@@ -4,8 +4,8 @@
 
 **A personal fork of PYAS — same engine, different UI. Built with AI assistance; recommended for most users: use the [upstream original](https://github.com/87owo/PYAS).**
 
-[![Base](https://img.shields.io/badge/upstream-87owo%2FPYAS_3.7.1-0078D4?style=flat-square)](https://github.com/87owo/PYAS)
-[![Version](https://img.shields.io/badge/version-3.7.1--1-0969DA?style=flat-square)](../../releases)
+[![Base](https://img.shields.io/badge/upstream-87owo%2FPYAS_3.7.0-0078D4?style=flat-square)](https://github.com/87owo/PYAS)
+[![Version](https://img.shields.io/badge/version-3.7.0--1-0969DA?style=flat-square)](../../releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4?style=flat-square&logo=windows)](https://github.com/87owo/PYAS)
 [![Python](https://img.shields.io/badge/language-Python-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 
@@ -17,7 +17,7 @@ This is a personal fork of [87owo/PYAS](https://github.com/87owo/PYAS), develope
 
 Honestly, if you just want PYAS, [use the upstream original](https://github.com/87owo/PYAS). It gets updates first, and it's the project the author actually maintains. This fork exists for the interface changes listed above, and it may lag behind upstream — the "Upstream" tab in the changelog shows exactly how far it has caught up.
 
-The version number follows `upstream-revision`, for example `3.7.1-1` means upstream 3.7.1 with the first round of Cyanmod changes.
+The version number follows `upstream-revision`, for example `3.7.0-1` means upstream 3.7.0 with the first round of Cyanmod changes.
 
 ---
 
@@ -215,7 +215,7 @@ pip install pyinstaller pywebview pystray Pillow requests pefile yara-python num
 
 To ship an update: bump `VERSION` in `PYAS_Version.py`, run the full-release path, and existing installations will pick it up through the in-app "Check Update" dialog. Installing the new `PYAS_Setup.exe` over an old one overwrites the application files while preserving user configuration in `ProgramData\PYAS`.
 
-Versioning scheme: this fork uses `upstream-revision` versions such as `3.7.1-1` — the part before the hyphen tracks the upstream `87owo/PYAS` release, and the number after it is the local revision. Following a new upstream release bumps the prefix (e.g. `3.7.2-1`); each round of local changes on the same upstream base increments the revision (`3.7.1-1` → `3.7.1-2`). The build script enforces this format and writes the dot-separated numeric equivalent (`3.7.1.1`) into the Inno Setup metadata, which does not accept hyphens.
+Versioning scheme: this fork uses `upstream-revision` versions such as `3.7.0-1` — the part before the hyphen tracks the upstream `87owo/PYAS` release, and the number after it is the local revision. Following a new upstream release bumps the prefix (e.g. `3.7.2-1`); each round of local changes on the same upstream base increments the revision (`3.7.0-1` → `3.7.0-2`). The build script enforces this format and writes the dot-separated numeric equivalent (`3.7.0.1`) into the Inno Setup metadata, which does not accept hyphens.
 
 ## Driver blocked by Windows Application Control
 
