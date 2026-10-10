@@ -600,6 +600,55 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
         except Exception:
             log_exception("PYAS._MainMixin._sync_maximize_icon")
 
+    CLASSIC_MENU_PATH = r"Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32"
+
+    def manage_classic_context_menu(self, enable):
+        """恢复/移除 Win10 经典右键菜单(Win11 新菜单不显示未打包应用的传统
+        注册表项,这是唯一能让扫描入口直接出现在右键的可行方式)。"""
+        try:
+            if enable:
+                ok = self._reg_write(
+                    winreg.HKEY_CURRENT_USER,
+                    self.CLASSIC_MENU_PATH,
+                    None,
+                    winreg.REG_SZ,
+                    "",
+                )
+            else:
+                ok = self._reg_delete(winreg.HKEY_CURRENT_USER, self.CLASSIC_MENU_PATH)
+
+            if not ok:
+                self.write_log(
+                    "WARN",
+                    "register_context_menu",
+                    detail="classic context menu registry write failed",
+                    success=False,
+                )
+                return False
+
+            explorer = self._find_windows_tool("explorer.exe")
+            self._run_windows_tool(
+                ("taskkill.exe",),
+                ["/F", "/IM", "explorer.exe"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            time.sleep(0.5)
+
+            if explorer:
+                subprocess.Popen([explorer])
+
+            self.write_log(
+                "INFO",
+                "register_context_menu",
+                detail=f"classic context menu {'enabled' if enable else 'disabled'}",
+            )
+            return True
+
+        except Exception:
+            log_exception("PYAS._MainMixin.manage_classic_context_menu")
+            return False
+
     def minimize(self):
         if self._window:
             self._window.minimize()

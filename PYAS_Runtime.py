@@ -165,6 +165,7 @@ class RuntimeMixin:
             "context_switch": True,
             "interactive_switch": False,
             "interactive_timeout": 30,
+            "classic_menu_switch": False,
             "custom_rule": [],
             "white_list": [],
             "quarantine": [],

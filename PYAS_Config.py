@@ -107,6 +107,8 @@ class ConfigMixin:
                     return bool(self.stop_system_driver())
                 elif key == "context_switch":
                     return self.register_context_menu(state) is not False
+                elif key == "classic_menu_switch":
+                    return self.manage_classic_context_menu(state)
                 elif key == "autostart_switch":
                     return bool(self.manage_autostart(state))
                 elif key == "document_switch" and not state:

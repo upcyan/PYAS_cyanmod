@@ -4,6 +4,10 @@
     });
 });
 
+window.addEventListener('error', (e) => {
+    try { window.pywebview?.api?.report_ui_error('runtime-js', String(e.message || e)); } catch (_) {}
+});
+
 document.addEventListener('DOMContentLoaded', () => {
     const { dict, langMap } = window.AppI18n;
 
@@ -825,6 +829,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let homeLogDirty = false;
     let homeLogSortDesc = true;
+    let homeLogBackfillInFlight = false;
+
+    const backfillHomeLogs = () => {
+        if (!window.pywebview || homeLogBackfillInFlight) return;
+        homeLogBackfillInFlight = true;
+        window.pywebview.api.get_logs().then(logs => {
+            homeLogBackfillInFlight = false;
+            window.pywebview.api.report_ui_error('home-log-backfill', 'received ' + (logs ? logs.length : 'null') + ' entries');
+            if (!logs || !logs.length) { renderHomeLogs(); return; }
+            const merged = [...logs];
+            homeLogs.forEach(l => { if (!merged.some(m => m.id === l.id)) merged.push(l); });
+            homeLogs.length = 0;
+            merged.slice(-200).forEach(l => homeLogs.push(l));
+            renderHomeLogs();
+        }).catch(err => {
+            homeLogBackfillInFlight = false;
+            window.pywebview.api.report_ui_error('home-log-backfill', 'failed: ' + String(err && err.message || err));
+            renderHomeLogs();
+        });
+    };
 
     const renderHomeLogs = () => {
         homeLogDirty = false;
@@ -840,7 +864,10 @@ document.addEventListener('DOMContentLoaded', () => {
             .sort((a, b) => (homeLogSortDesc ? -1 : 1) * String(a.time_str || '').localeCompare(String(b.time_str || '')));
 
         if (!data.length) {
-            listUl.innerHTML = '<li class="home-log-empty">' + escapeHtml(getMsg('changelog_empty')) + '</li>';
+            listUl.innerHTML = homeLogs.length
+                ? '<li class="home-log-empty">' + escapeHtml(getMsg('changelog_empty')) + '</li>'
+                : '';
+            if (!homeLogs.length) backfillHomeLogs();
             return;
         }
 
@@ -954,23 +981,36 @@ document.addEventListener('DOMContentLoaded', () => {
         else if (['delete', 'ignore', 'quarantine', 'whitelist'].includes(val)) handleVirusActions(val);
     });
 
+    const applyToggle = async (key, checked, toggle) => {
+        toggle.disabled = true;
+        try {
+            const result = await window.pywebview.api.update_config(key, checked);
+            if (result !== undefined && result !== null) toggle.checked = result;
+            if (key === 'interactive_switch') syncInteractiveTimeoutState(toggle.checked);
+            if (appState.configCache) {
+                appState.configCache[key] = checked;
+                updateProtectionLights(appState.configCache);
+            }
+        } catch { toggle.checked = !checked; }
+        finally { toggle.disabled = false; }
+    };
+
     document.querySelectorAll('.toggle-switch input').forEach((toggle, index) => {
         toggle.addEventListener('change', async (e) => {
-            const switchMap = ["process_switch", "suspend_switch", "load_switch", "document_switch", "system_switch", "network_switch", "driver_switch", "sensitive_switch", "extension_switch", "cloud_switch", "suffix_switch", "autostart_switch", "context_switch", "interactive_switch"];
+            const switchMap = ["process_switch", "suspend_switch", "load_switch", "document_switch", "system_switch", "network_switch", "driver_switch", "sensitive_switch", "extension_switch", "cloud_switch", "suffix_switch", "autostart_switch", "context_switch", "classic_menu_switch", "interactive_switch"];
             const key = switchMap[index];
-            if (window.pywebview && key) {
-                toggle.disabled = true;
-                try {
-                    const result = await window.pywebview.api.update_config(key, e.target.checked);
-                    if (result !== undefined && result !== null) toggle.checked = result;
-                    if (key === 'interactive_switch') syncInteractiveTimeoutState(toggle.checked);
-                    if (appState.configCache) {
-                        appState.configCache[key] = e.target.checked;
-                        updateProtectionLights(appState.configCache);
-                    }
-                } catch { toggle.checked = !e.target.checked; }
-                finally { toggle.disabled = false; }
+            if (!window.pywebview || !key) return;
+
+            if (key === 'classic_menu_switch') {
+                if (!e.target.checked) { applyToggle(key, false, toggle); return; }
+                window.pywebview.api.show_confirm(getMsg("title_prompt"), getMsg("msg_classic_menu_confirm")).then(ok => {
+                    if (ok) applyToggle(key, true, toggle);
+                    else toggle.checked = false;
+                });
+                return;
             }
+
+            await applyToggle(key, e.target.checked, toggle);
         });
     });
 
@@ -1678,6 +1718,16 @@ document.addEventListener('DOMContentLoaded', () => {
         gridResizeTimer = setTimeout(rescaleAllGrids, 120);
     });
 
+    const updateQuickScale = () => {
+        const row = document.querySelector('.quick-actions-row');
+        if (!row) return;
+        const scale = Math.max(0.68, Math.min(1, row.clientWidth / 640));
+        row.style.setProperty('--quick-scale', scale.toFixed(3));
+        row.classList.toggle('quick-compact', row.clientWidth < 470);
+    };
+    updateQuickScale();
+    window.addEventListener('resize', updateQuickScale);
+
     let pywebviewInitStarted = false;
     let pywebviewInitReady = false;
     let pywebviewInitAttempts = 0;
@@ -1745,7 +1795,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     timeoutInput.value = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 5), 300) : 30;
                     timeoutInput.disabled = !cfg.interactive_switch;
                 }
-                const switchMap = ["process_switch", "suspend_switch", "load_switch", "document_switch", "system_switch", "network_switch", "driver_switch", "sensitive_switch", "extension_switch", "cloud_switch", "suffix_switch", "autostart_switch", "context_switch", "interactive_switch"];
+                const switchMap = ["process_switch", "suspend_switch", "load_switch", "document_switch", "system_switch", "network_switch", "driver_switch", "sensitive_switch", "extension_switch", "cloud_switch", "suffix_switch", "autostart_switch", "context_switch", "classic_menu_switch", "interactive_switch"];
                 document.querySelectorAll('.toggle-switch input').forEach((toggle, index) => {
                     if (appState.firstLaunch) {
                         toggle.checked = false;
@@ -1756,13 +1806,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 stage = 'init_ui_ready';
                 await window.pywebview.api.init_ui_ready();
-                window.pywebview.api.get_logs().then(logs => {
-                    const merged = [...(logs || [])];
-                    homeLogs.forEach(l => { if (!merged.some(m => m.id === l.id)) merged.push(l); });
-                    homeLogs.length = 0;
-                    merged.slice(-200).forEach(l => homeLogs.push(l));
-                    scheduleHomeLogRender();
-                }).catch(() => {});
+                backfillHomeLogs();
             })(), timeout]);
             pywebviewInitReady = true;
             closeStartupOverlay();

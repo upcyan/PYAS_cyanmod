@@ -11,3 +11,4 @@ PYAS.spec
 .zwork/
 _release_notes.md
 _patch*.py
+_*.py

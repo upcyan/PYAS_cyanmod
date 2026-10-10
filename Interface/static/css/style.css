@@ -1242,45 +1242,32 @@ body.resizing-active * {
     font-size: 13px;
 }
 
-.quick-actions-row {
-    container-type: inline-size;
+.quick-item {
+    font-size: calc(15px * var(--quick-scale, 1));
 }
 
-@container (max-width: 560px) {
-    .quick-item {
-        padding: 10px 12px;
-        gap: 10px;
-    }
-
-    .quick-item .item-icon {
-        width: 26px;
-        height: 26px;
-        flex: 0 0 26px;
-    }
-
-    .quick-item .item-info h2 {
-        font-size: 13px;
-    }
-
-    .quick-item .icon-action-btn {
-        width: 20px;
-        height: 20px;
-    }
-
-    .quick-item .icon-action-btn svg {
-        width: 14px;
-        height: 14px;
-    }
+.quick-item .item-info h2 {
+    font-size: calc(15px * var(--quick-scale, 1));
 }
 
-@container (max-width: 430px) {
-    .quick-item .item-info h2 {
-        font-size: 11px;
-    }
+.quick-item .item-icon {
+    width: calc(38px * var(--quick-scale, 1));
+    height: calc(38px * var(--quick-scale, 1));
+    flex: 0 0 calc(38px * var(--quick-scale, 1));
+}
 
-    .quick-item .icon-action-btn {
-        display: none;
-    }
+.quick-item .icon-action-btn {
+    width: calc(32px * var(--quick-scale, 1));
+    height: calc(32px * var(--quick-scale, 1));
+}
+
+.quick-item .icon-action-btn svg {
+    width: calc(20px * var(--quick-scale, 1));
+    height: calc(20px * var(--quick-scale, 1));
+}
+
+.quick-actions-row.quick-compact .icon-action-btn {
+    display: none;
 }
 
 .home-log-widget::-webkit-scrollbar { width: 6px; height: 6px; }
