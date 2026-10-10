@@ -1,8 +1,10 @@
 from PYAS_Diagnostics import log_exception
 import os
+import sys
 import time
 import winreg
 import threading
+import subprocess
 import ctypes
 import ctypes.wintypes
 from PYAS_WinAPI import (
@@ -42,7 +44,33 @@ class DriverMixin:
 
     @staticmethod
     def _query_smart_app_control_state():
-        """返回 SAC 状态:'on'/'evaluation'/None(关闭或不可用)。"""
+        """返回 SAC 状态:'on'/'evaluation'/None(关闭或不可用)。
+        优先读 Defender WMI(与安全中心 UI 一致),注册表兜底。"""
+        try:
+            result = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    "(Get-CimInstance -Namespace root/Microsoft/Windows/Defender "
+                    "-ClassName MSFT_MpComputerStatus).SmartAppControlState",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+            )
+            state = (result.stdout or "").strip()
+
+            if state == "On":
+                return "on"
+
+            if state == "Eval":
+                return "evaluation"
+
+        except Exception:
+            log_exception("PYAS_Driver.DriverMixin._query_smart_app_control_state.wmi")
+
         try:
             with winreg.OpenKey(
                 winreg.HKEY_LOCAL_MACHINE,
@@ -55,6 +83,23 @@ class DriverMixin:
 
         except (FileNotFoundError, OSError, ValueError):
             return None
+
+    @staticmethod
+    def open_windows_security(page="appbrowser"):
+        """打开 Windows 安全中心;windows-defender:// 是不存在的协议,
+        真实协议为 windowsdefender://,失败时逐级回退。"""
+        candidates = [f"windowsdefender://{page}", "windowsdefender://", "ms-settings:windowsdefender"]
+
+        for uri in candidates:
+            try:
+                os.startfile(uri)
+                return True
+
+            except Exception:
+                continue
+
+        log_exception("PYAS_Driver.DriverMixin.open_windows_security")
+        return False
 
     def _notify_driver_block(self, error):
         code = int(error) & 0xFFFFFFFF
@@ -162,7 +207,7 @@ class DriverMixin:
 
         try:
             if self.show_confirm(title, followup):
-                os.startfile("windows-defender://")
+                self.open_windows_security("appbrowser")
         except Exception:
             log_exception("PYAS_Driver.DriverMixin._notify_smart_app_control_block.open")
 

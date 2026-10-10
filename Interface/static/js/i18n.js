@@ -224,6 +224,9 @@ window.AppI18n = {
             "changelog_failed": "載入失敗，請檢查網路",
             "changelog_empty": "暫無更新記錄",
             "changelog_tracked": "已跟進至上游 {0}",
+            "log_realtime": "實時日誌",
+            "log_filter_all": "全部",
+            "btn_clear_log": "清空",
         },
         "simplified_switch": {
             "app_name": "PYAS Security Cyanmod",
@@ -449,6 +452,9 @@ window.AppI18n = {
             "changelog_failed": "加载失败，请检查网络",
             "changelog_empty": "暂无更新记录",
             "changelog_tracked": "已跟进至上游 {0}",
+            "log_realtime": "实时日志",
+            "log_filter_all": "全部",
+            "btn_clear_log": "清空",
         },
         "english_switch": {
             "app_name": "PYAS Security Cyanmod",
@@ -674,6 +680,9 @@ window.AppI18n = {
             "changelog_failed": "Failed to load. Check your network.",
             "changelog_empty": "No updates yet.",
             "changelog_tracked": "Tracking upstream up to {0}",
+            "log_realtime": "Live Logs",
+            "log_filter_all": "All",
+            "btn_clear_log": "Clear",
         },
         "japanese_switch": {
             "app_name": "PYAS Security Cyanmod",
@@ -899,6 +908,9 @@ window.AppI18n = {
             "changelog_failed": "読み込みに失敗しました。ネットワークを確認してください。",
             "changelog_empty": "更新履歴はまだありません",
             "changelog_tracked": "上流 {0} まで追従",
+            "log_realtime": "リアルタイムログ",
+            "log_filter_all": "すべて",
+            "btn_clear_log": "クリア",
         },
         "korean_switch": {
             "app_name": "PYAS Security Cyanmod",
@@ -1124,6 +1136,9 @@ window.AppI18n = {
             "changelog_failed": "불러오기 실패. 네트워크를 확인하십시오.",
             "changelog_empty": "아직 업데이트가 없습니다",
             "changelog_tracked": "{0}까지 업스트림 추적",
+            "log_realtime": "실시간 로그",
+            "log_filter_all": "전체",
+            "btn_clear_log": "지우기",
         },
         "french_switch": {
             "app_name": "PYAS Security Cyanmod",
@@ -1349,6 +1364,9 @@ window.AppI18n = {
             "changelog_failed": "Échec du chargement. Vérifiez le réseau.",
             "changelog_empty": "Aucune mise à jour pour le moment",
             "changelog_tracked": "Suivi de l'amont jusqu'à {0}",
+            "log_realtime": "Journaux en direct",
+            "log_filter_all": "Tout",
+            "btn_clear_log": "Vider",
         },
         "spanish_switch": {
             "app_name": "PYAS Security Cyanmod",
@@ -1574,6 +1592,9 @@ window.AppI18n = {
             "changelog_failed": "Error al cargar. Compruebe la red.",
             "changelog_empty": "Aún no hay actualizaciones",
             "changelog_tracked": "Siguiendo el proyecto base hasta {0}",
+            "log_realtime": "Registros en vivo",
+            "log_filter_all": "Todo",
+            "btn_clear_log": "Vaciar",
         },
         "hindi_switch": {
             "app_name": "PYAS Security Cyanmod",
@@ -1799,6 +1820,9 @@ window.AppI18n = {
             "changelog_failed": "लोड होना विफल। नेटवर्क जांचें।",
             "changelog_empty": "अभी कोई अपडेट नहीं",
             "changelog_tracked": "अपस्ट्रीम {0} तक ट्रैक",
+            "log_realtime": "लाइव लॉग",
+            "log_filter_all": "सभी",
+            "btn_clear_log": "साफ़ करें",
         },
         "arabic_switch": {
             "app_name": "PYAS Security Cyanmod",
@@ -2024,6 +2048,9 @@ window.AppI18n = {
             "changelog_failed": "فشل التحميل. تحقق من الشبكة.",
             "changelog_empty": "لا توجد تحديثات بعد",
             "changelog_tracked": "يتبع المنبع حتى {0}",
+            "log_realtime": "السجل المباشر",
+            "log_filter_all": "الكل",
+            "btn_clear_log": "مسح",
         },
         "russian_switch": {
             "app_name": "PYAS Security Cyanmod",
@@ -2249,6 +2276,9 @@ window.AppI18n = {
             "changelog_failed": "Не удалось загрузить. Проверьте сеть.",
             "changelog_empty": "Обновлений пока нет",
             "changelog_tracked": "Отслеживается upstream до {0}",
+            "log_realtime": "Живой журнал",
+            "log_filter_all": "Все",
+            "btn_clear_log": "Очистить",
         },
         "slovenian_switch": {
             "app_name": "PYAS Security Cyanmod",
@@ -2474,6 +2504,9 @@ window.AppI18n = {
             "changelog_failed": "Nalaganje ni uspelo. Preverite omrežje.",
             "changelog_empty": "Še ni posodobitev",
             "changelog_tracked": "Sledi upstreamu do {0}",
+            "log_realtime": "Dnevnik v živo",
+            "log_filter_all": "Vse",
+            "btn_clear_log": "Počisti",
         },
     },
     langMap: {

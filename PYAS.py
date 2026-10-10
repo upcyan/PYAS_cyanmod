@@ -564,12 +564,41 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
         if "n" in direction:
             top = min(state["top"] + dy, state["bottom"] - min_h)
 
-        self.user32.SetWindowPos(hwnd, None, left, top, right - left, bottom - top, 0x0004)
+        self.user32.SetWindowPos(hwnd, None, left, top, right - left, bottom - top, 0x0014)
         return True
 
     def end_window_resize(self):
         self._resize_state = None
         return True
+
+    def toggle_maximize(self):
+        try:
+            if not self._window:
+                return False
+
+            if getattr(self, "_maximized", False):
+                self._window.restore()
+                self._maximized = False
+            else:
+                self._window.maximize()
+                self._maximized = True
+
+            self._sync_maximize_icon()
+            return self._maximized
+
+        except Exception:
+            log_exception("PYAS._MainMixin.toggle_maximize")
+            return getattr(self, "_maximized", False)
+
+    def _sync_maximize_icon(self):
+        try:
+            if self._window:
+                self._window.evaluate_js(
+                    "window.syncMaximizeIcon && window.syncMaximizeIcon("
+                    + str(bool(getattr(self, "_maximized", False))).lower() + ")"
+                )
+        except Exception:
+            log_exception("PYAS._MainMixin._sync_maximize_icon")
 
     def minimize(self):
         if self._window:
@@ -1202,6 +1231,8 @@ class WindowHook:
         self.WM_SYSCOMMAND = 0x0112
         self.WM_GETMINMAXINFO = 0x0024
         self.SC_CLOSE = 0xF060
+        self.SC_MAXIMIZE = 0xF030
+        self.SC_RESTORE = 0xF120
         self.HTCAPTION = 2
         self.HTLEFT = 10
         self.HTRIGHT = 11
@@ -1346,6 +1377,13 @@ class WindowHook:
                 pass
 
             return 1
+
+        if msg == self.WM_SYSCOMMAND and self.api_ref:
+            sc_value = wparam & 0xFFF0
+
+            if sc_value in (self.SC_MAXIMIZE, self.SC_RESTORE):
+                self.api_ref._maximized = sc_value == self.SC_MAXIMIZE
+                self.api_ref._sync_maximize_icon()
 
         if msg == self.WM_CLOSE or (
             msg == self.WM_SYSCOMMAND and (wparam & 0xFFF0) == self.SC_CLOSE

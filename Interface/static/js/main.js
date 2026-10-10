@@ -18,7 +18,9 @@ document.addEventListener('DOMContentLoaded', () => {
         netmonActive: false,
         virusMap: new Map(),
         virusResults: [],
-        junkList: []
+        junkList: [],
+        upstreamTracked: "3.7.0",
+        configCache: null
     };
 
     const reverseI18nMap = Object.entries(dict["traditional_switch"]).reduce((acc, [key, val]) => {
@@ -165,7 +167,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const cols = {
-        log: [{key: 'time_str', label: 'col_date', flex: 1.5}, {key: 'level', label: 'col_type', flex: 0.8, isI18n: true}, {key: 'action', label: 'col_func', flex: 1.2, isI18n: true}, {key: 'source', label: 'col_path', flex: 3}],
+        log: [{key: 'time_str', label: 'col_date', flex: 1.5, defaultDesc: true}, {key: 'level', label: 'col_type', flex: 0.8, isI18n: true}, {key: 'action', label: 'col_func', flex: 1.2, isI18n: true}, {key: 'source', label: 'col_path', flex: 3}],
         process: [{key: 'name', label: 'col_name', flex: 1.5}, {key: 'pid', label: 'col_pid', flex: 0.5}, {key: 'path', label: 'col_path', flex: 3}],
         startup: [{key: 'type', label: 'col_type', flex: 0.5, isI18n: true}, {key: 'name', label: 'col_name', flex: 1.5}, {key: 'status', label: 'col_status', flex: 0.5, isI18n: true}, {key: 'path', label: 'col_path', flex: 3}],
         virus: [{key: 'label', label: 'col_type', flex: 1, isI18n: true}, {key: 'path', label: 'col_path', flex: 3}],
@@ -325,8 +327,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const availableWidth = Math.max(containerWidth - 60 - (columns.length * 16), 400); 
             const totalFlex = columns.reduce((sum, c) => sum + (c.flex || 1), 0);
             
-            widget.gridState = { 
-                sortKey: columns[0]?.key || '', sortAsc: true, filterText: "",
+            widget.gridState = {
+                sortKey: columns[0]?.key || '', sortAsc: !(columns[0] && columns[0].defaultDesc), filterText: "",
                 colWidths: columns.map(c => Math.max(((c.flex || 1) / totalFlex) * availableWidth, 60)),
                 checkedSet: new Set()
             };
@@ -483,7 +485,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     return `<div class="row-col" style="width: var(--col-${idx}); flex: 0 0 auto;" title="${escapeHtml(valStr)}">${escapeHtml(valStr)}</div>`;
                 }).join('');
 
-                return `<li class="manage-list-item"><input type="checkbox" value="${escapeHtml(itemValStr)}" ${isChecked ? 'checked' : ''} data-path="${escapeHtml(item.path || '')}"><div class="manage-list-item-content">${rowColsHtml}</div></li>`;
+                const rowAttrs = [
+                    item.level ? `data-level="${escapeHtml(String(item.level))}"` : '',
+                    item.action ? `data-action="${escapeHtml(String(item.action))}"` : '',
+                    (item.pid !== undefined && item.pid !== null && item.pid !== '') ? `data-pid="${escapeHtml(String(item.pid))}"` : ''
+                ].filter(Boolean).join(' ');
+
+                return `<li class="manage-list-item" ${rowAttrs}><input type="checkbox" value="${escapeHtml(itemValStr)}" ${isChecked ? 'checked' : ''} data-path="${escapeHtml(item.path || '')}"><div class="manage-list-item-content">${rowColsHtml}</div></li>`;
             }).join('');
 
             if (displayData.length > MAX_ITEMS) {
@@ -748,6 +756,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (['whitelist_window', 'quarantine_window', 'popup_window', 'custom_protect_window'].includes(targetId)) refreshConfigLists();
 
         if (targetId === 'about_window') loadChangelogs();
+        if (targetId === 'home_window' && homeLogDirty) renderHomeLogs();
 
         if (targetId === 'log_export_window' && window.pywebview) {
             window.pywebview.api.get_logs().then(logs => {
@@ -810,29 +819,57 @@ document.addEventListener('DOMContentLoaded', () => {
         updateCustomSelectUI('scan_method_select', 'none');
     };
 
+    const homeLogs = [];
+    let homeLogFilter = 'all';
+    let homeLogRenderTimer = null;
+
+    let homeLogDirty = false;
+    let homeLogSortDesc = true;
+
+    const renderHomeLogs = () => {
+        homeLogDirty = false;
+        const listUl = document.getElementById('home_log_list');
+        if (!listUl) return;
+        if (!document.getElementById('home_window')?.classList.contains('active')) {
+            homeLogDirty = true;
+            return;
+        }
+
+        const data = (homeLogFilter === 'all' ? homeLogs : homeLogs.filter(l => l.level === homeLogFilter))
+            .slice(-200)
+            .sort((a, b) => (homeLogSortDesc ? -1 : 1) * String(a.time_str || '').localeCompare(String(b.time_str || '')));
+
+        if (!data.length) {
+            listUl.innerHTML = '<li class="home-log-empty">' + escapeHtml(getMsg('changelog_empty')) + '</li>';
+            return;
+        }
+
+        listUl.innerHTML = data.map(e => {
+            const lv = String(e.level || '');
+            const actionRaw = String(e.action || '');
+            const actionText = getMsg(actionRaw) !== actionRaw ? getMsg(actionRaw) : actionRaw;
+            const attrs = lv === 'BLOCK'
+                ? ' data-action="' + escapeHtml(actionRaw) + '" data-pid="' + escapeHtml(String(e.pid ?? '')) + '" data-path="' + escapeHtml(String(e.source || '')) + '"'
+                : '';
+            return '<li class="home-log-item lv-' + escapeHtml(lv) + '"' + attrs + '>'
+                + '<span class="hl-time">' + escapeHtml(e.time_str || '') + '</span>'
+                + '<span class="hl-level">' + escapeHtml(getMsg(lv) || lv) + '</span>'
+                + '<span class="hl-action">' + escapeHtml(actionText) + '</span>'
+                + '<span class="hl-source" title="' + escapeHtml(String(e.source || '')) + '">' + escapeHtml(String(e.source || '')) + '</span>'
+                + '</li>';
+        }).join('');
+    };
+
+    const scheduleHomeLogRender = () => {
+        clearTimeout(homeLogRenderTimer);
+        homeLogRenderTimer = setTimeout(renderHomeLogs, 300);
+    };
+
     window.updateLogs = (entry) => {
-        const logWidget = document.querySelector('.log-text');
-        if (logWidget) {
-            let parts = [`[${entry.time_str}]`, getMsg(entry.level || ''), getMsg(entry.action || '')];
-            if (entry.source) parts.push(`Src: ${entry.source}`);
-            if (entry.target) parts.push(`Tgt: ${entry.target}`);
-            if (entry.code) parts.push(`Code: ${entry.code}`);
-            if (entry.pid) parts.push(`PID: ${entry.pid}`);
-            if (entry.hash) parts.push(`Hash: ${entry.hash}`);
-            
-            if (entry.detail) {
-                const transDetail = getMsg(entry.detail);
-                parts.push(`Detail: ${transDetail !== entry.detail ? transDetail : entry.detail}`);
-            }
-            if (entry.operate !== null) parts.push(`Op: ${entry.operate}`);
-            parts.push(`Success: ${entry.success}`);
-            let val = logWidget.value + parts.join(' | ') + '\n';
-            if (val.length > 100000) {
-                const newline = val.indexOf('\n', val.length - 90000);
-                val = newline >= 0 && newline < val.length - 1 ? val.slice(newline + 1) : val.slice(-90000);
-            }
-            logWidget.value = val;
-            logWidget.scrollTop = logWidget.scrollHeight;
+        if (entry && entry.id && !homeLogs.some(l => l.id === entry.id)) {
+            homeLogs.push(entry);
+            if (homeLogs.length > 200) homeLogs.splice(0, homeLogs.length - 200);
+            scheduleHomeLogRender();
         }
 
         if (document.getElementById('log_export_window')?.classList.contains('active') && window.pywebview) {
@@ -875,6 +912,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.querySelectorAll('[data-target]').forEach(btn => btn.addEventListener('click', (e) => switchPage(e.currentTarget.getAttribute('data-target'))));
     document.getElementById('quick_scan_btn')?.addEventListener('click', () => { if (!appState.scanning) { switchPage('scan_window'); triggerScan('smart'); }});
+    document.getElementById('quick_update_btn')?.addEventListener('click', () => {
+        if (!window.pywebview) return;
+        window.pywebview.api.check_update().then(res => {
+            if (res.error) window.pywebview.api.show_alert(getMsg("title_error"), getMsg("msg_update_fail"), "error");
+            else if (res.has_update) openUpdateModal(res);
+            else window.pywebview.api.show_alert(getMsg("title_prompt"), `${getMsg("msg_latest_version")} ${res.current}`, "info");
+        });
+    });
     document.getElementById('stop_btn')?.addEventListener('click', async (e) => {
         const stopBtn = e.currentTarget;
         if (!window.pywebview || stopBtn.dataset.stopping === '1') return;
@@ -919,6 +964,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     const result = await window.pywebview.api.update_config(key, e.target.checked);
                     if (result !== undefined && result !== null) toggle.checked = result;
                     if (key === 'interactive_switch') syncInteractiveTimeoutState(toggle.checked);
+                    if (appState.configCache) {
+                        appState.configCache[key] = e.target.checked;
+                        updateProtectionLights(appState.configCache);
+                    }
                 } catch { toggle.checked = !e.target.checked; }
                 finally { toggle.disabled = false; }
             }
@@ -1132,6 +1181,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('minimize_button')?.addEventListener('click', () => window.pywebview?.api.minimize());
+
+    const syncMaximizeIcon = (maximized) => {
+        document.getElementById('icon_maximize')?.classList.toggle('hidden', !!maximized);
+        document.getElementById('icon_restore')?.classList.toggle('hidden', !maximized);
+    };
+    window.syncMaximizeIcon = syncMaximizeIcon;
+
+    document.getElementById('maximize_button')?.addEventListener('click', () => {
+        window.pywebview?.api.toggle_maximize().then(state => syncMaximizeIcon(!!state)).catch(() => {});
+    });
     document.getElementById('close_button')?.addEventListener('click', () => window.pywebview?.api.hide_window());
 
     document.querySelectorAll('.window-resize-handle').forEach(handle => {
@@ -1145,19 +1204,36 @@ document.addEventListener('DOMContentLoaded', () => {
             const startY = e.screenY;
             let lastDx = null;
             let lastDy = null;
+            let pendingDx = null;
+            let pendingDy = null;
+            let rafPending = false;
+
+            const flushMove = () => {
+                if (pendingDx === null) return;
+                if (pendingDx === lastDx && pendingDy === lastDy) { pendingDx = null; return; }
+                lastDx = pendingDx;
+                lastDy = pendingDy;
+                api.update_window_resize(pendingDx, pendingDy);
+                pendingDx = null;
+            };
 
             const onMove = (ev) => {
-                const dx = ev.screenX - startX;
-                const dy = ev.screenY - startY;
-                if (dx === lastDx && dy === lastDy) return;
-                lastDx = dx;
-                lastDy = dy;
-                api.update_window_resize(dx, dy);
+                pendingDx = ev.screenX - startX;
+                pendingDy = ev.screenY - startY;
+
+                if (!rafPending) {
+                    rafPending = true;
+                    requestAnimationFrame(() => {
+                        rafPending = false;
+                        flushMove();
+                    });
+                }
             };
 
             const onUp = () => {
                 document.removeEventListener('mousemove', onMove);
                 document.removeEventListener('mouseup', onUp);
+                flushMove();
                 api.end_window_resize();
             };
 
@@ -1166,6 +1242,68 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.addEventListener('mouseup', onUp);
             });
         });
+    });
+
+    const updateProtectionLights = (cfg) => {
+        const map = { process: 'light_process', document: 'light_document', system: 'light_system', network: 'light_network', driver: 'light_driver' };
+        Object.entries(map).forEach(([key, id]) => {
+            const el = document.getElementById(id);
+            if (el) el.classList.toggle('on', !!(cfg && cfg[key + '_switch']));
+        });
+    };
+
+    document.querySelectorAll('.log-filter').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.log-filter').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            homeLogFilter = btn.dataset.filter;
+            renderHomeLogs();
+        });
+    });
+
+    document.getElementById('home_log_sort')?.addEventListener('click', () => {
+        homeLogSortDesc = !homeLogSortDesc;
+        const btn = document.getElementById('home_log_sort');
+        if (btn) {
+            const arrow = homeLogSortDesc ? '↓' : '↑';
+            btn.innerHTML = arrow + '&nbsp;<span data-i18n="col_date">' + getMsg('col_date') + '</span>';
+        }
+        renderHomeLogs();
+    });
+
+    document.getElementById('home_log_export')?.addEventListener('click', () => {
+        window.pywebview?.api.export_logs().then(res => {
+            if (res) window.pywebview.api.show_alert(getMsg("title_prompt"), getMsg("msg_export_success"), "info");
+        });
+    });
+
+    document.getElementById('home_log_list')?.addEventListener('click', (e) => {
+        const li = e.target.closest('.home-log-item');
+        if (!li || !li.classList.contains('lv-BLOCK')) return;
+
+        const action = li.dataset.action || '';
+        const pid = li.dataset.pid || '';
+        const path = li.dataset.path || '';
+        let target = null, search = '';
+
+        if (action === 'File Block' || action === 'Deferred Scan Block') {
+            target = 'quarantine_window';
+            search = path;
+        } else if (action === 'Process Block' || action === 'Process DLL Block') {
+            target = 'taskmgr_window';
+            search = pid;
+        } else if (action === 'Network Block') {
+            target = 'netmon_window';
+            search = pid;
+        }
+
+        if (!target) return;
+        switchPage(target);
+        const searchInput = document.querySelector(`#${target} .search-box input`);
+        if (searchInput && search) {
+            searchInput.value = search;
+            searchInput.dispatchEvent(new Event('input'));
+        }
     });
 
     const contextMenu = document.createElement('div');
@@ -1509,6 +1647,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.querySelectorAll('select.modern-select').forEach(buildCustomSelectElement);
+    renderDataGrid('#home_window', [], cols.log, 'id', false);
     renderDataGrid('#scan_window', appState.virusResults, cols.virus, 'path', true);
     renderDataGrid('#taskmgr_window', [], cols.process, 'pid', false);
     renderDataGrid('#startup_window', [], cols.startup, 'id', false);
@@ -1595,7 +1734,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateCustomSelectUI('lang_select', lang);
                 const versionChip = document.getElementById('about_version');
                 if (versionChip) versionChip.textContent = 'v' + (cfg.version || '');
-                appState.upstreamTracked = cfg.upstream_tracked || '3.7.1';
+                const titleVersion = document.getElementById('title_version');
+                if (titleVersion) titleVersion.textContent = 'v' + (cfg.version || '');
+                appState.upstreamTracked = cfg.upstream_tracked || '3.7.0';
+                appState.configCache = cfg;
+                updateProtectionLights(cfg);
                 const timeoutInput = document.getElementById('interactive_timeout_input');
                 if (timeoutInput) {
                     const parsed = parseInt(cfg.interactive_timeout, 10);
@@ -1613,6 +1756,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 stage = 'init_ui_ready';
                 await window.pywebview.api.init_ui_ready();
+                window.pywebview.api.get_logs().then(logs => {
+                    const merged = [...(logs || [])];
+                    homeLogs.forEach(l => { if (!merged.some(m => m.id === l.id)) merged.push(l); });
+                    homeLogs.length = 0;
+                    merged.slice(-200).forEach(l => homeLogs.push(l));
+                    scheduleHomeLogRender();
+                }).catch(() => {});
             })(), timeout]);
             pywebviewInitReady = true;
             closeStartupOverlay();
@@ -1653,5 +1803,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         document.querySelectorAll('.toggle-switch input').forEach(t => t.disabled = false);
         appState.firstLaunch = false;
+        if (appState.configCache) {
+            seq.forEach(key => { appState.configCache[key] = true; });
+            updateProtectionLights(appState.configCache);
+        }
     };
 });
