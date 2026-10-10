@@ -71,6 +71,8 @@ class DriverMixin:
         except Exception:
             log_exception("PYAS_Driver.DriverMixin._query_smart_app_control_state.wmi")
 
+        # 注册表语义与部分系统的安全中心显示存在出入,仅在明确为开启时报告;
+        # 其余情况返回 None,由弹窗使用不含模式断言的中性文案
         try:
             with winreg.OpenKey(
                 winreg.HKEY_LOCAL_MACHINE,
@@ -79,7 +81,11 @@ class DriverMixin:
                 winreg.KEY_READ,
             ) as key:
                 value, _ = winreg.QueryValueEx(key, "VerifiedAndReputablePolicyState")
-                return DriverMixin.SMART_APP_CONTROL_STATES.get(int(value))
+
+                if int(value) == 2:
+                    return "on"
+
+                return None
 
         except (FileNotFoundError, OSError, ValueError):
             return None
@@ -135,6 +141,52 @@ class DriverMixin:
                 "slovenian_switch": "Smart App Control je blokiral gonilnik",
             }
         )
+        if not sac_state:
+            message = self._loc(
+                {
+                    "traditional_switch": "Windows 智能應用控制（Smart App Control）攔截了 PYAS 驅動——它按雲端信譽判定，即使是微軟簽名的驅動也可能被擋。WDAC 補充策略對 SAC 無效，唯一解法是關閉 SAC。\n\n關閉路徑：Windows 安全中心 → 應用和瀏覽器控制 → 智能應用控制設置 → 關 → 重新啟動系統。",
+                    "simplified_switch": "Windows 智能应用控制（Smart App Control）拦截了 PYAS 驱动——它按云端信誉判定，即使是微软签名的驱动也可能被挡。WDAC 补充策略对 SAC 无效，唯一解法是关闭 SAC。\n\n关闭路径：Windows 安全中心 → 应用和浏览器控制 → 智能应用控制设置 → 关 → 重启系统。",
+                    "english_switch": "Windows Smart App Control blocked the PYAS driver — it judges by cloud reputation, so even Microsoft-signed drivers can be rejected. WDAC supplemental policies do not apply to SAC; the only fix is to turn SAC off.\n\nPath: Windows Security → App & browser control → Smart App Control settings → Off → reboot.",
+                    "japanese_switch": "Windows Smart App Control が PYAS ドライバーをブロックしました。クラウド評価による判定のため、Microsoft 署名済みドライバーも拒否される可能性があります。WDAC 補充ポリシーは SAC に適用されず、唯一の解決策は SAC をオフにすることです。\n\n手順：Windows セキュリティ → アプリとブラウザー コントロール → Smart App Control の設定 → オフ → 再起動。",
+                    "korean_switch": "Windows Smart App Control이 PYAS 드라이버를 차단했습니다. 클라우드 평판으로 판단하므로 Microsoft 서명 드라이버도 거부될 수 있습니다. WDAC 보완 정책은 SAC에 적용되지 않으며, 유일한 해결책은 SAC를 끄는 것입니다.\n\n경로: Windows 보안 → 앱 및 브라우저 컨트롤 → Smart App Control 설정 → 끔 → 재부팅.",
+                    "french_switch": "Windows Smart App Control a bloqué le pilote PYAS — il juge par réputation cloud, même les pilotes signés par Microsoft peuvent être refusés. Les stratégies WDAC supplémentaires ne s'appliquent pas au SAC ; la seule solution est de désactiver le SAC.\n\nChemin : Sécurité Windows → Contrôle des applications et du navigateur → Paramètres Smart App Control → Désactivé → redémarrer.",
+                    "spanish_switch": "Windows Smart App Control bloqueó el controlador PYAS: juzga por reputación en la nube, incluso los controladores firmados por Microsoft pueden rechazarse. Las directivas suplementarias de WDAC no aplican a SAC; la única solución es desactivar SAC.\n\nRuta: Seguridad de Windows → Control de aplicaciones y navegador → Configuración de Smart App Control → Desactivado → reiniciar.",
+                    "hindi_switch": "Windows Smart App Control ने PYAS ड्राइवर को अवरुद्ध किया — यह क्लाउड प्रतिष्ठा से निर्णय लेता है, Microsoft-हस्ताक्षरित ड्राइवर भी अस्वीकृत हो सकते हैं। WDAC पूरक नीतियाँ SAC पर लागू नहीं होतीं; एकमात्र समाधान SAC बंद करना है।\n\nपथ: Windows सुरक्षा → ऐप और ब्राउज़र नियंत्रण → Smart App Control सेटिंग → बंद → पुनरारंभ।",
+                    "arabic_switch": "حظر Windows Smart App Control برنامج PYAS للتشغيل — يحكم حسب السمعة السحابية، وقد تُرفض حتى برامج التشغيل الموقعة من Microsoft. لا تنطبق سياسات WDAC التكميلية على SAC؛ والحل الوحيد هو إيقاف SAC.\n\nالمسار: أمان Windows → التحكم في التطبيقات والمتصفح → إعدادات Smart App Control → إيقاف → إعادة التشغيل.",
+                    "russian_switch": "Windows Smart App Control заблокировал драйвер PYAS — решение по облачной репутации, даже драйверы с подписью Microsoft могут быть отклонены. Дополнительные политики WDAC к SAC не применяются; единственное решение — выключить SAC.\n\nПуть: Безопасность Windows → Управление приложениями и браузером → Параметры Smart App Control → Выкл → перезагрузка.",
+                    "slovenian_switch": "Windows Smart App Control je blokiral gonilnik PYAS — odloča se po slovu reputaciji v oblaku, tudi z Microsoftom podpisani gonilniki so lahko zavrnjeni. Dopolnilne politike WDAC ne veljajo za SAC; edina rešitev je izklop SAC.\n\nPot: Varnost sistema Windows → Nadzor aplikacij in brskalnika → Nastavitve Smart App Control → Izklopljeno → ponovni zagon.",
+                }
+            )
+
+            try:
+                self.show_alert(title, message, "warning")
+            except Exception:
+                log_exception("PYAS_Driver.DriverMixin._notify_smart_app_control_block")
+
+            followup = self._loc(
+                {
+                    "traditional_switch": "是否立即打開 Windows 安全中心？",
+                    "simplified_switch": "是否立即打开 Windows 安全中心？",
+                    "english_switch": "Open Windows Security now?",
+                    "japanese_switch": "今すぐ Windows セキュリティを開きますか？",
+                    "korean_switch": "지금 Windows 보안을 여시겠습니까?",
+                    "french_switch": "Ouvrir Sécurité Windows maintenant ?",
+                    "spanish_switch": "¿Abrir Seguridad de Windows ahora?",
+                    "hindi_switch": "अभी Windows सुरक्षा खोलें?",
+                    "arabic_switch": "هل تريد فتح أمان Windows الآن؟",
+                    "russian_switch": "Открыть «Безопасность Windows» сейчас?",
+                    "slovenian_switch": "Želite zdaj odpreti Windows Varnost?",
+                }
+            )
+
+            try:
+                if self.show_confirm(title, followup):
+                    self.open_windows_security("appbrowser")
+            except Exception:
+                log_exception("PYAS_Driver.DriverMixin._notify_smart_app_control_block.open")
+
+            return
+
         state_text = (
             self._loc(
                 {

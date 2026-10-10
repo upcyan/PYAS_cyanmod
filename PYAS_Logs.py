@@ -77,9 +77,11 @@ class LogMixin:
                 js_cmd = f"if(window.updateLogs) window.updateLogs({json.dumps(entry)});"
                 self.ui_queue.put(js_cmd)
 
-    def get_logs(self):
+    def get_logs(self, limit=300):
         with self.lock_logs:
-            return [entry for entry in self.logs_data if is_ui_log_entry(entry)]
+            entries = [entry for entry in self.logs_data if is_ui_log_entry(entry)]
+        # 跨桥序列化大列表会拖慢/失败,首页视图只需要最新部分
+        return entries[-limit:] if limit else entries
 
     def clear_logs(self, log_ids=None):
         with self.lock_logs:
