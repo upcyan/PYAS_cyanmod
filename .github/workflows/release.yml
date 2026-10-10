@@ -18,6 +18,10 @@ jobs:
   build:
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      # runner 控制台是 cp1252,中文日志会 UnicodeEncodeError;
+      # UTF-8 模式会被 build.py/build_menu.py/PyInstaller 等所有 Python 子进程继承
+      PYTHONUTF8: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,7 +55,22 @@ jobs:
           }
 
       - name: Build installer
-        run: python build.py local
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          python build.py local 2>&1 | Tee-Object -FilePath build_output.log
+          exit $LASTEXITCODE
+
+      - name: Write build tail to job summary
+        if: failure()
+        shell: pwsh
+        run: |
+          if (Test-Path build_output.log) {
+            "## Build failure (last 60 lines)" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+            '```text' | Out-File -Append $env:GITHUB_STEP_SUMMARY
+            Get-Content build_output.log -Tail 60 -Encoding utf8 | Out-File -Append $env:GITHUB_STEP_SUMMARY
+            '```' | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          }
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4

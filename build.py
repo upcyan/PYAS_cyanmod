@@ -19,6 +19,14 @@ import sys
 import time
 from pathlib import Path
 
+# Windows 控制台默认代码页(如英文系统的 cp1252)编不了中文日志,这里只放宽
+# errors 不强制改编码:本地中文控制台显示不变,CI 由 PYTHONUTF8=1 走 UTF-8。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 ROOT = Path(__file__).resolve().parent
 ISS_FILE = ROOT / "PYAS_Inno.iss"
 VERSION_FILE = ROOT / "PYAS_Version.py"

@@ -18,6 +18,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+# 同 build.py:放宽控制台编码错误,避免英文代码页下中文日志直接崩溃。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 ROOT = Path(__file__).resolve().parent
 VSWHERE = Path(r"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe")
 SDK_BIN = Path(r"C:\Program Files (x86)\Windows Kits\10\bin")
