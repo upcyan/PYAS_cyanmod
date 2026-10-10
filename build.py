@@ -495,7 +495,7 @@ def create_release_gh(asset, version):
             "请先运行: gh auth login  (或设置 GITHUB_TOKEN 环境变量使用 API 方式)",
         )
 
-    notes = f"PYAS Security Cyanmod {tag}\n\n- 交互模式(拦截前询问,超时自动拦截)\n- 通知权限自检\n- 窗口拖拽缩放与界面自适应\n- 程序内检查并下载更新\n- 更名为 PYAS Security Cyanmod"
+    notes = f"PYAS Security Cyanmod {tag}\n\n- Win11 右键菜单扫描兼容:新增经典右键菜单开关,恢复 Win10 样式菜单使扫描入口直出(需重启资源管理器)\n- 首页日志独立列表:排序/筛选/跳转隔离区,状态指示灯、悬浮滚动条、最大化按钮与窗口缩放节流\n- SAC 状态检测改为多信源交叉,注册表仅在确定开启时报告;弹窗中性文案兜底\n- 检查更新改用 releases 列表,连字符 tag 不会被 latest 端点跳过\n- 移除窗口边缘拖动缩放"
     result = run(
         [
             "gh",

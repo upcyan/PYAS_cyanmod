@@ -100,8 +100,6 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
         self.lock_logs = threading.RLock()
         self.lock_virus = threading.RLock()
         self.lock_file_ops = threading.RLock()
-        self._resize_lock = threading.RLock()
-        self._resize_state = None
         self._window_interacting = False
 
         self.init_environ()
@@ -528,32 +526,6 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
         self._cached_main_hwnd = hwnd
         return hwnd
 
-    RESIZE_DIRECTION_HIT = {
-        "w": 10,
-        "e": 11,
-        "n": 12,
-        "nw": 13,
-        "ne": 14,
-        "s": 15,
-        "sw": 16,
-        "se": 17,
-    }
-
-    def begin_window_resize(self, direction):
-        """JS 边缘热区触发原生尺寸循环(SC_SIZE):拖动期间零桥调用,
-        由系统接管轨迹跟踪,最小尺寸由 WM_GETMINMAXINFO 原生钳制。"""
-        hit = self.RESIZE_DIRECTION_HIT.get(str(direction or "").lower())
-
-        if not hit:
-            return False
-
-        hwnd = self._find_main_hwnd()
-
-        if not hwnd:
-            return False
-
-        self.user32.PostMessageW(hwnd, 0x0112, 0xF000 | hit, 0)
-        return True
     def toggle_maximize(self):
         try:
             if not self._window:
@@ -1344,15 +1316,6 @@ class WindowHook:
         self.SC_MAXIMIZE = 0xF030
         self.SC_RESTORE = 0xF120
         self.HTCAPTION = 2
-        self.HTLEFT = 10
-        self.HTRIGHT = 11
-        self.HTTOP = 12
-        self.HTTOPLEFT = 13
-        self.HTTOPRIGHT = 14
-        self.HTBOTTOM = 15
-        self.HTBOTTOMLEFT = 16
-        self.HTBOTTOMRIGHT = 17
-        self.RESIZE_BORDER = 8
         self.MIN_WINDOW_WIDTH = 720
         self.MIN_WINDOW_HEIGHT = 560
         self.GWLP_WNDPROC = -4
@@ -1525,36 +1488,6 @@ class WindowHook:
 
             if rect.top <= y <= rect.top + 44 and rect.left <= x <= rect.right - 150:
                 return self.HTCAPTION
-
-            border = self.RESIZE_BORDER
-            on_left = 0 <= x - rect.left < border
-            on_right = 0 <= rect.right - x < border
-            on_top = 0 <= y - rect.top < border
-            on_bottom = 0 <= rect.bottom - y < border
-
-            if on_top and on_left:
-                return self.HTTOPLEFT
-
-            if on_top and on_right:
-                return self.HTTOPRIGHT
-
-            if on_bottom and on_left:
-                return self.HTBOTTOMLEFT
-
-            if on_bottom and on_right:
-                return self.HTBOTTOMRIGHT
-
-            if on_left:
-                return self.HTLEFT
-
-            if on_right:
-                return self.HTRIGHT
-
-            if on_top:
-                return self.HTTOP
-
-            if on_bottom:
-                return self.HTBOTTOM
 
         if msg == self.WM_GETMINMAXINFO:
             try:

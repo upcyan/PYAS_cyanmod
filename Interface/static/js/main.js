@@ -1323,17 +1323,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     document.getElementById('close_button')?.addEventListener('click', () => window.pywebview?.api.hide_window());
 
-    let resizeGestureActive = false;
-    document.querySelectorAll('.window-resize-handle').forEach(handle => {
-        handle.addEventListener('mousedown', (e) => {
-            if (e.button !== 0 || !window.pywebview) return;
-            e.preventDefault();
-            e.stopPropagation();
-            // 一次性触发原生尺寸循环,拖动期间不再有任何桥调用
-            window.pywebview.api.begin_window_resize(handle.dataset.dir);
-        });
-    });
-
     const updateProtectionLights = (cfg) => {
         const map = { process: 'light_process', document: 'light_document', system: 'light_system', network: 'light_network', driver: 'light_driver' };
         Object.entries(map).forEach(([key, id]) => {

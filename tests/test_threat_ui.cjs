@@ -112,14 +112,7 @@ const assert = require('node:assert/strict');
             Object.defineProperty(navigator, 'clipboard', { value: { writeText: async text => window.copiedLogs.push(text) }, configurable: true });
             const cfg = { first_launch: false, language: 'simplified_switch', theme: 'white_switch', version: 'test', interactive_timeout: 30 };
             window.menuTest = { cfg, rejectNext: false, alerts: [], mode: 'disabled', notice: '' };
-            window.resizeTest = { calls: [], start: null, updates: [] };
             window.pywebview = { api: {
-                begin_window_resize: () => new Promise(resolve => { window.resizeTest.start = resolve; }),
-                update_window_resize: (...args) => {
-                    window.resizeTest.calls.push(['update', ...args]);
-                    return new Promise(resolve => window.resizeTest.updates.push(resolve));
-                },
-                end_window_resize: async token => { window.resizeTest.calls.push(['end', token]); return true; },
                 get_config: async () => cfg,
                 init_ui_ready: async () => true,
                 report_ui_error: async () => true,
@@ -244,21 +237,9 @@ const assert = require('node:assert/strict');
             await clearDecisions.scrollIntoViewIfNeeded();
             await main.screenshot({ path: path.join(output, 'settings-secondary-options.png') });
         }
-        // Real DOM events in Edge with a delayed Python-bridge fixture.
-        await main.evaluate(() => {
-            document.querySelector('.window-resize-handle[data-dir="se"]').dispatchEvent(new MouseEvent('mousedown', { button: 0, screenX: 100, screenY: 100, bubbles: true }));
-            document.dispatchEvent(new MouseEvent('mouseup', { screenX: 110, screenY: 115 }));
-            window.resizeTest.start('edge-token');
-        });
-        await main.waitForFunction(() => window.resizeTest.calls.length === 1);
-        assert.deepEqual(await main.evaluate(() => window.resizeTest.calls[0]), ['update', 10, 15, 'edge-token']);
-        await main.evaluate(() => window.resizeTest.updates.shift()(true));
-        await main.waitForFunction(() => !document.body.classList.contains('resizing-active'));
-        assert.deepEqual(await main.evaluate(() => window.resizeTest.calls), [['update', 10, 15, 'edge-token'], ['end', 'edge-token']]);
         assert.deepEqual(errors, []);
         console.log('Threat UI: PASS (theme, compact layout, long paths, queue, focus, minimize, decisions)');
         console.log('Settings UI: PASS (default off, opt-in, timeout visibility, explicit config bindings)');
-        console.log('Resize DOM: PASS (early mouse release with delayed bridge, final update before end)');
     } finally {
         if (browser) await browser.close();
         await new Promise(resolve => server.close(resolve));
