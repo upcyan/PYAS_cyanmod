@@ -13,7 +13,7 @@
 
 ## About this fork
 
-This is a personal fork of [87owo/PYAS](https://github.com/87owo/PYAS), developed with AI assistance (Claude). The detection engine and core protection code are untouched — everything here is UI and interaction work: an interactive mode that asks before blocking threats, a resizable window, an in-app updater, and a clearer installer experience.
+This is a personal fork of [87owo/PYAS](https://github.com/87owo/PYAS), developed with AI assistance. The detection engine and core protection code are untouched — everything here is UI and interaction work: an interactive mode that asks before blocking threats, a resizable window, an in-app updater, and a clearer installer experience.
 
 Honestly, if you just want PYAS, [use the upstream original](https://github.com/87owo/PYAS). It gets updates first, and it's the project the author actually maintains. This fork exists for the interface changes listed above, and it may lag behind upstream — the "Upstream" tab in the changelog shows exactly how far it has caught up.
 
