@@ -474,9 +474,20 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
     def check_update(self):
         try:
             current = self.pyas_config.get("version", "0.0.0")
-            j = self._github_get(
-                "https://api.github.com/repos/upcyan/PYAS_cyanmod/releases/latest"
+            # 不用 /releases/latest:连字符 tag(如 v3.7.1-1)会被 semver
+            # 视为预发布而被 latest 端点跳过,列表取第一个非草稿更可靠
+            releases = self._github_get(
+                "https://api.github.com/repos/upcyan/PYAS_cyanmod/releases?per_page=10"
             ).json()
+            latest_release = next(
+                (r for r in releases or [] if isinstance(r, dict) and not r.get("draft")),
+                None,
+            )
+
+            if latest_release is None:
+                return {"error": True}
+
+            j = latest_release
             latest = str(j.get("tag_name") or j.get("name") or "").strip()
             page = j.get("html_url") or "https://github.com/upcyan/PYAS_cyanmod/releases"
             asset = None
