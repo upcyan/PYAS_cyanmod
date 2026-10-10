@@ -1,23 +1,29 @@
-# PYAS Security
+# PYAS Security Cyanmod
 
 <div align="center">
 
-**A hybrid Windows endpoint security platform powered by machine learning, YARA rules, cloud analysis, and kernel-level behavioral protection.**
+**A personal fork of PYAS — same engine, different UI. Built with AI assistance; recommended for most users: use the [upstream original](https://github.com/87owo/PYAS).**
 
-[![Latest Release](https://img.shields.io/github/v/release/87owo/PYAS?display_name=tag&style=flat-square)](https://github.com/87owo/PYAS/releases/latest)
-[![GitHub Stars](https://img.shields.io/github/stars/87owo/PYAS?style=flat-square)](https://github.com/87owo/PYAS/stargazers)
-[![GitHub Forks](https://img.shields.io/github/forks/87owo/PYAS?style=flat-square)](https://github.com/87owo/PYAS/network/members)
+[![Base](https://img.shields.io/badge/upstream-87owo%2FPYAS_3.7.1-0078D4?style=flat-square)](https://github.com/87owo/PYAS)
+[![Version](https://img.shields.io/badge/version-3.7.1--1-0969DA?style=flat-square)](../../releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4?style=flat-square&logo=windows)](https://github.com/87owo/PYAS)
 [![Python](https://img.shields.io/badge/language-Python-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
-[![C++](https://img.shields.io/badge/kernel-C%2B%2B-00599C?style=flat-square&logo=cplusplus)](https://github.com/87owo/PYAS/tree/main/Plugins/Filter)
-
-[Website](https://pyas-security.com/antivirus) · [Online Analysis](https://pyas-security.com/analyze) · [Download](https://github.com/87owo/PYAS/releases) · [Report an Issue](https://github.com/87owo/PYAS/issues)
 
 </div>
 
-![PYAS Security interface](https://github.com/user-attachments/assets/4a7e6b52-7001-4726-96fe-a2d6ccc8e6a4)
+## About this fork
 
-## Overview
+This is a personal fork of [87owo/PYAS](https://github.com/87owo/PYAS), developed with AI assistance (Claude). The detection engine and core protection code are untouched — everything here is UI and interaction work: an interactive mode that asks before blocking threats, a resizable window, an in-app updater, and a clearer installer experience.
+
+Honestly, if you just want PYAS, [use the upstream original](https://github.com/87owo/PYAS). It gets updates first, and it's the project the author actually maintains. This fork exists for the interface changes listed above, and it may lag behind upstream — the "Upstream" tab in the changelog shows exactly how far it has caught up.
+
+The version number follows `upstream-revision`, for example `3.7.1-1` means upstream 3.7.1 with the first round of Cyanmod changes.
+
+---
+
+## Overview (upstream)
+
+The overview below describes the upstream project, which this fork inherits unchanged.
 
 PYAS Security is a source-available Windows endpoint security project that combines multiple detection and protection layers in one desktop application. It brings together local PE-file machine-learning inference, YARA-based matching, digital-signature inspection, optional cloud analysis, real-time user-mode monitoring, and a native Windows minifilter driver.
 
@@ -188,6 +194,38 @@ PYAS stores machine-wide configuration and reports under:
 WebView2 user data is stored under the current user's local application-data directory. Activity records and diagnostic errors use the shared report system. Configuration includes protection settings, interface preferences, rule references, allow/block lists, and quarantine metadata.
 
 Before reporting a configuration issue, reproduce it with default settings when safe to do so and remove sensitive paths or file information from logs.
+
+## Building the installer
+
+A one-click build script is provided at the repository root. It supports two paths:
+
+- **Local build** (`build.bat` → option 2, or `python build.py local`): packages `PYAS.exe` with PyInstaller, assembles the `Payload` layout, and compiles `Output\PYAS_Setup_v<version>.exe` with Inno Setup. Nothing is uploaded.
+- **Full release** (`build.bat` → option 1, or `python build.py release`): performs the local build and then publishes the installer as a GitHub Release on `upcyan/PYAS_cyanmod` with tag `v<version>`, which is what the in-app update checker queries.
+
+One-time prerequisites:
+
+```powershell
+pip install pyinstaller pywebview pystray Pillow requests pefile yara-python numpy onnxruntime
+```
+
+- Inno Setup 6.3 or newer (`ISCC.exe` must be reachable; the languages referenced by `PYAS_Inno.iss` ship with it).
+- For the full-release path: the `gh` CLI signed in via `gh auth login`, or a `GITHUB_TOKEN` environment variable with repo scope.
+- The script downloads the VC++ redistributable and WebView2 bootstrapper into `Redist/`, generates `SetupResources/` (licence RTF and placeholder wizard images) automatically, and keeps `#define AppVersion` in `PYAS_Inno.iss` in sync with `VERSION` in `PYAS_Version.py`.
+- `python build.py check` verifies the toolchain without building.
+
+To ship an update: bump `VERSION` in `PYAS_Version.py`, run the full-release path, and existing installations will pick it up through the in-app "Check Update" dialog. Installing the new `PYAS_Setup.exe` over an old one overwrites the application files while preserving user configuration in `ProgramData\PYAS`.
+
+Versioning scheme: this fork uses `upstream-revision` versions such as `3.7.1-1` — the part before the hyphen tracks the upstream `87owo/PYAS` release, and the number after it is the local revision. Following a new upstream release bumps the prefix (e.g. `3.7.2-1`); each round of local changes on the same upstream base increments the revision (`3.7.1-1` → `3.7.1-2`). The build script enforces this format and writes the dot-separated numeric equivalent (`3.7.1.1`) into the Inno Setup metadata, which does not accept hyphens.
+
+## Driver blocked by Windows Application Control
+
+On Windows 11, enabling Driver Protection may fail with `StartServiceW failed: 0x000011C7` (4551, `ERROR_BLOCKED_BY_POLICY`). There are two distinct policy layers that produce this error, and the application detects both:
+
+**Smart App Control (SAC) — the common case on consumer Windows 11.** SAC (on or in evaluation mode, `HKLM\SYSTEM\CurrentControlSet\Control\CI\Policy\VerifiedAndReputablePolicyState`) blocks drivers by *cloud reputation*, even Microsoft-attestation-signed ones. **WDAC supplemental policies do not apply to SAC** — creating hash allow rules has no effect. The only fix is turning SAC off: Windows Security → App & browser control → Smart App Control settings → Off, then reboot. Note that SAC cannot be re-enabled afterwards without reinstalling Windows. The application detects SAC and offers to open Windows Security directly.
+
+**WDAC / App Control for Business.** If an explicit WDAC base policy is deployed, the Code Integrity event log (`Microsoft-Windows-CodeIntegrity/Operational`, events 3076/3077) records the verdict and the blocking policy ID, and `citool -lp` (as administrator) lists active policies. Loosening requires editing *that* policy — deploying an additional policy only adds constraints, since multiple active policies intersect. Community guides that generate a policy with `New-CIPolicy` and copy it to `CiPolicies\Active` are therefore incomplete: a proper fix is a supplemental policy linked to the active base policy's `BasePolicyID`, and the base must opt into supplemental policies. For development machines, `bcdedit /set testsigning on` followed by a reboot accepts test-signing-level drivers (a "Test Mode" watermark appears).
+
+The application detects error codes 577, 1275 and 4551 at driver start, shows a localized guidance dialog for the matching layer, prints the driver's path and SHA256 (for hash allow rules), and reverts the toggle automatically.
 
 ## Building the driver
 

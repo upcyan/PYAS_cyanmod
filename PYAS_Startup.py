@@ -24,6 +24,41 @@ def bootstrap_startup():
         if getattr(sys, stream) is None:
             setattr(sys, stream, open(os.devnull, "w"))
 
+    def ui_language():
+        try:
+            lang = ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0xFFFF
+
+        except Exception:
+            return "en"
+
+        if lang in (0x0804, 0x1404):
+            return "zh-cn"
+
+        if lang in (0x0404, 0x0C04):
+            return "zh-tw"
+
+        return "en"
+
+    def startup_error_text():
+        language = ui_language()
+
+        if language == "zh-cn":
+            return (
+                "PYAS 启动失败。\n\n{error}\n\n诊断日志: {log}",
+                "PYAS Security Cyanmod",
+            )
+
+        if language == "zh-tw":
+            return (
+                "PYAS 啟動失敗。\n\n{error}\n\n診斷日誌: {log}",
+                "PYAS Security Cyanmod",
+            )
+
+        return (
+            "PYAS failed to start.\n\n{error}\n\nDiagnostic log: {log}",
+            "PYAS Security Cyanmod",
+        )
+
     def exception_hook(exc_type, exc_value, traceback):
         logger.critical("Unhandled startup exception", exc_info=(exc_type, exc_value, traceback))
 
@@ -32,10 +67,11 @@ def bootstrap_startup():
             for arg in ("-hide", "-h", "-quit", "-driver-unload", "-driver-uninstall")
         ):
             try:
+                template, title = startup_error_text()
                 ctypes.windll.user32.MessageBoxW(
                     None,
-                    f"PYAS failed to start.\n\n{exc_value}\n\nDiagnostic log: {log_path or 'unavailable'}",
-                    "PYAS Security",
+                    template.format(error=exc_value, log=log_path or "unavailable"),
+                    title,
                     0x10,
                 )
             except Exception:

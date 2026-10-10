@@ -27,6 +27,228 @@ from PYAS_WinAPI import (
 
 
 class DriverMixin:
+    DRIVER_START_ERROR_HINTS = {
+        2: "the driver file is missing (system cannot find the file specified)",
+        5: "access denied (administrator privileges are required)",
+        577: "Windows cannot verify the digital signature of this driver",
+        1058: "the driver service is disabled",
+        1275: "this driver has been blocked from loading by code integrity policy",
+        4551: "an Application Control (WDAC / Smart App Control) policy has blocked this driver because it does not meet the required signing level",
+    }
+
+    DRIVER_POLICY_BLOCK_CODES = frozenset({577, 1275, 4551})
+
+    SMART_APP_CONTROL_STATES = {1: "evaluation", 2: "on"}
+
+    @staticmethod
+    def _query_smart_app_control_state():
+        """返回 SAC 状态:'on'/'evaluation'/None(关闭或不可用)。"""
+        try:
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SYSTEM\CurrentControlSet\Control\CI\Policy",
+                0,
+                winreg.KEY_READ,
+            ) as key:
+                value, _ = winreg.QueryValueEx(key, "VerifiedAndReputablePolicyState")
+                return DriverMixin.SMART_APP_CONTROL_STATES.get(int(value))
+
+        except (FileNotFoundError, OSError, ValueError):
+            return None
+
+    def _notify_driver_block(self, error):
+        code = int(error) & 0xFFFFFFFF
+
+        if code not in self.DRIVER_POLICY_BLOCK_CODES:
+            return
+
+        if getattr(self, "_driver_block_notice_shown", False):
+            return
+
+        self._driver_block_notice_shown = True
+
+        sac_state = self._query_smart_app_control_state()
+
+        if sac_state:
+            self._notify_smart_app_control_block(sac_state)
+        else:
+            self._notify_wdac_block()
+
+    def _notify_smart_app_control_block(self, sac_state):
+        title = self._loc(
+            {
+                "traditional_switch": "智能應用控制攔截了驅動",
+                "simplified_switch": "智能应用控制拦截了驱动",
+                "english_switch": "Smart App Control blocked the driver",
+                "japanese_switch": "Smart App Control がドライバーをブロックしました",
+                "korean_switch": "Smart App Control이 드라이버를 차단했습니다",
+                "french_switch": "Smart App Control a bloqué le pilote",
+                "spanish_switch": "Smart App Control bloqueó el controlador",
+                "hindi_switch": "Smart App Control ने ड्राइवर अवरुद्ध किया",
+                "arabic_switch": "حظر Smart App Control برنامج التشغيل",
+                "russian_switch": "Smart App Control заблокировал драйвер",
+                "slovenian_switch": "Smart App Control je blokiral gonilnik",
+            }
+        )
+        state_text = (
+            self._loc(
+                {
+                    "traditional_switch": "評估模式（按雲端信譽靜默攔截）",
+                    "simplified_switch": "评估模式（按云端信誉静默拦截）",
+                    "english_switch": "evaluation mode (silently blocks by cloud reputation)",
+                    "japanese_switch": "評価モード（クラウド評価により無音でブロック）",
+                    "korean_switch": "평가 모드(클라우드 평판 기준 자동 차단)",
+                    "french_switch": "mode évaluation (blocage silencieux par réputation cloud)",
+                    "spanish_switch": "modo de evaluación (bloqueo silencioso por reputación)",
+                    "hindi_switch": "मूल्यांकन मोड (क्लाउड प्रतिष्ठा से मौन अवरोध)",
+                    "arabic_switch": "وضع التقييم (حظر صامت حسب السمعة السحابية)",
+                    "russian_switch": "режим оценки (тихая блокировка по облачной репутации)",
+                    "slovenian_switch": "način ocenjevanja (tiha blokada po slovu reputaciji)",
+                }
+            )
+            if sac_state == "evaluation"
+            else self._loc(
+                {
+                    "traditional_switch": "開啟狀態",
+                    "simplified_switch": "开启状态",
+                    "english_switch": "on",
+                    "japanese_switch": "オン",
+                    "korean_switch": "켜짐",
+                    "french_switch": "activé",
+                    "spanish_switch": "activado",
+                    "hindi_switch": "चालू",
+                    "arabic_switch": "مُفعّل",
+                    "russian_switch": "включён",
+                    "slovenian_switch": "vklopljen",
+                }
+            )
+        )
+        message = self._loc(
+            {
+                "traditional_switch": "Windows 智能應用控制（Smart App Control，目前為{0}）攔截了 PYAS 驅動——它按雲端信譽判定，即使是微軟簽名的驅動也可能被擋。WDAC 補充策略對 SAC 無效，唯一解法是關閉 SAC。\n\n關閉路徑：Windows 安全中心 → 應用和瀏覽器控制 → 智能應用控制設置 → 關 → 重新啟動系統。注意：SAC 一旦手動關閉便無法重新開啟（除非重裝系統）。",
+                "simplified_switch": "Windows 智能应用控制（Smart App Control，当前为{0}）拦截了 PYAS 驱动——它按云端信誉判定，即使是微软签名的驱动也可能被挡。WDAC 补充策略对 SAC 无效，唯一解法是关闭 SAC。\n\n关闭路径：Windows 安全中心 → 应用和浏览器控制 → 智能应用控制设置 → 关 → 重启系统。注意：SAC 一旦手动关闭便无法重新开启（除非重装系统）。",
+                "english_switch": "Windows Smart App Control (currently {0}) blocked the PYAS driver — it judges by cloud reputation, so even Microsoft-signed drivers can be rejected. WDAC supplemental policies do not apply to SAC; the only fix is to turn SAC off.\n\nPath: Windows Security → App & browser control → Smart App Control settings → Off → reboot. Note: once manually turned off, SAC cannot be re-enabled without reinstalling Windows.",
+                "japanese_switch": "Windows Smart App Control（現在{0}）が PYAS ドライバーをブロックしました——クラウド評価による判定のため、Microsoft 署名済みドライバーも拒否される可能性があります。WDAC 補充ポリシーは SAC に適用されず、唯一の解決策は SAC をオフにすることです。\n\n手順：Windows セキュリティ → アプリとブラウザー コントロール → Smart App Control の設定 → オフ → 再起動。注意：一度オフにすると再インストールしない限り再オンできません。",
+                "korean_switch": "Windows Smart App Control(현재 {0})이 PYAS 드라이버를 차단했습니다. 클라우드 평판으로 판단하므로 Microsoft 서명 드라이버도 거부될 수 있습니다. WDAC 보완 정책은 SAC에 적용되지 않으며, 유일한 해결책은 SAC를 끄는 것입니다.\n\n경로: Windows 보안 → 앱 및 브라우저 컨트롤 → Smart App Control 설정 → 끔 → 재부팅. 참고: 한번 끄면 Windows를 다시 설치하지 않는 한 다시 켤 수 없습니다.",
+                "french_switch": "Windows Smart App Control (actuellement {0}) a bloqué le pilote PYAS — il juge par réputation cloud, même les pilotes signés par Microsoft peuvent être refusés. Les stratégies WDAC supplémentaires ne s'appliquent pas au SAC ; la seule solution est de désactiver le SAC.\n\nChemin : Sécurité Windows → Contrôle des applications et du navigateur → Paramètres Smart App Control → Désactivé → redémarrer. Note : une fois désactivé, le SAC ne peut pas être réactivé sans réinstaller Windows.",
+                "spanish_switch": "Windows Smart App Control (actualmente {0}) bloqueó el controlador PYAS: juzga por reputación en la nube, incluso los controladores firmados por Microsoft pueden rechazarse. Las directivas suplementarias de WDAC no aplican a SAC; la única solución es desactivar SAC.\n\nRuta: Seguridad de Windows → Control de aplicaciones y navegador → Configuración de Smart App Control → Desactivado → reiniciar. Nota: una vez desactivado, SAC no puede reactivarse sin reinstalar Windows.",
+                "hindi_switch": "Windows Smart App Control (वर्तमान में {0}) ने PYAS ड्राइवर को अवरुद्ध किया — यह क्लाउड प्रतिष्ठा से निर्णय लेता है, Microsoft-हस्ताक्षरित ड्राइवर भी अस्वीकृत हो सकते हैं। WDAC पूरक नीतियाँ SAC पर लागू नहीं होतीं; एकमात्र समाधान SAC बंद करना है।\n\nपथ: Windows सुरक्षा → ऐप और ब्राउज़र नियंत्रण → Smart App Control सेटिंग → बंद → पुनरारंभ। नोट: एक बार बंद करने के बाद Windows पुनः स्थापित किए बिना SAC फिर चालू नहीं हो सकता।",
+                "arabic_switch": "حظر Windows Smart App Control (الحالي: {0}) برنامج PYAS للتشغيل — يحكم حسب السمعة السحابية، وقد تُرفض حتى برامج التشغيل الموقعة من Microsoft. لا تنطبق سياسات WDAC التكميلية على SAC؛ والحل الوحيد هو إيقاف SAC.\n\nالمسار: أمان Windows → التحكم في التطبيقات والمتصفح → إعدادات Smart App Control → إيقاف → إعادة التشغيل. ملاحظة: بمجرد إيقافه يدويًا لا يمكن إعادة تفعيله إلا بإعادة تثبيت Windows.",
+                "russian_switch": "Windows Smart App Control (сейчас {0}) заблокировал драйвер PYAS — решение по облачной репутации, даже драйверы с подписью Microsoft могут быть отклонены. Дополнительные политики WDAC к SAC не применяются; единственное решение — выключить SAC.\n\nПуть: Безопасность Windows → Управление приложениями и браузером → Параметры Smart App Control → Выкл → перезагрузка. Примечание: после ручного выключения SAC нельзя включить снова без переустановки Windows.",
+                "slovenian_switch": "Windows Smart App Control (trenutno {0}) je blokiral gonilnik PYAS — odloča se po slovu reputaciji v oblaku, tudi z Microsoftom podpisani gonilniki so lahko zavrnjeni. Dopolnilne politike WDAC ne veljajo za SAC; edina rešitev je izklop SAC.\n\nPot: Varnost sistema Windows → Nadzor aplikacij in brskalnika → Nastavitve Smart App Control → Izklopljeno → ponovni zagon. Opomba: enkrat ročno izklopljenega SAC ni mogoče znova vklopiti brez ponovne namestitve sistema.",
+            }
+        ).replace("{0}", state_text)
+
+        try:
+            self.show_alert(title, message, "warning")
+        except Exception:
+            log_exception("PYAS_Driver.DriverMixin._notify_smart_app_control_block")
+
+        followup = self._loc(
+            {
+                "traditional_switch": "是否立即打開 Windows 安全中心？",
+                "simplified_switch": "是否立即打开 Windows 安全中心？",
+                "english_switch": "Open Windows Security now?",
+                "japanese_switch": "今すぐ Windows セキュリティを開きますか？",
+                "korean_switch": "지금 Windows 보안을 여시겠습니까?",
+                "french_switch": "Ouvrir Sécurité Windows maintenant ?",
+                "spanish_switch": "¿Abrir Seguridad de Windows ahora?",
+                "hindi_switch": "अभी Windows सुरक्षा खोलें?",
+                "arabic_switch": "هل تريد فتح أمان Windows الآن؟",
+                "russian_switch": "Открыть «Безопасность Windows» сейчас?",
+                "slovenian_switch": "Želite zdaj odpreti Windows Varnost?",
+            }
+        )
+
+        try:
+            if self.show_confirm(title, followup):
+                os.startfile("windows-defender://")
+        except Exception:
+            log_exception("PYAS_Driver.DriverMixin._notify_smart_app_control_block.open")
+
+    def _notify_wdac_block(self):
+        title = self._loc(
+            {
+                "traditional_switch": "無法啟用驅動防護",
+                "simplified_switch": "无法启用驱动防护",
+                "english_switch": "Driver Protection could not be enabled",
+                "japanese_switch": "ドライバー保護を有効にできません",
+                "korean_switch": "드라이버 보호를 활성화할 수 없습니다",
+                "french_switch": "Impossible d'activer la protection du pilote",
+                "spanish_switch": "No se pudo activar la protección del controlador",
+                "hindi_switch": "ड्राइवर सुरक्षा सक्रिय नहीं हो सकी",
+                "arabic_switch": "تعذر تفعيل حماية برنامج التشغيل",
+                "russian_switch": "Не удалось включить защиту драйвера",
+                "slovenian_switch": "Zaščite gonilnika ni bilo mogoče omogočiti",
+            }
+        )
+        message = self._loc(
+            {
+                "traditional_switch": "Windows 應用控制策略（WDAC／Smart App Control）按簽名級別攔截了 PYAS 驅動，驅動防護無法啟用。\n\n處理建議：\n1. 以管理員執行 citool -lp 查看系統活動的代碼完整性策略；\n2. 開發環境可執行 bcdedit /set testsigning on 並重新啟動（允許測試簽名級別，桌面會顯示測試模式水印）；\n3. 正式部署需為驅動取得 Microsoft WHQL／attestation 簽名，或在本機 WDAC 策略中放行該驅動。",
+                "simplified_switch": "Windows 应用控制策略（WDAC／Smart App Control）按签名级别拦截了 PYAS 驱动，驱动防护无法启用。\n\n处理建议：\n1. 以管理员运行 citool -lp 查看系统活动的代码完整性策略；\n2. 开发环境可运行 bcdedit /set testsigning on 并重启（允许测试签名级别，桌面会显示测试模式水印）；\n3. 正式部署需为驱动取得 Microsoft WHQL／attestation 签名，或在本机 WDAC 策略中放行该驱动。",
+                "english_switch": "A Windows Application Control policy (WDAC / Smart App Control) has blocked the PYAS driver based on its signing level, so Driver Protection cannot be enabled.\n\nSuggested actions:\n1. Run 'citool -lp' as administrator to list active code integrity policies;\n2. On development machines, run 'bcdedit /set testsigning on' and reboot (allows test-signing level; a test-mode watermark will appear);\n3. For production, obtain Microsoft WHQL / attestation signing for the driver, or allowlist it in the local WDAC policy.",
+                "japanese_switch": "Windows アプリケーション制御ポリシー（WDAC／Smart App Control）が署名レベルにより PYAS ドライバーをブロックしたため、ドライバー保護を有効にできません。\n\n対処：\n1. 管理者として citool -lp を実行し、有効なコード整合性ポリシーを確認；\n2. 開発環境では bcdedit /set testsigning on を実行して再起動（テスト署名レベルを許可、テストモードの透かし表示）；\n3. 本番では Microsoft WHQL／attestation 署名を取得するか、WDAC ポリシーで許可してください。",
+                "korean_switch": "Windows 애플리케이션 제어 정책(WDAC/Smart App Control)이 서명 수준 때문에 PYAS 드라이버를 차단하여 드라이버 보호를 활성화할 수 없습니다.\n\n조치:\n1. 관리자로 citool -lp 실행 후 활성 코드 무결성 정책 확인;\n2. 개발 환경에서는 bcdedit /set testsigning on 실행 후 재부팅(테스트 서명 수준 허용, 테스트 모드 워터마크 표시);\n3. 프로덕션은 Microsoft WHQL/attestation 서명을 받거나 WDAC 정책에서 허용하세요.",
+                "french_switch": "Une stratégie de contrôle d'application Windows (WDAC / Smart App Control) a bloqué le pilote PYAS en raison de son niveau de signature.\n\nActions :\n1. Exécutez « citool -lp » en administrateur pour lister les stratégies actives ;\n2. En développement : « bcdedit /set testsigning on » puis redémarrez (autorise le niveau test-signing, filigrane affiché) ;\n3. En production : obtenez une signature Microsoft WHQL / attestation ou autorisez le pilote dans la stratégie WDAC.",
+                "spanish_switch": "Una directiva de control de aplicaciones de Windows (WDAC / Smart App Control) bloqueó el controlador PYAS por su nivel de firma.\n\nAcciones:\n1. Ejecute «citool -lp» como administrador para ver las directivas activas;\n2. En desarrollo: «bcdedit /set testsigning on» y reinicie (permite firma de prueba, muestra marca de agua);\n3. En producción: obtenga firma WHQL/attestation de Microsoft o permita el controlador en la directiva WDAC.",
+                "hindi_switch": "Windows एप्लिकेशन नियंत्रण नीति (WDAC / Smart App Control) ने हस्ताक्षर स्तर के कारण PYAS ड्राइवर को अवरुद्ध किया।\n\nसुझाव:\n1. सक्रिय नीतियाँ देखने हेतु व्यवस्थापक के रूप में 'citool -lp' चलाएँ;\n2. विकास पर्यावरण में 'bcdedit /set testsigning on' चलाकर पुनरारंभ करें (टेस्ट-साइनिंग स्तर स्वीकृत, वॉटरमार्क दिखेगा);\n3. प्रोडक्शन हेतु Microsoft WHQL/attestation हस्ताक्षर लें या WDAC नीति में ड्राइवर अनुमत दें।",
+                "arabic_switch": "حظرت نهج التحكم بالتطبيقات في Windows (WDAC / Smart App Control) برنامج PYAS للتشغيل بسبب مستوى توقيعه، لذا تعذر تفعيل الحماية.\n\nالإجراءات:\n1. شغّل citool -lp كمسؤول لعرض النهج النشطة؛\n2. في بيئة التطوير: bcdedit /set testsigning on ثم أعد التشغيل (يسمح بمستوى التوقيع الاختباري)؛\n3. للإنتاج: احصل على توقيع WHQL/attestation من Microsoft أو اسمح بالبرنامج في نهج WDAC.",
+                "russian_switch": "Политика управления приложениями Windows (WDAC / Smart App Control) заблокировала драйвер PYAS из-за уровня подписи.\n\nДействия:\n1. Запустите «citool -lp» от имени администратора, чтобы увидеть активные политики;\n2. Для разработки: «bcdedit /set testsigning on» и перезагрузка (разрешает тестовый уровень подписи, появится водяной знак);\n3. Для продакшена: получите подпись Microsoft WHQL/attestation или разрешите драйвер в политике WDAC.",
+                "slovenian_switch": "Pravilnik nadzora aplikacij Windows (WDAC / Smart App Control) je blokiral gonilnik PYAS zaradi ravni podpisa.\n\nDejanja:\n1. Zaženite «citool -lp» kot skrbnik za seznam aktivnih pravilnikov;\n2. V razvoju: «bcdedit /set testsigning on» in ponovni zagon (dovoli testno raven podpisa, prikazan vodni žig);\n3. Za produkcijo: pridobite Microsoft WHQL/attestation podpis ali dovolite gonilnik v pravilniku WDAC.",
+            }
+        )
+
+        details = ""
+
+        try:
+            driver_hash = self.calc_file_hash(self.path_drivers)
+
+            if driver_hash:
+                details = f"\n\n{os.path.normpath(self.path_drivers)}\nSHA256: {driver_hash}"
+
+        except Exception:
+            log_exception("PYAS_Driver.DriverMixin._notify_driver_block.hash")
+
+        try:
+            self.show_alert(title, message + details, "warning")
+        except Exception:
+            log_exception("PYAS_Driver.DriverMixin._notify_driver_block")
+
+        followup = self._loc(
+            {
+                "traditional_switch": "是否打開 Microsoft 應用控制官方文檔（瞭解如何建立放行規則）？",
+                "simplified_switch": "是否打开 Microsoft 应用控制官方文档（了解如何建立放行规则）？",
+                "english_switch": "Open the Microsoft Application Control documentation (how to create allow rules)?",
+                "japanese_switch": "Microsoft アプリケーション制御の公式ドキュメント（許可規則の作成方法）を開きますか？",
+                "korean_switch": "Microsoft 애플리케이션 제어 공식 문서(허용 규칙 만들기)를 여시겠습니까?",
+                "french_switch": "Ouvrir la documentation Microsoft sur le contrôle d'application (créer des règles d'autorisation) ?",
+                "spanish_switch": "¿Abrir la documentación de Microsoft sobre control de aplicaciones (cómo crear reglas de permiso)?",
+                "hindi_switch": "Microsoft एप्लिकेशन नियंत्रण आधिकारिक दस्तावेज़ (अनुमति नियम बनाना) खोलें?",
+                "arabic_switch": "هل تريد فتح وثائق Microsoft للتحكم بالتطبيقات (كيفية إنشاء قواعد سماح)؟",
+                "russian_switch": "Открыть документацию Microsoft по управлению приложениями (как создать правила разрешения)?",
+                "slovenian_switch": "Ali želite odpreti Microsoftovo dokumentacijo o nadzoru aplikacij (ustvarjanje pravil dovoljenja)?",
+            }
+        )
+
+        try:
+            if self.show_confirm(title, followup):
+                self.open_url(
+                    "https://learn.microsoft.com/windows/security/"
+                    "application-security/application-control/"
+                    "app-control-for-business/"
+                )
+        except Exception:
+            log_exception("PYAS_Driver.DriverMixin._notify_driver_block.docs")
+
+    def _describe_driver_start_error(self, error):
+        code = int(error) & 0xFFFFFFFF
+        hint = self.DRIVER_START_ERROR_HINTS.get(code)
+
+        if hint:
+            return f"StartServiceW failed: 0x{code:08X} ({hint})"
+
+        return f"StartServiceW failed: 0x{code:08X}"
+
     def _query_service_state_handle(self, service):
         status = SERVICE_STATUS_PROCESS()
         needed = ctypes.wintypes.DWORD(0)
@@ -342,9 +564,10 @@ class DriverMixin:
                 self.write_log(
                     "WARN",
                     "Driver Service",
-                    detail=f"StartServiceW failed: 0x{start_error & 0xFFFFFFFF:08X}",
+                    detail=self._describe_driver_start_error(start_error),
                     success=False,
                 )
+                self._notify_driver_block(start_error)
                 return False
 
             final_state = None
@@ -540,7 +763,7 @@ class DriverMixin:
         self._close_driver_port()
         return self.start_driver_listener(wait_ready=True)
 
-    def _set_driver_unload_authorization(self, enabled):
+    def _send_driver_unload_permit(self, enabled):
         msg = PYAS_USER_MESSAGE()
         msg.Command = 5 if enabled else 6
         msg.Path = ""
@@ -568,7 +791,7 @@ class DriverMixin:
                         ctypes.byref(bytes_returned),
                     )
                 except Exception as e:
-                    log_exception("PYAS_Driver.DriverMixin._set_driver_unload_authorization:427")
+                    log_exception("PYAS_Driver.DriverMixin._send_driver_unload_permit:427")
                     self.write_log(
                         "WARN", "Driver Unload Authorization", detail=str(e), success=False
                     )
@@ -749,7 +972,7 @@ class DriverMixin:
                     unload_authorized = False
                     return result
 
-                if not self._set_driver_unload_authorization(True):
+                if not self._send_driver_unload_permit(True):
                     continue
 
                 unload_authorized = True
@@ -765,7 +988,7 @@ class DriverMixin:
 
                 if self.check_system_driver():
                     try:
-                        revoked = self._set_driver_unload_authorization(False)
+                        revoked = self._send_driver_unload_permit(False)
                     except Exception:
                         log_exception("PYAS_Driver.DriverMixin._filter_unload_with_privilege:606")
                         revoked = False
@@ -784,7 +1007,7 @@ class DriverMixin:
         finally:
             if unload_authorized and self.check_system_driver():
                 try:
-                    self._set_driver_unload_authorization(False)
+                    self._send_driver_unload_permit(False)
                 except Exception:
                     log_exception("PYAS_Driver.DriverMixin._filter_unload_with_privilege:622")
                     pass

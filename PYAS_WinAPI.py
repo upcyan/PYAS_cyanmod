@@ -348,10 +348,10 @@ class WindowsMixin:
         self.user32.SetWindowPos.argtypes = [
             ctypes.wintypes.HWND,
             ctypes.wintypes.HWND,
-            ctypes.c_int,
-            ctypes.c_int,
-            ctypes.c_int,
-            ctypes.c_int,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
             ctypes.wintypes.UINT,
         ]
         self.user32.SetWindowPos.restype = ctypes.wintypes.BOOL

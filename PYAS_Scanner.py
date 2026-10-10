@@ -228,15 +228,18 @@ class ScannerMixin(CloudQueueMixin):
         result = self.safe_scan_engine(file_path)
 
         if result:
-            self.manage_named_list(
-                "quarantine", [file_path], action="add", lock_func=self.lock_file
-            )
-            self.write_log(
-                "BLOCK",
-                "Deferred Scan Block",
-                source=file_path,
-                file_hash=self.calc_file_hash(file_path),
-            )
+            if self.request_block_decision("Deferred Scan Block", source=file_path):
+                self.manage_named_list(
+                    "quarantine", [file_path], action="add", lock_func=self.lock_file
+                )
+                self.write_log(
+                    "BLOCK",
+                    "Deferred Scan Block",
+                    source=file_path,
+                    file_hash=self.calc_file_hash(file_path),
+                )
+            else:
+                self.write_log("INFO", "Deferred Scan Allow", source=file_path)
 
     def _scan_result_messages(self, count=None, scanned=None, elapsed=None):
         if count is None or scanned is None or elapsed is None:

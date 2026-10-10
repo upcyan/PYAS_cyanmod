@@ -747,6 +747,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (['whitelist_window', 'quarantine_window', 'popup_window', 'custom_protect_window'].includes(targetId)) refreshConfigLists();
 
+        if (targetId === 'about_window') loadChangelogs();
+
         if (targetId === 'log_export_window' && window.pywebview) {
             window.pywebview.api.get_logs().then(logs => {
                 const logList = logs.reverse().map(log => ({ time_str: `[${log.time_str}]`, level: log.level, action: log.action, source: log.source || '-', id: log.id }));
@@ -885,6 +887,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     document.getElementById('theme_select')?.addEventListener('change', (e) => { applyTheme(e.target.value); window.pywebview?.api.update_config('theme', e.target.value); });
     document.getElementById('lang_select')?.addEventListener('change', (e) => { translateText(e.target.value); window.pywebview?.api.update_config('language', e.target.value); });
+
+    const syncInteractiveTimeoutState = (enabled) => {
+        const timeoutInput = document.getElementById('interactive_timeout_input');
+        if (timeoutInput) timeoutInput.disabled = !enabled;
+    };
+
+    document.getElementById('interactive_timeout_input')?.addEventListener('change', (e) => {
+        if (!window.pywebview) return;
+        let value = parseInt(e.target.value, 10);
+        if (!Number.isFinite(value)) value = 30;
+        value = Math.min(Math.max(value, 5), 300);
+        e.target.value = value;
+        window.pywebview.api.update_config('interactive_timeout', value);
+    });
     
     document.getElementById('scan_method_select')?.addEventListener('change', (e) => {
         const val = e.target.value;
@@ -895,14 +911,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.querySelectorAll('.toggle-switch input').forEach((toggle, index) => {
         toggle.addEventListener('change', async (e) => {
-            const switchMap = ["process_switch", "suspend_switch", "load_switch", "document_switch", "system_switch", "network_switch", "driver_switch", "sensitive_switch", "extension_switch", "cloud_switch", "suffix_switch", "autostart_switch", "context_switch"];
+            const switchMap = ["process_switch", "suspend_switch", "load_switch", "document_switch", "system_switch", "network_switch", "driver_switch", "sensitive_switch", "extension_switch", "cloud_switch", "suffix_switch", "autostart_switch", "context_switch", "interactive_switch"];
             const key = switchMap[index];
             if (window.pywebview && key) {
                 toggle.disabled = true;
                 try {
                     const result = await window.pywebview.api.update_config(key, e.target.checked);
                     if (result !== undefined && result !== null) toggle.checked = result;
-                } catch { toggle.checked = !e.target.checked; } 
+                    if (key === 'interactive_switch') syncInteractiveTimeoutState(toggle.checked);
+                } catch { toggle.checked = !e.target.checked; }
                 finally { toggle.disabled = false; }
             }
         });
@@ -1117,6 +1134,40 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('minimize_button')?.addEventListener('click', () => window.pywebview?.api.minimize());
     document.getElementById('close_button')?.addEventListener('click', () => window.pywebview?.api.hide_window());
 
+    document.querySelectorAll('.window-resize-handle').forEach(handle => {
+        handle.addEventListener('mousedown', (e) => {
+            if (e.button !== 0 || !window.pywebview) return;
+            e.preventDefault();
+            e.stopPropagation();
+
+            const api = window.pywebview.api;
+            const startX = e.screenX;
+            const startY = e.screenY;
+            let lastDx = null;
+            let lastDy = null;
+
+            const onMove = (ev) => {
+                const dx = ev.screenX - startX;
+                const dy = ev.screenY - startY;
+                if (dx === lastDx && dy === lastDy) return;
+                lastDx = dx;
+                lastDy = dy;
+                api.update_window_resize(dx, dy);
+            };
+
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                api.end_window_resize();
+            };
+
+            api.begin_window_resize(handle.dataset.dir).then(() => {
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+        });
+    });
+
     const contextMenu = document.createElement('div');
     contextMenu.className = 'custom-context-menu';
     contextMenu.innerHTML = `
@@ -1220,12 +1271,234 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     bindSettingAction('web_official', () => window.pywebview?.api.open_website());
-    
+
+    const updateModalState = { result: null, downloading: false };
+
+    const setModalElement = (id, show) => document.getElementById(id)?.classList.toggle('hidden', !show);
+
+    const openUpdateModal = (res) => {
+        updateModalState.result = res;
+        updateModalState.downloading = false;
+        const version = document.getElementById('update_modal_version');
+        if (version) version.textContent = `${res.current} -> ${res.latest}`;
+        const asset = document.getElementById('update_modal_asset');
+        if (asset) {
+            if (res.asset && res.asset.name) {
+                const sizeText = res.asset.size > 0 ? ` (${formatSize(res.asset.size)})` : '';
+                asset.textContent = `${res.asset.name}${sizeText}`;
+                asset.classList.remove('hidden');
+            } else {
+                asset.textContent = '';
+                asset.classList.add('hidden');
+            }
+        }
+        setModalElement('update_modal_progress', false);
+        setModalElement('update_modal_status', false);
+        setModalElement('update_download_btn', !!(res.asset && res.asset.url));
+        setModalElement('update_install_btn', false);
+        const downloadBtn = document.getElementById('update_download_btn');
+        if (downloadBtn) downloadBtn.disabled = false;
+        const fill = document.getElementById('update_progress_fill');
+        if (fill) fill.style.width = '0%';
+        const progressText = document.getElementById('update_progress_text');
+        if (progressText) progressText.textContent = '0%';
+        document.getElementById('update_modal')?.classList.remove('hidden');
+    };
+
+    const closeUpdateModal = () => document.getElementById('update_modal')?.classList.add('hidden');
+
+    window.updateDownloadProgress = (payload) => {
+        if (!payload) return;
+        const fill = document.getElementById('update_progress_fill');
+        const text = document.getElementById('update_progress_text');
+        if (payload.percent >= 0) {
+            if (fill) fill.style.width = `${payload.percent}%`;
+            if (text) text.textContent = `${payload.percent}%`;
+        } else {
+            if (fill) fill.style.width = '35%';
+            if (text) text.textContent = formatSize(payload.received || 0);
+        }
+    };
+
+    window.updateDownloadFinished = (result) => {
+        updateModalState.downloading = false;
+        const downloadBtn = document.getElementById('update_download_btn');
+        if (downloadBtn) downloadBtn.disabled = false;
+        const status = document.getElementById('update_modal_status');
+        if (result && result.success) {
+            const fill = document.getElementById('update_progress_fill');
+            if (fill) fill.style.width = '100%';
+            const progressText = document.getElementById('update_progress_text');
+            if (progressText) progressText.textContent = '100%';
+            setModalElement('update_modal_progress', false);
+            updateModalState.installerPath = result.path;
+            if (status) {
+                status.textContent = `${getMsg('msg_update_downloaded')} ${result.path}`;
+                status.classList.remove('hidden');
+            }
+            setModalElement('update_install_btn', true);
+            setModalElement('update_download_btn', false);
+        } else {
+            if (status) {
+                status.textContent = `${getMsg('msg_update_download_fail')}${result && result.error ? `\n${result.error}` : ''}`;
+                status.classList.remove('hidden');
+            }
+            setModalElement('update_modal_progress', false);
+            setModalElement('update_download_btn', !!(updateModalState.result?.asset?.url));
+        }
+    };
+
+    document.getElementById('update_download_btn')?.addEventListener('click', () => {
+        const asset = updateModalState.result?.asset;
+        if (!asset || !asset.url || !window.pywebview || updateModalState.downloading) return;
+        updateModalState.downloading = true;
+        const downloadBtn = document.getElementById('update_download_btn');
+        if (downloadBtn) downloadBtn.disabled = true;
+        setModalElement('update_modal_status', false);
+        setModalElement('update_modal_progress', true);
+        window.pywebview.api.download_update(asset.url, asset.name).then(res => {
+            if (!res || !res.success) {
+                window.updateDownloadFinished(res || { success: false, error: 'failed to start' });
+            }
+        }).catch(() => window.updateDownloadFinished({ success: false, error: 'bridge error' }));
+    });
+
+    document.getElementById('update_install_btn')?.addEventListener('click', () => {
+        const path = updateModalState.installerPath;
+        if (!path || !window.pywebview) return;
+        window.pywebview.api.run_update_installer(path).then(ok => {
+            if (ok) closeUpdateModal();
+            else window.pywebview.api.show_alert(getMsg("title_prompt"), getMsg("msg_update_install_fail"), "error");
+        });
+    });
+
+    document.getElementById('update_page_btn')?.addEventListener('click', () => {
+        const url = updateModalState.result?.url;
+        if (url) window.pywebview?.api.open_url(url);
+    });
+
+    document.getElementById('update_close_btn')?.addEventListener('click', closeUpdateModal);
+
     bindSettingAction('update_check', () => {
         window.pywebview?.api.check_update().then(res => {
             if (res.error) window.pywebview.api.show_alert(getMsg("title_error"), getMsg("msg_update_fail"), "error");
-            else if (res.has_update) window.pywebview.api.show_confirm(getMsg("title_prompt"), `${getMsg("msg_new_version")} ${res.latest}\n(${res.current} -> ${res.latest})`).then(ok => ok && window.pywebview.api.open_url(res.url));
+            else if (res.has_update) openUpdateModal(res);
             else window.pywebview.api.show_alert(getMsg("title_prompt"), `${getMsg("msg_latest_version")} ${res.current}`, "info");
+        });
+    });
+
+    bindSettingAction('opt_notify_check', () => {
+        if (!window.pywebview) return;
+        window.pywebview.api.check_notification_permission().then(res => {
+            if (!res || !res.supported) {
+                window.pywebview.api.show_alert(getMsg("title_prompt"), getMsg("msg_notify_unsupported"), "info");
+            } else if (res.enabled) {
+                window.pywebview.api.show_alert(getMsg("title_prompt"), getMsg("msg_notify_ok"), "info");
+            } else {
+                window.pywebview.api.show_confirm(getMsg("title_prompt"), getMsg("msg_notify_disabled")).then(ok => {
+                    if (ok) window.pywebview.api.open_notification_settings();
+                });
+            }
+        });
+    });
+
+    const changelogState = { loaded: false, data: null, tab: 'cyanmod' };
+
+    const versionDigits = (s) => (String(s).match(/\d+/g) || []).map(Number);
+
+    const versionAtMost = (a, b) => {
+        const da = versionDigits(a), db = versionDigits(b);
+        const len = Math.max(da.length, db.length);
+        for (let i = 0; i < len; i++) {
+            const x = da[i] || 0, y = db[i] || 0;
+            if (x !== y) return x < y;
+        }
+        return true;
+    };
+
+    const fetchReleases = async (repo, maxVersion) => {
+        const res = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=20`, {
+            headers: { 'Accept': 'application/vnd.github+json' }
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const list = await res.json();
+        return (list || []).filter(rel => rel && rel.tag_name).map(rel => ({
+            tag: String(rel.tag_name).trim(),
+            name: String(rel.name || rel.tag_name || ''),
+            date: String(rel.published_at || '').slice(0, 10),
+            body: String(rel.body || '').slice(0, 2000)
+        })).filter(e => !maxVersion || (versionDigits(e.tag).length && versionAtMost(e.tag, maxVersion)));
+    };
+
+    const renderChangelog = () => {
+        const body = document.getElementById('changelog_body');
+        const note = document.getElementById('changelog_note');
+        if (!body) return;
+
+        if (note) {
+            if (changelogState.tab === 'upstream' && changelogState.data && !changelogState.data.error && changelogState.data.tracked) {
+                note.textContent = getMsg('changelog_tracked').replace('{0}', 'v' + changelogState.data.tracked);
+                note.classList.remove('hidden');
+            } else {
+                note.classList.add('hidden');
+            }
+        }
+
+        if (!changelogState.data) {
+            body.innerHTML = `<div class="changelog-placeholder">${escapeHtml(getMsg('changelog_loading'))}</div>`;
+            return;
+        }
+
+        if (changelogState.data.error) {
+            body.innerHTML = `<div class="changelog-placeholder">${escapeHtml(getMsg('changelog_failed'))}</div>`;
+            return;
+        }
+
+        const entries = changelogState.data[changelogState.tab] || [];
+
+        if (!entries.length) {
+            body.innerHTML = `<div class="changelog-placeholder">${escapeHtml(getMsg('changelog_empty'))}</div>`;
+            return;
+        }
+
+        body.innerHTML = entries.map(e => `
+            <div class="changelog-entry">
+                <div class="changelog-entry-head">
+                    <span class="changelog-tag">${escapeHtml(e.tag)}</span>
+                    <span class="changelog-name">${escapeHtml(e.name || '')}</span>
+                    <span class="changelog-date">${escapeHtml(e.date || '')}</span>
+                </div>
+                ${e.body ? `<div class="changelog-text">${escapeHtml(e.body)}</div>` : ''}
+            </div>`).join('');
+    };
+
+    const loadChangelogs = () => {
+        if (changelogState.loaded) {
+            renderChangelog();
+            return;
+        }
+
+        renderChangelog();
+        const tracked = appState.upstreamTracked || '3.7.1';
+
+        Promise.all([
+            fetchReleases('upcyan/PYAS_cyanmod', null).catch(() => null),
+            fetchReleases('87owo/PYAS', tracked).catch(() => null)
+        ]).then(([cyanmod, upstream]) => {
+            const failed = cyanmod === null && upstream === null;
+            changelogState.data = { cyanmod: cyanmod || [], upstream: upstream || [], tracked, error: failed };
+            changelogState.loaded = true;
+            renderChangelog();
+        });
+    };
+
+    document.querySelectorAll('.changelog-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.changelog-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            changelogState.tab = tab.dataset.tab;
+            renderChangelog();
+            if (!changelogState.loaded) loadChangelogs();
         });
     });
     
@@ -1247,6 +1520,24 @@ document.addEventListener('DOMContentLoaded', () => {
     renderDataGrid('#popup_window', [], cols.popup, 'value', false);
     renderDataGrid('#log_export_window', [], cols.log, 'id', true);
     renderDataGrid('#netmon_window', [], cols.netmon, 'pid', false);
+
+    let gridResizeTimer = null;
+    const rescaleAllGrids = () => {
+        document.querySelectorAll('.manage-widget, .virus-widget').forEach(widget => {
+            const state = widget.gridState;
+            if (!state || !Array.isArray(state.colWidths) || !state.colWidths.length) return;
+            const containerWidth = widget.clientWidth || 800;
+            const availableWidth = Math.max(containerWidth - 60 - (state.colWidths.length * 16), 400);
+            const total = state.colWidths.reduce((sum, w) => sum + w, 0);
+            if (total <= 0) return;
+            state.colWidths = state.colWidths.map(w => Math.max((w / total) * availableWidth, 40));
+            state.colWidths.forEach((w, idx) => widget.style.setProperty(`--col-${idx}`, `${w}px`));
+        });
+    };
+    window.addEventListener('resize', () => {
+        clearTimeout(gridResizeTimer);
+        gridResizeTimer = setTimeout(rescaleAllGrids, 120);
+    });
 
     let pywebviewInitStarted = false;
     let pywebviewInitReady = false;
@@ -1302,7 +1593,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 translateText(lang);
                 updateCustomSelectUI('theme_select', theme);
                 updateCustomSelectUI('lang_select', lang);
-                const switchMap = ["process_switch", "suspend_switch", "load_switch", "document_switch", "system_switch", "network_switch", "driver_switch", "sensitive_switch", "extension_switch", "cloud_switch", "suffix_switch", "autostart_switch", "context_switch"];
+                const versionChip = document.getElementById('about_version');
+                if (versionChip) versionChip.textContent = 'v' + (cfg.version || '');
+                appState.upstreamTracked = cfg.upstream_tracked || '3.7.1';
+                const timeoutInput = document.getElementById('interactive_timeout_input');
+                if (timeoutInput) {
+                    const parsed = parseInt(cfg.interactive_timeout, 10);
+                    timeoutInput.value = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 5), 300) : 30;
+                    timeoutInput.disabled = !cfg.interactive_switch;
+                }
+                const switchMap = ["process_switch", "suspend_switch", "load_switch", "document_switch", "system_switch", "network_switch", "driver_switch", "sensitive_switch", "extension_switch", "cloud_switch", "suffix_switch", "autostart_switch", "context_switch", "interactive_switch"];
                 document.querySelectorAll('.toggle-switch input').forEach((toggle, index) => {
                     if (appState.firstLaunch) {
                         toggle.checked = false;

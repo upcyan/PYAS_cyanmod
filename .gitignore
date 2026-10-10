@@ -1,0 +1,12 @@
+__pycache__/
+build/
+dist/
+Output/
+Payload/
+Redist/
+SetupResources/
+versionfile.txt
+*.pyc
+PYAS.spec
+.zwork/
+_release_notes.md

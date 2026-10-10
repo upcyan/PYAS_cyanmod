@@ -152,14 +152,18 @@ class RealtimeMixin:
                 self.cloud_check(file_path)
 
                 if result:
-                    self._terminate_process_handle(h, pid=pid)
-                    self.write_log(
-                        "BLOCK",
-                        "Process Block",
-                        pid=pid,
-                        source=file_path,
-                        file_hash=self.calc_file_hash(file_path),
-                    )
+                    if self.request_block_decision("Process Block", source=file_path, pid=pid):
+                        self._terminate_process_handle(h, pid=pid)
+                        self.write_log(
+                            "BLOCK",
+                            "Process Block",
+                            pid=pid,
+                            source=file_path,
+                            file_hash=self.calc_file_hash(file_path),
+                        )
+                    else:
+                        self.write_log("INFO", "Process Allow", pid=pid, source=file_path)
+
                     virus_found = True
                     break
 
@@ -167,14 +171,21 @@ class RealtimeMixin:
                 hidden_virus_path = self.scan_process_memory(pid, h)
 
                 if hidden_virus_path:
-                    self._terminate_process_handle(h, pid=pid)
-                    self.write_log(
-                        "BLOCK",
-                        "Process DLL Block",
-                        pid=pid,
-                        source=hidden_virus_path,
-                        file_hash=self.calc_file_hash(hidden_virus_path),
-                    )
+                    if self.request_block_decision(
+                        "Process DLL Block", source=hidden_virus_path, pid=pid
+                    ):
+                        self._terminate_process_handle(h, pid=pid)
+                        self.write_log(
+                            "BLOCK",
+                            "Process DLL Block",
+                            pid=pid,
+                            source=hidden_virus_path,
+                            file_hash=self.calc_file_hash(hidden_virus_path),
+                        )
+                    else:
+                        self.write_log(
+                            "INFO", "Process DLL Allow", pid=pid, source=hidden_virus_path
+                        )
 
         finally:
             if suspended:
@@ -470,18 +481,30 @@ class RealtimeMixin:
                 self.cloud_check(file_path)
 
                 if result:
-                    if (
-                        self.manage_named_list(
-                            "quarantine", [file_path], action="add", lock_func=self.lock_file
-                        )
-                        > 0
-                    ):
-                        self.write_log(
-                            "BLOCK",
-                            "File Block",
-                            source=file_path,
-                            file_hash=self.calc_file_hash(file_path),
-                        )
+                    with self.lock_config:
+                        interactive_mode = self.pyas_config.get("interactive_switch", False)
+
+                    if interactive_mode:
+                        self.lock_file(file_path, True, quiet=True)
+
+                    if self.request_block_decision("File Block", source=file_path):
+                        if (
+                            self.manage_named_list(
+                                "quarantine", [file_path], action="add", lock_func=self.lock_file
+                            )
+                            > 0
+                        ):
+                            self.write_log(
+                                "BLOCK",
+                                "File Block",
+                                source=file_path,
+                                file_hash=self.calc_file_hash(file_path),
+                            )
+                    else:
+                        if interactive_mode:
+                            self.lock_file(file_path, False, quiet=True)
+
+                        self.write_log("INFO", "File Allow", source=file_path)
             finally:
                 self.kernel32.CloseHandle(gate_handle)
         except Exception:
@@ -537,15 +560,22 @@ class RealtimeMixin:
                     and hasattr(self.heuristic, "network")
                     and remote_ip in self.heuristic.network
                 ):
-                    self._terminate_process_handle(h, pid=pid)
-                    self.write_log(
-                        "BLOCK",
-                        "Network Block",
-                        pid=pid,
-                        source=file_path,
-                        target=remote_ip,
-                        file_hash=self.calc_file_hash(file_path),
-                    )
+                    if self.request_block_decision(
+                        "Network Block", source=file_path, target=remote_ip, pid=pid
+                    ):
+                        self._terminate_process_handle(h, pid=pid)
+                        self.write_log(
+                            "BLOCK",
+                            "Network Block",
+                            pid=pid,
+                            source=file_path,
+                            target=remote_ip,
+                            file_hash=self.calc_file_hash(file_path),
+                        )
+                    else:
+                        self.write_log(
+                            "INFO", "Network Allow", pid=pid, source=file_path, target=remote_ip
+                        )
 
             finally:
                 self.kernel32.CloseHandle(h)

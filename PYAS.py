@@ -32,6 +32,7 @@ from PIL import Image
 from socketserver import ThreadingTCPServer
 from webview.dom import DOMEventHandler
 from PYAS_Engine import sign_scanner, rule_scanner, pe_scanner, cloud_scanner
+from PYAS_Dialog import MINMAXINFO
 from PYAS_Protect import ProtectMixin
 from PYAS_Scanner import ScannerMixin
 from PYAS_Tools import (
@@ -58,7 +59,7 @@ from PYAS_Tools import (
 )
 
 
-PYAS_WINDOW_TITLE = "PYAS Security"
+PYAS_WINDOW_TITLE = "PYAS Security Cyanmod"
 WM_COPYDATA = 0x004A
 SMTO_ABORTIFHUNG = 0x0002
 SMTO_ERRORONEXIT = 0x0020
@@ -225,7 +226,9 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
             if not self.send_existing_window_message(hwnd, PYAS_MESSAGE_QUIT, timeout=5000):
                 return 2
 
-            return 0 if self.wait_for_existing_shutdown() else 2
+            # 退出只要求主程序窗口关闭;驱动服务的删除由安装器的
+            # FinalizeDriverRemoval 随后专门执行,这里等待服务删除只会超时失败。
+            return 0 if self.wait_for_existing_shutdown(require_service_removal=False) else 2
 
         if "-driver-uninstall" in self.args_pyas:
             if not self.send_existing_window_message(
@@ -366,7 +369,7 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
             ),
             pystray.MenuItem(lambda item: self.get_tray_text("exit_app"), self.close),
         )
-        self.tray_icon = pystray.Icon("PYAS", self.get_app_icon(), "PYAS Security", menu)
+        self.tray_icon = pystray.Icon("PYAS", self.get_app_icon(), "PYAS Security Cyanmod", menu)
         self.tray_icon.run_detached()
 
     def tray_check_update(self, icon=None, item=None):
@@ -482,6 +485,91 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
 
     def set_window(self, window):
         self._window = window
+
+    RESIZE_WINDOW_MIN_WIDTH = 720
+    RESIZE_WINDOW_MIN_HEIGHT = 560
+
+    def _find_main_hwnd(self):
+        return self.user32.FindWindowW(None, PYAS_WINDOW_TITLE)
+
+    def begin_window_resize(self, direction):
+        """记录 JS 边缘热区拖拽的起始窗口矩形。WebView2 持有鼠标捕获,
+        原生 SC_SIZE 缩放循环收不到鼠标移动,因此缩放与拖动一样由 JS
+        追踪 mousemove 增量、这里直接 SetWindowPos。"""
+        direction = str(direction or "").lower()
+
+        if not direction or not all(ch in "nsew" for ch in direction):
+            return False
+
+        hwnd = self._find_main_hwnd()
+
+        if not hwnd:
+            return False
+
+        rect = RECT()
+
+        if not self.user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return False
+
+        self._resize_state = {
+            "dir": direction,
+            "left": rect.left,
+            "top": rect.top,
+            "right": rect.right,
+            "bottom": rect.bottom,
+        }
+        return True
+
+    def update_window_resize(self, dx, dy):
+        state = getattr(self, "_resize_state", None)
+
+        if not state:
+            return False
+
+        hwnd = self._find_main_hwnd()
+
+        if not hwnd:
+            return False
+
+        scale = 1.0
+
+        try:
+            if hasattr(self.user32, "GetDpiForWindow"):
+                scale = (self.user32.GetDpiForWindow(hwnd) or 96) / 96.0
+
+        except Exception:
+            scale = 1.0
+
+        try:
+            dx = int(float(dx) * scale)
+            dy = int(float(dy) * scale)
+        except (TypeError, ValueError):
+            return False
+
+        direction = state["dir"]
+        left, top = state["left"], state["top"]
+        right, bottom = state["right"], state["bottom"]
+        min_w = self.RESIZE_WINDOW_MIN_WIDTH
+        min_h = self.RESIZE_WINDOW_MIN_HEIGHT
+
+        if "e" in direction:
+            right = max(state["right"] + dx, state["left"] + min_w)
+
+        if "s" in direction:
+            bottom = max(state["bottom"] + dy, state["top"] + min_h)
+
+        if "w" in direction:
+            left = min(state["left"] + dx, state["right"] - min_w)
+
+        if "n" in direction:
+            top = min(state["top"] + dy, state["bottom"] - min_h)
+
+        self.user32.SetWindowPos(hwnd, None, left, top, right - left, bottom - top, 0x0004)
+        return True
+
+    def end_window_resize(self):
+        self._resize_state = None
+        return True
 
     def minimize(self):
         if self._window:
@@ -657,17 +745,62 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
             self.engine_initialized = True
 
         self.start_daemon_thread(self.init_engine_thread)
+        self.start_daemon_thread(self.notification_permission_watch)
 
-    def trigger_block_notification(self, action, source, target, code):
-        if action not in [
-            "Process Block",
-            "Process DLL Block",
-            "File Block",
-            "Network Block",
-            "Driver Block",
-        ]:
+    def notification_permission_watch(self):
+        time.sleep(4)
+
+        try:
+            status = self.check_notification_permission()
+        except Exception:
+            log_exception("PYAS._MainMixin.notification_permission_watch")
             return
 
+        if not status.get("supported") or status.get("enabled", True):
+            return
+
+        self.write_log(
+            "WARN",
+            "Notification Permission",
+            detail="Windows notifications are disabled",
+            success=False,
+        )
+
+        title = self._loc(
+            {
+                "traditional_switch": "提示",
+                "simplified_switch": "提示",
+                "english_switch": "Prompt",
+                "japanese_switch": "プロンプト",
+                "korean_switch": "프롬프트",
+                "french_switch": "Indication",
+                "spanish_switch": "Aviso",
+                "hindi_switch": "सुझाव",
+                "arabic_switch": "تلميح",
+                "russian_switch": "Подсказка",
+                "slovenian_switch": "Namig",
+            }
+        )
+        message = self._loc(
+            {
+                "traditional_switch": "Windows 通知權限已被禁用，攔截通知將無法顯示。\n是否開啟系統通知設定？",
+                "simplified_switch": "Windows 通知权限已被禁用，拦截通知将无法显示。\n是否打开系统通知设置？",
+                "english_switch": "Windows notifications are disabled. Threat notifications will not be shown.\nOpen Windows notification settings now?",
+                "japanese_switch": "Windows の通知が無効になっています。脅威の通知は表示されません。\n通知設定を開きますか？",
+                "korean_switch": "Windows 알림이 비활성화되어 있습니다. 위협 알림이 표시되지 않습니다.\n알림 설정을 여시겠습니까?",
+                "french_switch": "Les notifications Windows sont désactivées. Les alertes de menaces ne seront pas affichées.\nOuvrir les paramètres de notification ?",
+                "spanish_switch": "Las notificaciones de Windows están desactivadas. Las alertas de amenazas no se mostrarán.\n¿Abrir la configuración de notificaciones?",
+                "hindi_switch": "Windows अधिसूचनाएँ अक्षम हैं। खतरे की सूचनाएँ नहीं दिखेंगी।\nअभी Windows अधिसूचना सेटिंग खोलें?",
+                "arabic_switch": "إشعارات Windows معطلة. لن تظهر تنبيهات التهديدات.\nهل تريد فتح إعدادات الإشعارات الآن؟",
+                "russian_switch": "Уведомления Windows отключены. Оповещения об угрозах не будут отображаться.\nОткрыть настройки уведомлений?",
+                "slovenian_switch": "Obvestila Windows so onemogočena. Opozorila o grožnjah ne bodo prikazana.\nAli želite odpreti nastavitve obvestil?",
+            }
+        )
+
+        if self.show_confirm(title, message):
+            self.open_notification_settings()
+
+    def get_block_action_title(self, action):
         titles = {
             "Process Block": {
                 "traditional_switch": "進程防護",
@@ -734,7 +867,31 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
                 "russian_switch": "Защита драйверов",
                 "slovenian_switch": "Zaščita gonilnikov",
             },
+            "Deferred Scan Block": {
+                "traditional_switch": "檔案防護",
+                "simplified_switch": "文件防护",
+                "english_switch": "File Protection",
+                "japanese_switch": "ファイル保護",
+                "korean_switch": "파일 보호",
+                "french_switch": "Protection des Fichiers",
+                "spanish_switch": "Protección de Archivos",
+                "hindi_switch": "फ़ाइल सुरक्षा",
+                "arabic_switch": "حماية الملفات",
+                "russian_switch": "Защита файлов",
+                "slovenian_switch": "Zaščita datotek",
+            },
         }
+        return self._loc(titles.get(action, {}))
+
+    def trigger_block_notification(self, action, source, target, code):
+        if action not in [
+            "Process Block",
+            "Process DLL Block",
+            "File Block",
+            "Network Block",
+            "Driver Block",
+        ]:
+            return
 
         path = source or ""
         messages = {
@@ -751,7 +908,7 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
             "slovenian_switch": f"Grožnja odpravljena: {path}",
         }
 
-        title = self._loc(titles.get(action, {}))
+        title = self.get_block_action_title(action)
         message = self._loc(messages)
 
         try:
@@ -1043,8 +1200,20 @@ class WindowHook:
         self.WM_CLOSE = 0x0010
         self.WM_COPYDATA = WM_COPYDATA
         self.WM_SYSCOMMAND = 0x0112
+        self.WM_GETMINMAXINFO = 0x0024
         self.SC_CLOSE = 0xF060
         self.HTCAPTION = 2
+        self.HTLEFT = 10
+        self.HTRIGHT = 11
+        self.HTTOP = 12
+        self.HTTOPLEFT = 13
+        self.HTTOPRIGHT = 14
+        self.HTBOTTOM = 15
+        self.HTBOTTOMLEFT = 16
+        self.HTBOTTOMRIGHT = 17
+        self.RESIZE_BORDER = 8
+        self.MIN_WINDOW_WIDTH = 720
+        self.MIN_WINDOW_HEIGHT = 560
         self.GWLP_WNDPROC = -4
 
         self.RECT = RECT
@@ -1110,19 +1279,18 @@ class WindowHook:
                     ctypes.c_uint,
                     ctypes.c_void_p,
                 ]
-                self.user32.ChangeWindowMessageFilter.argtypes = [ctypes.c_uint, ctypes.c_uint]
-                self.user32.ChangeWindowMessageFilter.restype = ctypes.wintypes.BOOL
 
-                if not self.user32.ChangeWindowMessageFilter(PYAS_MAINTENANCE_MESSAGE, 0):
-                    raise OSError("Could not remove process-wide maintenance message allowance")
-
+                # MSGFLT_ALLOW=1: 允许(可能未提权的)安装器等进程投递维护消息。
+                # 上游原代码使用的 ChangeWindowMessageFilter(msg, 0) 参数非法,
+                # 必然失败并导致 maintenance_channel_ready 永远为 False,
+                # 使 -quit 的退出消息被窗口过程直接忽略。
                 if not self.user32.ChangeWindowMessageFilterEx(
-                    hwnd, PYAS_MAINTENANCE_MESSAGE, 2, None
+                    hwnd, PYAS_MAINTENANCE_MESSAGE, 1, None
                 ):
-                    raise OSError("Could not protect maintenance message channel")
+                    raise OSError("Could not allow maintenance message channel")
 
-                self.maintenance_channel_ready = True
                 self.user32.ChangeWindowMessageFilterEx(hwnd, self.WM_COPYDATA, 1, None)
+                self.maintenance_channel_ready = True
             except Exception:
                 log_exception("PYAS.WindowHook.hook:732")
                 pass
@@ -1135,11 +1303,9 @@ class WindowHook:
 
     def wndproc(self, hwnd, msg, wparam, lparam):
         if msg == PYAS_MAINTENANCE_MESSAGE:
-            if (
-                not getattr(self, "maintenance_channel_ready", False)
-                or wparam not in PYAS_MAINTENANCE_COMMANDS
-                or not self.api_ref
-            ):
+            # maintenance_channel_ready 只作为诊断信息,不作为硬门:
+            # 即使消息过滤器配置失败,退出/卸载链路也必须保持可用。
+            if wparam not in PYAS_MAINTENANCE_COMMANDS or not self.api_ref:
                 return 0
 
             uninstall = wparam in (PYAS_MESSAGE_QUIT, PYAS_MESSAGE_DRIVER_UNINSTALL)
@@ -1204,6 +1370,46 @@ class WindowHook:
 
             if rect.top <= y <= rect.top + 44 and rect.left <= x <= rect.right - 150:
                 return self.HTCAPTION
+
+            border = self.RESIZE_BORDER
+            on_left = 0 <= x - rect.left < border
+            on_right = 0 <= rect.right - x < border
+            on_top = 0 <= y - rect.top < border
+            on_bottom = 0 <= rect.bottom - y < border
+
+            if on_top and on_left:
+                return self.HTTOPLEFT
+
+            if on_top and on_right:
+                return self.HTTOPRIGHT
+
+            if on_bottom and on_left:
+                return self.HTBOTTOMLEFT
+
+            if on_bottom and on_right:
+                return self.HTBOTTOMRIGHT
+
+            if on_left:
+                return self.HTLEFT
+
+            if on_right:
+                return self.HTRIGHT
+
+            if on_top:
+                return self.HTTOP
+
+            if on_bottom:
+                return self.HTBOTTOM
+
+        if msg == self.WM_GETMINMAXINFO:
+            try:
+                info = MINMAXINFO.from_address(lparam)
+                info.ptMinTrackSize.x = self.MIN_WINDOW_WIDTH
+                info.ptMinTrackSize.y = self.MIN_WINDOW_HEIGHT
+                return 0
+            except Exception:
+                log_exception("PYAS.WindowHook.wndproc.getminmaxinfo")
+                pass
 
         if msg == self.WM_DPICHANGED:
             try:

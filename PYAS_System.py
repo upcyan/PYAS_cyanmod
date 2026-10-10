@@ -1,5 +1,6 @@
 from PYAS_Diagnostics import log_exception
 import os
+import sys
 import time
 import shutil
 import winreg
@@ -594,3 +595,107 @@ class SystemMixin:
         except Exception:
             log_exception("PYAS_System.SystemMixin.check_process_survival:371")
             pass
+
+    def check_notification_permission(self):
+        result = {
+            "supported": False,
+            "enabled": True,
+            "global_enabled": True,
+            "app_enabled": True,
+            "detail": "",
+        }
+
+        try:
+            if sys.getwindowsversion().major < 10:
+                result["detail"] = "windows below 10 has no notification settings"
+                return result
+
+            result["supported"] = True
+            global_enabled = True
+
+            try:
+                with winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    r"Software\Microsoft\Windows\CurrentVersion\PushNotifications",
+                    0,
+                    winreg.KEY_READ,
+                ) as key:
+                    value, _ = winreg.QueryValueEx(key, "ToastEnabled")
+
+                    if int(value) == 0:
+                        global_enabled = False
+
+            except FileNotFoundError:
+                pass
+
+            if global_enabled:
+                try:
+                    with winreg.OpenKey(
+                        winreg.HKEY_CURRENT_USER,
+                        r"Software\Microsoft\Windows\CurrentVersion\Notifications\Settings",
+                        0,
+                        winreg.KEY_READ,
+                    ) as key:
+                        value, _ = winreg.QueryValueEx(key, "NOC_GLOBAL_SETTING_TOASTS_ENABLED")
+
+                        if int(value) == 0:
+                            global_enabled = False
+
+                except FileNotFoundError:
+                    pass
+
+            app_enabled = True
+            exe_path = os.path.normcase(os.path.normpath(self.file_pyas))
+            exe_name = os.path.basename(exe_path)
+            settings_path = r"Software\Microsoft\Windows\CurrentVersion\Notifications\Settings"
+
+            try:
+                with winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER, settings_path, 0, winreg.KEY_READ
+                ) as key:
+                    index = 0
+
+                    while True:
+                        try:
+                            subkey_name = winreg.EnumKey(key, index)
+                        except OSError:
+                            break
+
+                        index += 1
+                        normalized = os.path.normcase(subkey_name)
+
+                        if normalized != exe_path and not normalized.endswith("\\" + exe_name):
+                            continue
+
+                        try:
+                            with winreg.OpenKey(key, subkey_name, 0, winreg.KEY_READ) as subkey:
+                                value, _ = winreg.QueryValueEx(subkey, "Enabled")
+
+                                if int(value) == 0:
+                                    app_enabled = False
+                                    break
+
+                        except FileNotFoundError:
+                            continue
+
+            except FileNotFoundError:
+                pass
+
+            result["global_enabled"] = global_enabled
+            result["app_enabled"] = app_enabled
+            result["enabled"] = global_enabled and app_enabled
+
+        except Exception as error:
+            log_exception("PYAS_System.SystemMixin.check_notification_permission")
+            result["detail"] = str(error)
+
+        return result
+
+    def open_notification_settings(self):
+        try:
+            os.startfile("ms-settings:notifications")
+            return True
+        except Exception as error:
+            log_exception("PYAS_System.SystemMixin.open_notification_settings")
+            self.write_log("WARN", "open_notification_settings", detail=str(error), success=False)
+            return False

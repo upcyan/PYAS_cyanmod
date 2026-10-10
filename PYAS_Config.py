@@ -1,4 +1,5 @@
 from PYAS_Diagnostics import log_exception
+from PYAS_Version import UPSTREAM_TRACKED
 import os
 import copy
 import json
@@ -194,6 +195,7 @@ class ConfigMixin:
         with self.lock_config:
             cfg = self.pyas_config.copy()
             cfg["autostart_mode"] = self.autostart_mode
+            cfg["upstream_tracked"] = UPSTREAM_TRACKED
 
             rules = []
 

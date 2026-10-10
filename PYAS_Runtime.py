@@ -101,6 +101,7 @@ class RuntimeMixin:
         self.lock_proc = threading.RLock()
         self.lock_net = threading.RLock()
         self.lock_io = threading.RLock()
+        self.lock_interactive = threading.RLock()
 
         self.pyas_default = {
             "version": VERSION,
@@ -162,6 +163,8 @@ class RuntimeMixin:
             "suffix_switch": True,
             "autostart_switch": True,
             "context_switch": True,
+            "interactive_switch": False,
+            "interactive_timeout": 30,
             "custom_rule": [],
             "white_list": [],
             "quarantine": [],

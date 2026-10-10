@@ -398,28 +398,242 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
             log_exception("PYAS_Tools.ToolsMixin.compare_versions:259")
             return False
 
+    GITHUB_RELEASE_HEADERS = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "PYAS-Cyanmod",
+    }
+
+    def _system_proxy_candidates(self):
+        candidates = []
+
+        for key in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+            value = os.environ.get(key, "").strip()
+
+            if value:
+                candidates.append(value if "://" in value else "http://" + value)
+
+        try:
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+                0,
+                winreg.KEY_READ,
+            ) as key:
+                try:
+                    server, _ = winreg.QueryValueEx(key, "ProxyServer")
+
+                    if server and "=" not in server:
+                        candidates.append("http://" + server)
+
+                except FileNotFoundError:
+                    pass
+
+                try:
+                    pac, _ = winreg.QueryValueEx(key, "AutoConfigURL")
+                    match = re.match(r"https?://([^/:]+):(\d+)", pac or "")
+
+                    if match and match.group(1) in ("127.0.0.1", "localhost"):
+                        candidates.append(f"http://127.0.0.1:{match.group(2)}")
+
+                except FileNotFoundError:
+                    pass
+
+        except Exception:
+            pass
+
+        seen = set()
+        unique = []
+
+        for item in candidates:
+            if item not in seen:
+                seen.add(item)
+                unique.append(item)
+
+        return unique
+
+    def _github_get(self, url, **kwargs):
+        """GitHub 请求:先直连,失败后依次尝试系统代理(环境变量/注册表/PAC 端口)。"""
+        kwargs.setdefault("timeout", 15)
+        kwargs.setdefault("headers", self.GITHUB_RELEASE_HEADERS)
+
+        try:
+            return requests.get(url, **kwargs)
+
+        except requests.RequestException:
+            pass
+
+        for proxy in self._system_proxy_candidates():
+            try:
+                return requests.get(url, proxies={"http": proxy, "https": proxy}, **kwargs)
+
+            except requests.RequestException:
+                continue
+
+        return requests.get(url, **kwargs)
+
     def check_update(self):
         try:
             current = self.pyas_config.get("version", "0.0.0")
-            j = requests.get(
-                "https://api.github.com/repos/87owo/PYAS/releases/latest",
-                headers={"Accept": "application/vnd.github+json", "User-Agent": "PYAS"},
-                timeout=10,
+            j = self._github_get(
+                "https://api.github.com/repos/upcyan/PYAS_cyanmod/releases/latest"
             ).json()
             latest = str(j.get("tag_name") or j.get("name") or "").strip()
-            page = j.get("html_url") or "https://github.com/87owo/PYAS/releases"
+            page = j.get("html_url") or "https://github.com/upcyan/PYAS_cyanmod/releases"
+            asset = None
+
+            for item in j.get("assets") or []:
+                name = str(item.get("name") or "")
+                lower = name.lower()
+
+                if lower.endswith(".exe") or lower.endswith(".msi"):
+                    asset = {
+                        "name": name,
+                        "url": item.get("browser_download_url"),
+                        "size": int(item.get("size") or 0),
+                    }
+
+                    if lower.endswith(".exe"):
+                        break
 
             if latest:
                 if not self.compare_versions(current, latest) and current != latest:
-                    return {"has_update": True, "latest": latest, "current": current, "url": page}
+                    return {
+                        "has_update": True,
+                        "latest": latest,
+                        "current": current,
+                        "url": page,
+                        "asset": asset,
+                    }
 
-                return {"has_update": False, "latest": latest, "current": current, "url": page}
+                return {
+                    "has_update": False,
+                    "latest": latest,
+                    "current": current,
+                    "url": page,
+                    "asset": asset,
+                }
 
         except Exception:
             log_exception("PYAS_Tools.ToolsMixin.check_update:274")
             pass
 
         return {"error": True}
+
+    def download_update(self, url, file_name=None):
+        with self.lock_update:
+            if getattr(self, "_update_downloading", False):
+                return {"success": False, "error": "download already in progress"}
+
+            if not isinstance(url, str) or not url.lower().startswith("https://github.com/"):
+                return {"success": False, "error": "invalid download url"}
+
+            self._update_downloading = True
+
+        threading.Thread(
+            target=self._download_update_worker, args=(url, file_name), daemon=True
+        ).start()
+        return {"success": True, "started": True}
+
+    def _download_update_worker(self, url, file_name):
+        result = {"success": False, "path": None, "error": None, "size": 0}
+        temp_path = None
+
+        try:
+            safe_name = os.path.basename(str(file_name) or url.rstrip("/").split("/")[-1])
+            safe_name = safe_name.split("?")[0] or "PYAS_Setup.exe"
+
+            if not safe_name.lower().endswith((".exe", ".msi")):
+                safe_name += ".exe"
+
+            downloads_dir = os.path.join(self.path_user, "Downloads")
+            os.makedirs(downloads_dir, exist_ok=True)
+            target_path = os.path.join(downloads_dir, safe_name)
+            temp_path = target_path + ".part"
+            response = self._github_get(url, stream=True)
+            response.raise_for_status()
+            total = int(response.headers.get("Content-Length") or 0)
+            received = 0
+            next_report = 0.0
+
+            with open(temp_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=65536):
+                    if not chunk:
+                        continue
+
+                    f.write(chunk)
+                    received += len(chunk)
+                    now = time.time()
+
+                    if now >= next_report:
+                        next_report = now + 0.2
+                        self._push_update_progress(received, total)
+
+            if temp_path:
+                os.replace(temp_path, target_path)
+                temp_path = None
+
+            result = {"success": True, "path": target_path, "error": None, "size": received}
+            self.write_log("INFO", "Update Download", detail=f"Saved {target_path}")
+
+        except Exception as error:
+            log_exception("PYAS_Tools.ToolsMixin.download_update")
+            result = {"success": False, "path": None, "error": str(error), "size": 0}
+            self.write_log("WARN", "Update Download", detail=str(error), success=False)
+
+        finally:
+            self._update_downloading = False
+
+            if temp_path:
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    log_exception("PYAS_Tools.ToolsMixin.download_update.cleanup")
+                    pass
+
+            self._emit_ui_js(
+                f"if(window.updateDownloadFinished) window.updateDownloadFinished({json.dumps(result)});"
+            )
+
+    def _push_update_progress(self, received, total):
+        if total > 0:
+            percent = min(100, int(received * 100 / total))
+        else:
+            percent = -1
+
+        payload = json.dumps({"received": received, "total": total, "percent": percent})
+        self._emit_ui_js(
+            f"if(window.updateDownloadProgress) window.updateDownloadProgress({payload});"
+        )
+
+    def _emit_ui_js(self, command):
+        try:
+            if self._window:
+                self.ui_queue.put(command)
+        except Exception:
+            log_exception("PYAS_Tools.ToolsMixin._emit_ui_js")
+            pass
+
+    def run_update_installer(self, file_path):
+        try:
+            path = os.path.expandvars(str(file_path)).strip('"').strip("'")
+            downloads_dir = os.path.normcase(os.path.join(self.path_user, "Downloads"))
+
+            if os.path.normcase(os.path.dirname(path)) != downloads_dir:
+                return False
+
+            if not os.path.isfile(path):
+                return False
+
+            if not os.path.basename(path).lower().endswith((".exe", ".msi")):
+                return False
+
+            os.startfile(path)
+            return True
+
+        except Exception as error:
+            log_exception("PYAS_Tools.ToolsMixin.run_update_installer")
+            self.write_log("WARN", "Update Install", detail=str(error), success=False)
+            return False
 
     def calc_file_hash(self, file_path, block_size=65536):
         try:
