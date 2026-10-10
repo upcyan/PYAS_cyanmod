@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PYAS · Pending alerts</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/threat.css">
+    <script defer src="/static/js/i18n.js"></script>
+    <script defer src="/static/js/theme.js"></script>
+    <script defer src="/static/js/threat.js"></script>
+</head>
+<body class="threat-window">
+    <div class="app-container">
+        <header class="navigate-window pywebview-drag-region">
+            <div class="navigate-title">PYAS Security Cyanmod</div>
+            <div class="window-controls">
+                <button id="threat_minimize" class="ctrl-btn" type="button" aria-label="Minimize">
+                    <svg class="theme-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/></svg>
+                </button>
+                <button id="threat_close" class="ctrl-btn" type="button" aria-label="Minimize without deciding">
+                    <svg class="theme-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 6 12 12M18 6 6 18"/></svg>
+                </button>
+            </div>
+        </header>
+        <main class="threat-layout">
+            <aside class="threat-queue" aria-labelledby="queue_heading">
+                <div class="threat-queue-heading"><h2 id="queue_heading">Pending alerts</h2><span id="queue_count" class="version-chip" aria-live="polite">0</span></div>
+                <ol id="threat_queue_list"></ol>
+            </aside>
+            <section class="threat-detail" aria-labelledby="threat_title">
+                <div class="threat-summary">
+                    <svg class="theme-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v5m0 3h.01"/></svg>
+                    <h1 id="threat_title">Loading…</h1>
+                </div>
+                <div id="threat_message" class="threat-message" tabindex="0"></div>
+                <p id="threat_status" class="threat-status" role="status"></p>
+            </section>
+        </main>
+        <footer class="threat-footer">
+            <div id="threat_confirmation" class="hidden" role="group" aria-labelledby="threat_confirmation_text">
+                <p id="threat_confirmation_text"></p>
+                <button id="threat_confirm" class="action-btn modern-btn" type="button">Confirm</button>
+                <button id="threat_cancel" class="action-btn modern-btn" type="button">Cancel</button>
+            </div>
+            <label class="threat-repeat"><input id="threat_repeat" type="checkbox"><span id="threat_repeat_text"></span></label>
+            <div class="threat-actions">
+                <button id="threat_permanent" class="action-btn modern-btn" type="button" disabled>Always allow</button>
+                <button id="threat_allow" class="action-btn modern-btn" type="button" disabled>Allow this time</button>
+                <button id="threat_block" class="action-btn modern-btn primary-btn" type="button" disabled>Block</button>
+            </div>
+        </footer>
+    </div>
+</body>
+</html>

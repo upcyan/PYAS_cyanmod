@@ -160,6 +160,12 @@ pip install pandas scikit-learn lightgbm onnxmltools orjson
 
 ## Runtime requirements
 
+### Interactive alerts
+
+Interactive mode queues decisions in one window using the same theme and controls as the main interface. Automatic blocking on timeout is **off by default**, including for configurations saved before this option existed. Enable **Auto-block on timeout** in Settings to use a countdown; it starts only when an alert is displayed, never while it is queued. Settings apply to new alerts.
+
+Closing the alert window minimizes it without allowing or blocking anything. The Home page shows a pending-alert count and reopens the window. Alerts are processed in arrival order; new alerts do not replace the current decision. While awaiting a decision, the existing protection path may keep a process suspended or a file locked. Exiting PYAS cancels the queue and releases waiting protection calls using the block decision. A UI initialization failure also defaults to blocking and is recorded in diagnostics.
+
 - Windows 10 (May 2020 Update or newer) or Windows 11
 - 64-bit Windows for the included x64 driver
 - Microsoft Visual C++ Redistributable

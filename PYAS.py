@@ -9,6 +9,9 @@ import queue
 import platform
 import threading
 import logging
+from PYAS_WindowIdentity import find_main_window
+from PYAS_Encoding import decode_process_output
+from PYAS_MenuState import MenuRegistrationState
 from PYAS_Startup import (
     bootstrap_startup,
     check_webview_dependencies,
@@ -97,6 +100,9 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
         self.lock_logs = threading.RLock()
         self.lock_virus = threading.RLock()
         self.lock_file_ops = threading.RLock()
+        self._resize_lock = threading.RLock()
+        self._resize_state = None
+        self._window_interacting = False
 
         self.init_environ()
         self.init_windll()
@@ -123,7 +129,7 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
         deadline = time.monotonic() + timeout
 
         while time.monotonic() < deadline:
-            hwnd = self.user32.FindWindowW(None, PYAS_WINDOW_TITLE)
+            hwnd = find_main_window(PYAS_WINDOW_TITLE)
 
             if hwnd:
                 return hwnd
@@ -203,7 +209,7 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
         deadline = time.monotonic() + timeout
 
         while time.monotonic() < deadline:
-            window_closed = not self.user32.FindWindowW(None, PYAS_WINDOW_TITLE)
+            window_closed = not find_main_window(PYAS_WINDOW_TITLE)
             service_removed = not require_service_removal or self._is_driver_service_absent()
 
             if window_closed and service_removed:
@@ -478,7 +484,7 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
             self._window.restore()
             self._window.show()
 
-            hwnd = self.user32.FindWindowW(None, PYAS_WINDOW_TITLE)
+            hwnd = self._find_main_hwnd()
 
             if hwnd:
                 self.user32.SetForegroundWindow(hwnd)
@@ -486,19 +492,59 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
     def set_window(self, window):
         self._window = window
 
-    RESIZE_WINDOW_MIN_WIDTH = 720
-    RESIZE_WINDOW_MIN_HEIGHT = 560
-
     def _find_main_hwnd(self):
-        return self.user32.FindWindowW(None, PYAS_WINDOW_TITLE)
+        """按 PID+可见+面积定位主窗口,而不是按标题查找——
+        pystray 托盘的隐藏消息窗口与主窗口同名,FindWindow 会找错。"""
+        cached = getattr(self, "_cached_main_hwnd", None)
+
+        if cached and self.user32.IsWindow(cached):
+            return cached
+
+        pid = os.getpid()
+        found = []
+
+        ENUMPROC = ctypes.WINFUNCTYPE(
+            ctypes.wintypes.BOOL, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+
+        def enum_callback(hwnd, lparam):
+            owner = ctypes.wintypes.DWORD()
+            self.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+
+            if owner.value != pid or not self.user32.IsWindowVisible(hwnd):
+                return True
+
+            rect = ctypes.wintypes.RECT()
+            self.user32.GetWindowRect(hwnd, ctypes.byref(rect))
+            found.append(((rect.right - rect.left) * (rect.bottom - rect.top), hwnd))
+            return True
+
+        callback = ENUMPROC(enum_callback)
+        self.user32.EnumWindows(callback, 0)
+
+        if not found:
+            return None
+
+        hwnd = max(found)[1]
+        self._cached_main_hwnd = hwnd
+        return hwnd
+
+    RESIZE_DIRECTION_HIT = {
+        "w": 10,
+        "e": 11,
+        "n": 12,
+        "nw": 13,
+        "ne": 14,
+        "s": 15,
+        "sw": 16,
+        "se": 17,
+    }
 
     def begin_window_resize(self, direction):
-        """记录 JS 边缘热区拖拽的起始窗口矩形。WebView2 持有鼠标捕获,
-        原生 SC_SIZE 缩放循环收不到鼠标移动,因此缩放与拖动一样由 JS
-        追踪 mousemove 增量、这里直接 SetWindowPos。"""
-        direction = str(direction or "").lower()
+        """JS 边缘热区触发原生尺寸循环(SC_SIZE):拖动期间零桥调用,
+        由系统接管轨迹跟踪,最小尺寸由 WM_GETMINMAXINFO 原生钳制。"""
+        hit = self.RESIZE_DIRECTION_HIT.get(str(direction or "").lower())
 
-        if not direction or not all(ch in "nsew" for ch in direction):
+        if not hit:
             return False
 
         hwnd = self._find_main_hwnd()
@@ -506,71 +552,8 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
         if not hwnd:
             return False
 
-        rect = RECT()
-
-        if not self.user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-            return False
-
-        self._resize_state = {
-            "dir": direction,
-            "left": rect.left,
-            "top": rect.top,
-            "right": rect.right,
-            "bottom": rect.bottom,
-        }
+        self.user32.PostMessageW(hwnd, 0x0112, 0xF000 | hit, 0)
         return True
-
-    def update_window_resize(self, dx, dy):
-        state = getattr(self, "_resize_state", None)
-
-        if not state:
-            return False
-
-        hwnd = self._find_main_hwnd()
-
-        if not hwnd:
-            return False
-
-        scale = 1.0
-
-        try:
-            if hasattr(self.user32, "GetDpiForWindow"):
-                scale = (self.user32.GetDpiForWindow(hwnd) or 96) / 96.0
-
-        except Exception:
-            scale = 1.0
-
-        try:
-            dx = int(float(dx) * scale)
-            dy = int(float(dy) * scale)
-        except (TypeError, ValueError):
-            return False
-
-        direction = state["dir"]
-        left, top = state["left"], state["top"]
-        right, bottom = state["right"], state["bottom"]
-        min_w = self.RESIZE_WINDOW_MIN_WIDTH
-        min_h = self.RESIZE_WINDOW_MIN_HEIGHT
-
-        if "e" in direction:
-            right = max(state["right"] + dx, state["left"] + min_w)
-
-        if "s" in direction:
-            bottom = max(state["bottom"] + dy, state["top"] + min_h)
-
-        if "w" in direction:
-            left = min(state["left"] + dx, state["right"] - min_w)
-
-        if "n" in direction:
-            top = min(state["top"] + dy, state["bottom"] - min_h)
-
-        self.user32.SetWindowPos(hwnd, None, left, top, right - left, bottom - top, 0x0014)
-        return True
-
-    def end_window_resize(self):
-        self._resize_state = None
-        return True
-
     def toggle_maximize(self):
         try:
             if not self._window:
@@ -653,7 +636,7 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
         if self._window:
             self._window.minimize()
         else:
-            hwnd = self.user32.FindWindowW(None, PYAS_WINDOW_TITLE)
+            hwnd = self._find_main_hwnd()
 
             if hwnd:
                 self.user32.ShowWindow(hwnd, 6)
@@ -727,6 +710,7 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
 
             self.tray_icon = None
 
+        self.cancel_pending_threats()
         window = self._window
         self._window = None
 
@@ -1014,7 +998,7 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
     def show_confirm(self, title, message):
         return self.user32.MessageBoxW(0, message, title, 0x00000004 | 0x00000020) == 6
 
-    def register_context_menu(self, enable):
+    def register_context_menu(self, enable, retry=False):
         paths = [
             r"Software\Classes\*\shell\PYAS_Scan",
             r"Software\Classes\Directory\shell\PYAS_Scan",
@@ -1076,11 +1060,84 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
                     success=False,
                 )
 
-            return success
+            modern_success = self.register_modern_context_menu(enable, retry=retry)
+            modern_supported = sys.getwindowsversion().build >= 22000 and getattr(sys, 'frozen', False)
+            self._context_menu_mode = (
+                'modern' if enable and modern_supported and modern_success else
+                'legacy' if enable and success else 'failed' if enable else
+                'disabled' if modern_success and success else 'failed'
+            )
+            if getattr(self, 'ui_queue', None) is not None:
+                self.ui_queue.put('window.refreshContextMenuStatus?.();')
+            if not enable:
+                # Turning scanning off must remove both entries.
+                return modern_success and success
+
+            if success and not modern_success and not getattr(self, '_menu_attempt_skipped', False):
+                self.write_log(
+                    "INFO", "Context Menu Fallback",
+                    detail="Modern menu registration failed; scanning remains available in the original context menu (Show more options on Windows 11).",
+                    success=True,
+                )
+            # The modern helper is a no-op on Windows 10/source runs; it must
+            # not conceal a failed original-menu registration there.
+            return success or (modern_supported and modern_success)
         except Exception as error:
             log_exception("PYAS._MainMixin.register_context_menu:523")
             self.write_log("WARN", "register_context_menu", detail=str(error), success=False)
             return False
+
+    def get_context_menu_status(self):
+        notice = ''
+        state = getattr(self, '_menu_registration_state', None)
+        if state:
+            try:
+                notice = state.take_notice()
+            except Exception:
+                log_exception('PYAS.menu_notice_state')
+        mode = getattr(self, '_context_menu_mode', 'pending')
+        if mode == 'modern' and getattr(self, 'pyas_config', {}).get('classic_menu_switch'):
+            mode = 'legacy'
+        return {'mode': mode, 'notice': notice}
+
+    def register_modern_context_menu(self, enable, retry=False):
+        self._menu_attempt_skipped = False
+        if sys.getwindowsversion().build < 22000 or not getattr(sys, 'frozen', False):
+            return True
+        state = getattr(self, '_menu_registration_state', None)
+        if state is None:
+            state = self._menu_registration_state = MenuRegistrationState(self.path_pyas)
+        if enable and not retry and state.failed():
+            self._menu_attempt_skipped = True
+            return False
+
+        def remember(success, error=''):
+            try:
+                if enable or success:
+                    state.record(success, error)
+            except Exception:
+                log_exception('PYAS.menu_registration_state')
+            return success
+        menu_path = os.path.join(self.path_pyas, 'Menu')
+        script = os.path.join(menu_path, 'register_menu.ps1' if enable else 'unregister_menu.ps1')
+        if not os.path.isfile(script):
+            self.write_log('WARN', 'Modern Context Menu', detail='Registration files are missing', success=False)
+            return remember(False, 'Registration files are missing')
+        command = [os.path.join(self.path_system, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+            '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script]
+        if enable:
+            command.extend(['-ExternalLocation', self.path_pyas])
+        try:
+            result = subprocess.run(command, capture_output=True,
+                timeout=90, creationflags=subprocess.CREATE_NO_WINDOW)
+            detail = (decode_process_output(result.stdout) + decode_process_output(result.stderr)).strip()[:1500]
+            self.write_log('INFO' if result.returncode == 0 else 'WARN', 'Modern Context Menu',
+                detail=detail,
+                success=result.returncode == 0)
+            return remember(result.returncode == 0, detail if result.returncode else '')
+        except Exception as error:
+            log_exception('PYAS.register_modern_context_menu')
+            return remember(False, str(error))
 
     def trigger_context_scan(self, target):
         if self._window:
@@ -1227,6 +1284,10 @@ def get_frontend_asset_errors():
         os.path.join("Interface", "static", "css", "style.css"),
         os.path.join("Interface", "static", "js", "i18n.js"),
         os.path.join("Interface", "static", "js", "main.js"),
+        os.path.join("Interface", "static", "js", "theme.js"),
+        os.path.join("Interface", "static", "js", "threat.js"),
+        os.path.join("Interface", "static", "css", "threat.css"),
+        os.path.join("Interface", "templates", "threat.html"),
     ]
     errors = []
 
@@ -1346,7 +1407,7 @@ class WindowHook:
         if self.old_wndproc:
             return
 
-        hwnd = self.user32.FindWindowW(None, self.title)
+        hwnd = find_main_window(self.title, own_pid=os.getpid())
 
         if hwnd:
             self.old_wndproc = self.GetWindowLong(hwnd, self.GWLP_WNDPROC)
@@ -1382,6 +1443,8 @@ class WindowHook:
         return self.user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
     def wndproc(self, hwnd, msg, wparam, lparam):
+        if msg in (0x0231, 0x0232) and self.api_ref:  # WM_ENTER/EXITSIZEMOVE
+            self.api_ref._window_interacting = msg == 0x0231
         if msg == PYAS_MAINTENANCE_MESSAGE:
             # maintenance_channel_ready 只作为诊断信息,不作为硬门:
             # 即使消息过滤器配置失败,退出/卸载链路也必须保持可用。
@@ -1432,7 +1495,12 @@ class WindowHook:
 
             if sc_value in (self.SC_MAXIMIZE, self.SC_RESTORE):
                 self.api_ref._maximized = sc_value == self.SC_MAXIMIZE
-                self.api_ref._sync_maximize_icon()
+                # evaluate_js waits for the WebView thread; never call it from
+                # the native window procedure that thread may be waiting on.
+                self.api_ref.ui_queue.put(
+                    "window.syncMaximizeIcon && window.syncMaximizeIcon("
+                    + str(self.api_ref._maximized).lower() + ");"
+                )
 
         if msg == self.WM_CLOSE or (
             msg == self.WM_SYSCOMMAND and (wparam & 0xFFF0) == self.SC_CLOSE

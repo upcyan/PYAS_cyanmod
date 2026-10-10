@@ -152,7 +152,7 @@ class RealtimeMixin:
                 self.cloud_check(file_path)
 
                 if result:
-                    if self.request_block_decision("Process Block", source=file_path, pid=pid):
+                    if self.request_block_decision("Process Block", source=file_path, pid=pid, detection=result):
                         self._terminate_process_handle(h, pid=pid)
                         self.write_log(
                             "BLOCK",
@@ -487,7 +487,7 @@ class RealtimeMixin:
                     if interactive_mode:
                         self.lock_file(file_path, True, quiet=True)
 
-                    if self.request_block_decision("File Block", source=file_path):
+                    if self.request_block_decision("File Block", source=file_path, detection=result):
                         if (
                             self.manage_named_list(
                                 "quarantine", [file_path], action="add", lock_func=self.lock_file
@@ -561,7 +561,7 @@ class RealtimeMixin:
                     and remote_ip in self.heuristic.network
                 ):
                     if self.request_block_decision(
-                        "Network Block", source=file_path, target=remote_ip, pid=pid
+                        "Network Block", source=file_path, target=f'{remote_ip}:{remote_port}', pid=pid, detection={'remote_ip': remote_ip}
                     ):
                         self._terminate_process_handle(h, pid=pid)
                         self.write_log(

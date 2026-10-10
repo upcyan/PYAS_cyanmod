@@ -15,6 +15,7 @@ import requests
 import subprocess
 import ctypes
 import ctypes.wintypes
+from PYAS_Version import VERSION
 from concurrent.futures import ThreadPoolExecutor
 from PYAS_WinAPI import (
     COPYDATASTRUCT,
@@ -392,7 +393,8 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
         try:
             val1 = tuple(int(x) for x in re.findall(r"\d+", re.sub(r"^[vV]\s*", "", str(v1))))
             val2 = tuple(int(x) for x in re.findall(r"\d+", re.sub(r"^[vV]\s*", "", str(v2))))
-            return val1 >= val2
+            length = max(len(val1), len(val2))
+            return val1 + (0,) * (length - len(val1)) >= val2 + (0,) * (length - len(val2))
 
         except Exception:
             log_exception("PYAS_Tools.ToolsMixin.compare_versions:259")
@@ -457,7 +459,10 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
         kwargs.setdefault("headers", self.GITHUB_RELEASE_HEADERS)
 
         try:
-            return requests.get(url, **kwargs)
+            response = requests.get(url, **kwargs)
+            if response.status_code not in (502, 503, 504):
+                return response
+            response.close()
 
         except requests.RequestException:
             pass
@@ -472,20 +477,31 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
         return requests.get(url, **kwargs)
 
     def check_update(self):
+        repository = 'upcyan/PYAS_cyanmod'
         try:
-            current = self.pyas_config.get("version", "0.0.0")
+            current = VERSION
             # 不用 /releases/latest:连字符 tag(如 v3.7.1-1)会被 semver
             # 视为预发布而被 latest 端点跳过,列表取第一个非草稿更可靠
-            releases = self._github_get(
-                "https://api.github.com/repos/upcyan/PYAS_cyanmod/releases?per_page=10"
-            ).json()
-            latest_release = next(
-                (r for r in releases or [] if isinstance(r, dict) and not r.get("draft")),
-                None,
-            )
+            response = self._github_get(f'https://api.github.com/repos/{repository}/releases?per_page=100')
+            try:
+                if response.status_code == 404:
+                    return {'error': True, 'error_code': 'repository_unavailable', 'detail': repository}
+                if response.status_code in (403, 429):
+                    return {'error': True, 'error_code': 'rate_limited', 'detail': f'HTTP {response.status_code}'}
+                response.raise_for_status()
+                releases = response.json()
+            finally:
+                response.close()
+            if not isinstance(releases, list):
+                return {'error': True, 'error_code': 'invalid_response'}
+            candidates = [r for r in releases if isinstance(r, dict) and not r.get('draft') and not r.get('prerelease')
+                and re.fullmatch(r'[vV]?\d+(?:\.\d+){1,3}(?:-\d+)?', str(r.get('tag_name') or ''))]
+            latest_release = max(candidates, key=lambda r: tuple(int(n) for n in re.findall(r'\d+', r['tag_name'])) +
+                (0,) * (5 - len(re.findall(r'\d+', r['tag_name']))), default=None)
 
             if latest_release is None:
-                return {"error": True}
+                return {'has_update': False, 'current': current, 'latest': current, 'no_release': True,
+                    'url': f'https://github.com/{repository}/releases', 'asset': None}
 
             j = latest_release
             latest = str(j.get("tag_name") or j.get("name") or "").strip()
@@ -496,17 +512,22 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
                 name = str(item.get("name") or "")
                 lower = name.lower()
 
-                if lower.endswith(".exe") or lower.endswith(".msi"):
+                if lower.startswith('pyas_setup') and lower.endswith((".exe", ".msi")):
+                    asset_url = str(item.get('browser_download_url') or '')
+                    if not asset_url.startswith(f'https://github.com/{repository}/releases/download/'):
+                        continue
                     asset = {
                         "name": name,
                         "url": item.get("browser_download_url"),
                         "size": int(item.get("size") or 0),
+                        'digest': item.get('digest'),
                     }
 
                     if lower.endswith(".exe"):
                         break
 
             if latest:
+                self._checked_update_asset = asset
                 if not self.compare_versions(current, latest) and current != latest:
                     return {
                         "has_update": True,
@@ -524,11 +545,14 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
                     "asset": asset,
                 }
 
+        except requests.RequestException as error:
+            log_exception('PYAS_Tools.ToolsMixin.check_update.network')
+            return {'error': True, 'error_code': 'network_error', 'detail': type(error).__name__}
         except Exception:
             log_exception("PYAS_Tools.ToolsMixin.check_update:274")
             pass
 
-        return {"error": True}
+        return {"error": True, 'error_code': 'invalid_response'}
 
     def download_update(self, url, file_name=None):
         with self.lock_update:
@@ -537,6 +561,9 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
 
             if not isinstance(url, str) or not url.lower().startswith("https://github.com/"):
                 return {"success": False, "error": "invalid download url"}
+            asset = getattr(self, '_checked_update_asset', None)
+            if not asset or url != asset.get('url') or file_name != asset.get('name'):
+                return {'success': False, 'error': 'Check for updates again before downloading'}
 
             self._update_downloading = True
 
@@ -564,6 +591,7 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
             response.raise_for_status()
             total = int(response.headers.get("Content-Length") or 0)
             received = 0
+            digest = hashlib.sha256()
             next_report = 0.0
 
             with open(temp_path, "wb") as f:
@@ -572,6 +600,7 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
                         continue
 
                     f.write(chunk)
+                    digest.update(chunk)
                     received += len(chunk)
                     now = time.time()
 
@@ -579,6 +608,15 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
                         next_report = now + 0.2
                         self._push_update_progress(received, total)
 
+            response.close()
+            expected = getattr(self, '_checked_update_asset', {}) or {}
+            if expected.get('url') != url:
+                raise ValueError('Update selection changed; check for updates again')
+            if expected.get('size') and received != expected['size']:
+                raise ValueError('Incomplete update download')
+            expected_digest = expected.get('digest')
+            if expected_digest and expected_digest != 'sha256:' + digest.hexdigest():
+                raise ValueError('Update checksum mismatch')
             if temp_path:
                 os.replace(temp_path, target_path)
                 temp_path = None

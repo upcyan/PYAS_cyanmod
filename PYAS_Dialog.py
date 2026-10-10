@@ -2,6 +2,13 @@ from PYAS_Diagnostics import log_exception
 import ctypes
 import ctypes.wintypes
 import threading
+import time
+import math
+from collections import deque
+from dataclasses import dataclass, field
+from uuid import uuid4
+from urllib.parse import urljoin
+from PYAS_Decisions import AlertPolicyMixin
 
 
 WS_CHILD = 0x40000000
@@ -11,6 +18,7 @@ WS_CAPTION = 0x00C00000
 WS_SYSMENU = 0x00080000
 WS_VSCROLL = 0x00200000
 WS_EX_TOPMOST = 0x00000008
+WS_TABSTOP = 0x00010000
 
 SS_LEFT = 0x00000000
 ES_MULTILINE = 0x00000004
@@ -25,6 +33,8 @@ WM_TIMER = 0x0113
 WM_DESTROY = 0x0002
 WM_CLOSE = 0x0010
 WM_SETFONT = 0x0030
+WM_SHOW_PENDING = 0x8001
+WM_CANCEL_PENDING = 0x8002
 
 ID_BLOCK_BUTTON = 1001
 ID_ALLOW_BUTTON = 1002
@@ -48,8 +58,8 @@ COLOR_BTNFACE = 15
 
 DIALOG_CLASS_NAME = "PYAS_ThreatDialog"
 DIALOG_STYLE = WS_POPUP | WS_CAPTION | WS_SYSMENU
-DIALOG_WIDTH = 500
-DIALOG_HEIGHT = 300
+DIALOG_WIDTH = 580
+DIALOG_HEIGHT = 360
 DIALOG_MARGIN = 16
 
 INTERACTIVE_TIMEOUT_MIN = 5
@@ -171,6 +181,22 @@ DIALOG_TEXTS = {
     },
 }
 
+DIALOG_TEXTS.update({
+    "waiting_decision": {
+        "simplified_switch": "等待您选择；关闭窗口仅收起，不执行操作。",
+        "traditional_switch": "等待您選擇；關閉視窗僅收起，不執行操作。",
+        "english_switch": "Waiting for your decision. Closing only minimizes this window.",
+    },
+    "pending_count": {
+        "simplified_switch": "待处理 {0} 项 · 按到达顺序处理",
+        "traditional_switch": "待處理 {0} 項 · 按到達順序處理",
+        "english_switch": "{0} pending · First in, first out",
+    },
+})
+DIALOG_TEXTS["btn_allow"].update({
+    "simplified_switch": "本次允许", "traditional_switch": "本次允許", "english_switch": "Allow this time",
+})
+
 THREAT_DESCRIPTIONS = {
     "Process Block": {
         "traditional_switch": "偵測到可疑程式正在啟動，現已暫停並等待您處理。攔截將終止該進程；放行將恢復其執行。",
@@ -244,7 +270,7 @@ SUPPORTED_LANGS = frozenset(DIALOG_TEXTS["btn_block"].keys())
 
 def loc_dialog_text(lang, key):
     text_dict = DIALOG_TEXTS.get(key, {})
-    return text_dict.get(lang) or text_dict.get("traditional_switch", "")
+    return text_dict.get(lang) or text_dict.get("english_switch") or text_dict.get("traditional_switch", "")
 
 
 def loc_threat_description(lang, action):
@@ -252,14 +278,299 @@ def loc_threat_description(lang, action):
     return text_dict.get(lang) or text_dict.get("traditional_switch", "")
 
 
+_queue_init_lock = threading.Lock()
+
+
+@dataclass
+class _DecisionRequest:
+    lang: str
+    title: str
+    message: str
+    timeout: int | None
+    done: threading.Event = field(default_factory=threading.Event)
+    choice: str = "block"
+    id: str = field(default_factory=lambda: uuid4().hex)
+    deadline: float | None = None
+    category: str = ''
+    rule: dict | None = None
+    dedup_key: tuple | None = None
+    followers: list = field(default_factory=list)
+    resolving: bool = False
+
+
+class _ThreatPromptQueue:
+    """One UI worker per application; FIFO decisions never expire while queued."""
+
+    def __init__(self, session_factory=None, capacity=256, policy_lookup=None):
+        self.condition = threading.Condition()
+        self.pending = deque()
+        self.active = None
+        self.session = None
+        self.worker = None
+        self.closed = False
+        self.capacity = capacity
+        self.session_factory = session_factory or _ThreatDialogSession
+        self.policy_lookup = policy_lookup
+
+    def submit(self, request):
+        with self.condition:
+            self.condition.wait_for(lambda: self.closed or self.count < self.capacity)
+            if self.closed:
+                request.done.set()
+                return request.choice
+            matching = next((item for item in [self.active, *self.pending]
+                if item and request.dedup_key and item.dedup_key == request.dedup_key and not item.resolving), None)
+            if matching:
+                matching.followers.append(request)
+                self.condition.notify_all()
+            else:
+                self.pending.append(request)
+            if self.worker is None:
+                self.worker = threading.Thread(target=self._run, daemon=True, name="PYAS.ThreatQueue")
+                self.worker.start()
+        request.done.wait()
+        return request.choice
+
+    @property
+    def count(self):
+        with self.condition:
+            return sum(1 + len(item.followers) for item in [self.active, *self.pending] if item)
+
+    def take_next(self):
+        with self.condition:
+            if self.closed or not self.pending:
+                return None
+            while self.pending:
+                self.active = self.pending.popleft()
+                cached = self.policy_lookup(self.active.rule, 1 + len(self.active.followers)) if self.policy_lookup else None
+                if cached:
+                    self.complete(cached)
+                else:
+                    return self.active
+            return None
+
+    def complete(self, choice):
+        with self.condition:
+            if self.active is not None:
+                for item in [self.active, *self.active.followers]:
+                    item.choice = choice
+                    item.done.set()
+                self.active = None
+            self.condition.notify_all()
+
+    def _run(self):
+        while True:
+            with self.condition:
+                request = self.take_next()
+                if request is None:
+                    self.session = None
+                    self.worker = None
+                    return
+            try:
+                with self.condition:
+                    self.session = self.session_factory(
+                        request.lang, request.title, request.message, request.timeout,
+                        lambda n: loc_dialog_text(request.lang, "countdown_auto_block").replace("{0}", str(n)),
+                        queue=self,
+                    )
+                    session = self.session
+                session.run()
+            except Exception:
+                log_exception("PYAS_Dialog._ThreatPromptQueue._run")
+            finally:
+                # Window creation failures still resolve the current request.
+                self.complete("block")
+
+    def reopen(self):
+        with self.condition:
+            session = self.session
+            if session and session.hwnd:
+                session.post_message(WM_SHOW_PENDING)
+                return True
+        return False
+
+    def close(self):
+        with self.condition:
+            self.closed = True
+            for request in self.pending:
+                request.done.set()
+                for follower in request.followers:
+                    follower.done.set()
+            self.pending.clear()
+            if self.active:
+                self.active.done.set()
+                for follower in self.active.followers:
+                    follower.done.set()
+                self.active = None
+            if self.session and self.session.hwnd:
+                self.session.post_message(WM_CANCEL_PENDING)
+            self.condition.notify_all()
+
+
+class _WebDecisionAPI:
+    """Only decision-window operations are exposed to its JavaScript bridge."""
+
+    def __init__(self, session):
+        self._session = session
+
+    def ready(self):
+        self._session.ready.set()
+        return True
+
+    def snapshot(self):
+        session = self._session
+        with session.queue.condition:
+            request = session.queue.active
+            if request is None:
+                return None
+            if session.ready.is_set() and request.timeout and request.deadline is None:
+                request.deadline = time.monotonic() + request.timeout
+            remaining = max(0, math.ceil(request.deadline - time.monotonic())) if request.deadline else None
+            events = [request, *session.queue.pending]
+            groups = {}
+            for item in events:
+                category = item.category or item.title
+                group = groups.setdefault(category, {'id': category, 'title': item.title, 'count': 0, 'active': False})
+                group['count'] += 1 + len(item.followers)
+                group['active'] |= item is request
+            result = {
+                "id": request.id, "title": request.title, "message": request.message,
+                "remaining": remaining,
+                "events": list(groups.values()), "count": session.queue.count,
+                "can_remember": request.rule is not None,
+                "identity_summary": (f"{request.rule['source']}\nSHA-256: {request.rule['sha256']}\n{request.rule['target']}" if request.rule else ''),
+                "duplicates": 1 + len(request.followers),
+                "resolving": request.resolving,
+                "decision_error": getattr(session, 'decision_error', False),
+                "waiting": loc_dialog_text(request.lang, "waiting_decision"),
+                "allow": loc_dialog_text(request.lang, "btn_allow"),
+                "block": loc_dialog_text(request.lang, "btn_block"),
+                "countdown": loc_dialog_text(request.lang, "countdown_auto_block").replace("{0}", str(remaining)),
+            }
+        with session.owner.lock_config:
+            result["theme"] = session.owner.pyas_config.get("theme", "system_switch")
+            result["language"] = session.owner.pyas_config.get("language", "english_switch")
+        return result
+
+    def decide(self, request_id, choice, repeat=False):
+        if choice not in ("allow", "block", "permanent") or not isinstance(repeat, bool):
+            return False
+        session = self._session
+        with session.queue.condition:
+            request = session.queue.active
+            if request is None or request.id != request_id or session.queue.closed or request.resolving:
+                return False
+            # Reject a stale click after an enabled timeout has already elapsed.
+            if request.deadline and request.deadline <= time.monotonic():
+                choice = "block"
+                repeat = False
+            request.resolving = True
+        try:
+            if choice == 'permanent' or repeat:
+                if not session.owner._remember_alert_decision(request, choice, repeat):
+                    session.decision_error = True
+                    return False
+            with session.queue.condition:
+                if session.queue.active is not request or session.queue.closed:
+                    return False
+                session.decision_error = False
+                session.queue.complete('allow' if choice == 'permanent' else choice)
+                session.queue.take_next()
+                return True
+        finally:
+            request.resolving = False
+
+    def minimize(self):
+        window = self._session.window
+        if window:
+            window.minimize()
+        return True
+
+
+class _WebThreatDialogSession:
+    """A persistent secondary WebView using the main application's assets."""
+
+    def __init__(self, lang, title, message, timeout, countdown_formatter, queue, owner):
+        self.queue = queue
+        self.owner = owner
+        self.window = None
+        self.hwnd = None
+        self.ready = threading.Event()
+        self.destroying = False
+        self.api = _WebDecisionAPI(self)
+
+    @staticmethod
+    def _bottom_right_position(width, height, scale=1.0, margin=16):
+        work = ctypes.wintypes.RECT()
+        if ctypes.windll.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(work), 0):
+            return (work.right - int(width * scale) - int(margin * scale),
+                    work.bottom - int(height * scale) - int(margin * scale))
+        return int(margin * scale), int(margin * scale)
+
+    def run(self):
+        import webview
+        url = urljoin(self.owner._window.get_current_url(), "/templates/threat.html")
+        scale = 1.0
+        try:
+            if hasattr(self.api, '_session'):
+                get_dpi = getattr(ctypes.windll.user32, 'GetDpiForSystem', None)
+                if get_dpi:
+                    scale = (get_dpi() or 96) / 96.0
+        except Exception:
+            scale = 1.0
+        pos_x, pos_y = self._bottom_right_position(720, 520, scale)
+        self.window = webview.create_window(
+            "PYAS · Pending alerts", url=url, js_api=self.api,
+            width=720, height=520, min_size=(560, 420),
+            frameless=True, easy_drag=False, on_top=True, text_select=True,
+            background_color="#f5f5f7", x=pos_x, y=pos_y,
+        )
+        self.hwnd = True  # Queue operations use post_message, not a native HWND.
+        self.window.events.closing += self._on_closing
+        started = time.monotonic()
+        try:
+            while True:
+                with self.queue.condition:
+                    request = self.queue.active
+                    if self.queue.closed or request is None:
+                        break
+                    if request.deadline and request.deadline <= time.monotonic():
+                        self.queue.complete("block")
+                        self.queue.take_next()
+                        continue
+                    self.queue.condition.wait(.2)
+                if not self.ready.is_set() and time.monotonic() - started > 30:
+                    raise RuntimeError("Threat window UI failed to initialize")
+        finally:
+            self.destroying = True
+            self.window.destroy()
+            self.hwnd = None
+
+    def _on_closing(self):
+        if not self.destroying:
+            self.window.minimize()
+            return False
+        return True
+
+    def post_message(self, message):
+        if message == WM_SHOW_PENDING:
+            self.window.restore()
+            self.window.show()
+        elif message == WM_CANCEL_PENDING:
+            with self.queue.condition:
+                self.queue.condition.notify_all()
+
+
 class _ThreatDialogSession:
     _class_counter = 0
 
-    def __init__(self, lang, title, message, timeout, countdown_formatter):
+    def __init__(self, lang, title, message, timeout, countdown_formatter, queue=None):
         self.lang = lang
         self.title = title
         self.message = message
-        self.timeout = max(1, int(timeout))
+        self.timeout = max(1, int(timeout)) if timeout is not None else None
+        self.queue = queue
+        self.deadline = None
         self.countdown_formatter = countdown_formatter
         self.choice = "block"
         self.hwnd = None
@@ -354,97 +665,133 @@ class _ThreatDialogSession:
         client = ctypes.wintypes.RECT()
         self.user32.GetClientRect(self.hwnd, ctypes.byref(client))
         self._build_controls(client.right, client.bottom, scale)
+        self.deadline = time.monotonic() + self.timeout if self.timeout else None
         self.update_countdown()
         self.user32.SetWindowPos(
             self.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW
         )
         self.user32.SetForegroundWindow(self.hwnd)
         self.user32.MessageBeep(MB_ICONWARNING)
-        self.user32.SetTimer(self.hwnd, ID_COUNTDOWN_TIMER, 1000, None)
+        self.user32.SetTimer(self.hwnd, ID_COUNTDOWN_TIMER, 250, None)
 
         msg = ctypes.wintypes.MSG()
 
         while self.user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            if self.user32.IsDialogMessageW(self.hwnd, ctypes.byref(msg)):
+                continue
             self.user32.TranslateMessage(ctypes.byref(msg))
             self.user32.DispatchMessageW(ctypes.byref(msg))
 
         return self.choice
 
     def wndproc(self, hwnd, msg, wparam, lparam):
+        if msg == WM_SHOW_PENDING:
+            self.user32.ShowWindow(hwnd, 9)
+            self.user32.SetForegroundWindow(hwnd)
+            return 0
+        if msg == WM_CANCEL_PENDING:
+            self.user32.DestroyWindow(hwnd)
+            return 0
         if msg == WM_COMMAND:
             command_id = wparam & 0xFFFF
 
             if command_id == ID_BLOCK_BUTTON:
-                self.choice = "block"
-                self.user32.DestroyWindow(hwnd)
+                self._decide("block")
                 return 0
 
             if command_id == ID_ALLOW_BUTTON:
-                self.choice = "allow"
-                self.user32.DestroyWindow(hwnd)
+                self._decide("allow")
                 return 0
 
         elif msg == WM_TIMER:
             if wparam == ID_COUNTDOWN_TIMER:
-                self.remaining -= 1
+                if self.queue and self.queue.closed:
+                    self.user32.DestroyWindow(hwnd)
+                    return 0
+                self.remaining = max(0, math.ceil(self.deadline - time.monotonic())) if self.deadline else None
                 self.update_countdown()
 
-                if self.remaining <= 0:
-                    self.choice = "block"
-                    self.user32.DestroyWindow(hwnd)
+                if self.deadline and self.remaining <= 0:
+                    self._decide("block")
 
             return 0
 
         elif msg == WM_CLOSE:
-            self.choice = "block"
-            self.user32.DestroyWindow(hwnd)
+            # Closing is a presentation action, never an implicit decision.
+            self.user32.ShowWindow(hwnd, 6)
             return 0
 
         elif msg == WM_DESTROY:
             self.user32.KillTimer(hwnd, ID_COUNTDOWN_TIMER)
             ctypes.windll.user32.PostQuitMessage(0)
+            self.hwnd = None
             return 0
 
         return self.user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
     def update_countdown(self):
         if self.hwnd and self.labels.get("countdown"):
-            text = self.countdown_formatter(max(0, self.remaining))
+            text = self.countdown_formatter(max(0, self.remaining)) if self.deadline else loc_dialog_text(self.lang, "waiting_decision")
             self.user32.SetWindowTextW(self.labels["countdown"], text)
+            if self.labels.get("queue"):
+                count = self.queue.count if self.queue else 1
+                self.user32.SetWindowTextW(self.labels["queue"], loc_dialog_text(self.lang, "pending_count").replace("{0}", str(count)))
+
+    def post_message(self, message):
+        self.user32.PostMessageW(self.hwnd, message, 0, 0)
+
+    def _decide(self, choice):
+        self.choice = choice
+        if self.queue:
+            self.queue.complete(choice)
+            request = self.queue.take_next()
+            if request is not None:
+                self.lang, self.title, self.message = request.lang, request.title, request.message
+                self.timeout = request.timeout
+                self.countdown_formatter = lambda n: loc_dialog_text(self.lang, "countdown_auto_block").replace("{0}", str(n))
+                self.deadline = time.monotonic() + self.timeout if self.timeout else None
+                self.remaining = self.timeout
+                self.user32.SetWindowTextW(self.hwnd, self.title)
+                for name, text in (("title", self.title), ("message", self.message), ("allow", loc_dialog_text(self.lang, "btn_allow")), ("block", loc_dialog_text(self.lang, "btn_block"))):
+                    self.user32.SetWindowTextW(self.labels[name], text)
+                self.update_countdown()
+                return
+        self.user32.DestroyWindow(self.hwnd)
 
     def _build_controls(self, width, height, scale):
         pad = int(20 * scale)
-        line_height = int(24 * scale)
-        button_width = int(96 * scale)
-        button_height = int(34 * scale)
+        line_height = int(50 * scale)
+        button_width = int(150 * scale)
+        button_height = int(40 * scale)
         countdown_height = int(22 * scale)
         button_y = height - pad - button_height
         countdown_y = button_y - int(8 * scale) - countdown_height
         self.font_title = ctypes.windll.gdi32.CreateFontW(
-            -int(17 * scale),
+            -int(20 * scale),
             0, 0, 0,
             FW_BOLD, 0, 0, 0,
             0, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
             DEFAULT_PITCH | FF_DONTCARE,
-            "Segoe UI",
+            "Microsoft YaHei UI" if self.lang in ("simplified_switch", "traditional_switch") else "Segoe UI",
         )
         self.font_body = ctypes.windll.gdi32.CreateFontW(
-            -int(14 * scale),
+            -int(15 * scale),
             0, 0, 0,
             400, 0, 0, 0,
             0, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
             DEFAULT_PITCH | FF_DONTCARE,
-            "Segoe UI",
+            "Microsoft YaHei UI" if self.lang in ("simplified_switch", "traditional_switch") else "Segoe UI",
         )
         title_label = self._create_control(
             "STATIC", SS_LEFT, pad, pad, width - pad * 2, line_height, self.title
         )
+        self.labels["queue"] = self._create_control("STATIC", SS_LEFT, pad, pad + line_height, width - pad * 2, int(24 * scale), "")
         self.labels["title"] = title_label
-        message_top = pad + line_height + int(8 * scale)
+        message_top = pad + line_height + int(32 * scale)
         message_height = countdown_y - int(8 * scale) - message_top
         self.labels["message"] = self._create_control(
             "EDIT",
-            ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
+            ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | WS_TABSTOP,
             pad,
             message_top,
             width - pad * 2,
@@ -456,13 +803,13 @@ class _ThreatDialogSession:
             SS_LEFT,
             pad,
             countdown_y,
-            int(260 * scale),
+            width - pad * 2,
             countdown_height,
             "",
         )
-        self._create_control(
+        self.labels["allow"] = self._create_control(
             "BUTTON",
-            BS_PUSHBUTTON,
+            BS_PUSHBUTTON | WS_TABSTOP,
             width - pad - button_width * 2 - int(10 * scale),
             button_y,
             button_width,
@@ -470,9 +817,9 @@ class _ThreatDialogSession:
             loc_dialog_text(self.lang, "btn_allow"),
             ID_ALLOW_BUTTON,
         )
-        self._create_control(
+        self.labels["block"] = self._create_control(
             "BUTTON",
-            BS_DEFPUSHBUTTON,
+            BS_DEFPUSHBUTTON | WS_TABSTOP,
             width - pad - button_width,
             button_y,
             button_width,
@@ -485,7 +832,7 @@ class _ThreatDialogSession:
             self.user32.SendMessageW(title_label, WM_SETFONT, self.font_title, 1)
 
         if self.font_body:
-            for control in (self.labels["message"], self.labels["countdown"]):
+            for control in (self.labels["message"], self.labels["countdown"], self.labels["queue"], self.labels["allow"], self.labels["block"]):
                 self.user32.SendMessageW(control, WM_SETFONT, self.font_body, 1)
 
     def _create_control(self, class_name, style, x, y, width, height, text, control_id=0):
@@ -506,6 +853,12 @@ class _ThreatDialogSession:
 
     def _ensure_api(self):
         user32 = self.user32
+        user32.PostMessageW.argtypes = [ctypes.wintypes.HWND, ctypes.wintypes.UINT, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM]
+        user32.PostMessageW.restype = ctypes.wintypes.BOOL
+        user32.ShowWindow.argtypes = [ctypes.wintypes.HWND, ctypes.c_int]
+        user32.ShowWindow.restype = ctypes.wintypes.BOOL
+        user32.IsDialogMessageW.argtypes = [ctypes.wintypes.HWND, ctypes.POINTER(ctypes.wintypes.MSG)]
+        user32.IsDialogMessageW.restype = ctypes.wintypes.BOOL
         user32.CreateWindowExW.argtypes = [
             ctypes.wintypes.DWORD,
             ctypes.wintypes.LPCWSTR,
@@ -620,9 +973,32 @@ class _ThreatDialogSession:
         return 1.0
 
 
-class DialogMixin:
+class DialogMixin(AlertPolicyMixin):
+    def _get_threat_queue(self):
+        with _queue_init_lock:
+            if not hasattr(self, "_threat_queue"):
+                factory = None
+                if getattr(self, "_window", None) is not None:
+                    factory = lambda *args, **kwargs: _WebThreatDialogSession(*args, **kwargs, owner=self)
+                self._threat_queue = _ThreatPromptQueue(factory, policy_lookup=self._lookup_alert_decision)
+            return self._threat_queue
+
+    def get_pending_threat_count(self):
+        queue = getattr(self, "_threat_queue", None)
+        return queue.count if queue else 0
+
+    def show_pending_threats(self):
+        queue = getattr(self, "_threat_queue", None)
+        return queue.reopen() if queue else False
+
+    def cancel_pending_threats(self):
+        # Explicit application shutdown resolves outstanding protection calls.
+        self._get_threat_queue().close()
+
     def get_interactive_timeout(self):
         with self.lock_config:
+            if not self.pyas_config.get("interactive_auto_block", False):
+                return None
             try:
                 timeout = int(
                     self.pyas_config.get("interactive_timeout", INTERACTIVE_TIMEOUT_DEFAULT)
@@ -638,7 +1014,7 @@ class DialogMixin:
 
         return lang if lang in SUPPORTED_LANGS else "traditional_switch"
 
-    def request_block_decision(self, action, source=None, target=None, pid=None):
+    def request_block_decision(self, action, source=None, target=None, pid=None, detection=None):
         with self.lock_config:
             if not self.pyas_config.get("interactive_switch", False):
                 return True
@@ -657,36 +1033,27 @@ class DialogMixin:
             lines.append(f"{loc_dialog_text(lang, 'label_pid')}: {pid}")
 
         timeout = self.get_interactive_timeout()
-        return self.show_threat_prompt(title, "\r\n".join(lines), timeout)
+        with self.lock_config:
+            detection = {'finding': detection, 'extended': bool(self.pyas_config.get('extension_switch')),
+                'sensitive': bool(self.pyas_config.get('sensitive_switch'))} if detection else None
+        rule = self._make_alert_identity(action, source, target, detection)
+        cached = self._lookup_alert_decision(rule)
+        if cached:
+            if hasattr(self, 'write_log'):
+                self.write_log('INFO', 'Alert Decision Reused', source=source,
+                    detail=f'{action} / {target or ""} / {cached}', file_hash=rule['sha256'])
+            return cached != 'allow'
+        category = {'Process Block': 'process', 'Process DLL Block': 'process',
+            'File Block': 'file', 'Deferred Scan Block': 'file', 'Network Block': 'network'}.get(action, action)
+        request = _DecisionRequest(lang, title, "\r\n".join(lines), timeout, category=category, rule=rule,
+            dedup_key=(rule['key'], pid) if rule else None)
+        choice = self._get_threat_queue().submit(request)
+        if choice == 'allow' and rule:
+            fresh = self._make_alert_identity(action, source, target, detection)
+            if fresh != rule:
+                return True
+        return choice != 'allow'
 
-    def show_threat_prompt(self, title, message, timeout=INTERACTIVE_TIMEOUT_DEFAULT):
-        result = {"choice": "block"}
-        done = threading.Event()
-        lock_interactive = getattr(self, "lock_interactive", None) or threading.RLock()
-
-        def run():
-            try:
-                with lock_interactive:
-                    session = _ThreatDialogSession(
-                        self.get_interactive_lang(),
-                        title,
-                        message,
-                        timeout,
-                        lambda remaining: loc_dialog_text(
-                            self.get_interactive_lang(), "countdown_auto_block"
-                        ).replace("{0}", str(remaining)),
-                    )
-                    result["choice"] = session.run()
-            except Exception:
-                log_exception("PYAS_Dialog.DialogMixin.show_threat_prompt.run")
-                result["choice"] = "block"
-            finally:
-                done.set()
-
-        worker = threading.Thread(target=run, daemon=True, name="PYAS.ThreatDialog")
-        worker.start()
-
-        if not done.wait(timeout + 15):
-            return True
-
-        return result["choice"] != "allow"
+    def show_threat_prompt(self, title, message, timeout=None):
+        request = _DecisionRequest(self.get_interactive_lang(), title, message, timeout)
+        return self._get_threat_queue().submit(request) != "allow"

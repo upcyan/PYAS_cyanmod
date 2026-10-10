@@ -165,6 +165,7 @@ class RuntimeMixin:
             "context_switch": True,
             "interactive_switch": False,
             "interactive_timeout": 30,
+            "interactive_auto_block": False,
             "classic_menu_switch": False,
             "custom_rule": [],
             "white_list": [],
@@ -188,6 +189,9 @@ class RuntimeMixin:
 
     def ui_dispatcher_thread(self):
         while not getattr(self, "closing", False):
+            if getattr(self, "_window_interacting", False):
+                time.sleep(0.05)
+                continue
             batch = []
 
             try:

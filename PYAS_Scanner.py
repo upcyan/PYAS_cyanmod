@@ -17,7 +17,7 @@ class ScannerMixin(CloudQueueMixin):
         try:
             self.start_daemon_thread(self.backup_mbr)
             self.start_daemon_thread(self.relock_file)
-            self.start_daemon_thread(self.init_whitelist)
+            self.init_whitelist()
             self.start_daemon_thread(self.popup_intercept_thread)
 
             def log_callback(x):
@@ -41,7 +41,10 @@ class ScannerMixin(CloudQueueMixin):
                 context_enabled = self.pyas_config.get("context_switch", True)
                 autostart_enabled = self.pyas_config.get("autostart_switch", True)
 
-            self.register_context_menu(context_enabled)
+            with self.lock_update:
+                with self.lock_config:
+                    context_enabled = self.pyas_config.get("context_switch", True)
+                self.register_context_menu(context_enabled)
 
             with self.lock_update:
                 with self.lock_config:
@@ -228,7 +231,7 @@ class ScannerMixin(CloudQueueMixin):
         result = self.safe_scan_engine(file_path)
 
         if result:
-            if self.request_block_decision("Deferred Scan Block", source=file_path):
+            if self.request_block_decision("Deferred Scan Block", source=file_path, detection=result):
                 self.manage_named_list(
                     "quarantine", [file_path], action="add", lock_func=self.lock_file
                 )

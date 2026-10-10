@@ -137,7 +137,7 @@ def sync_iss_version(version):
         die("PYAS_Inno.iss 中找不到 #define AppVersion")
 
     if updated != text:
-        ISS_FILE.write_text(updated, encoding="utf-8", newline="\r\n")
+        ISS_FILE.write_text(updated, encoding="utf-8", newline="\n")
         log("版本", f"PYAS_Inno.iss AppVersion 已同步为 {numeric}")
     else:
         log("版本", f"PYAS_Inno.iss AppVersion 已是 {numeric}")
@@ -591,6 +591,9 @@ def do_build(interactive):
     ensure_setup_resources()
     build_exe()
     assemble_payload()
+    result = run([sys.executable, str(ROOT / 'build_menu.py')])
+    if result.returncode != 0:
+        die('新版右键菜单组件构建失败')
     asset = run_iscc(iscc_path)
     log("完成", f"安装包已生成: {asset}")
     return asset

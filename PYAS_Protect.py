@@ -1,4 +1,5 @@
 from PYAS_Diagnostics import log_exception
+from PYAS_ComponentTrust import component_digest, is_menu_component_copy
 import os
 import time
 import shutil
@@ -113,10 +114,17 @@ class ProtectMixin(DialogMixin, DriverMixin, SystemMixin, RealtimeMixin, PopupWi
                 if p_norm.startswith(wl_norm):
                     return True
 
-        return False
+        return is_menu_component_copy(p, getattr(self, "_menu_component_digest", None))
 
     def init_whitelist(self):
-        self.manage_named_list("white_list", [self.file_pyas], action="add")
+        files = [self.file_pyas]
+        # Only trust our installed helper, never every file with this basename.
+        menu_component = os.path.join(self.path_pyas, "PYAS_Menu.exe")
+        # Learn only from our installed component, never from a scanned candidate.
+        self._menu_component_digest = component_digest(menu_component)
+        if os.path.isfile(menu_component):
+            files.append(menu_component)
+        self.manage_named_list("white_list", files, action="add")
 
     def _driver_whitelist_patterns(self, file_path, is_directory=None):
         normalized_path = self.norm_path(file_path, must_exist=False)

@@ -14,7 +14,7 @@
     python test_dialog.py 2 [秒]     # 超时自动拦截测试(默认 8 秒)
     python test_dialog.py 3 [秒]     # 连续威胁排队测试(默认 4 秒 x2)
 
-说明:弹窗返回 True 表示拦截、False 表示放行;超时/关闭弹窗等同拦截。
+说明:默认不自动处理；关闭仅收起。计时测试显式启用超时拦截。
 真实防护链路的拦截仍由 PYAS 主程序的交互模式开关控制,本工具只测弹窗环节。
 """
 
@@ -70,9 +70,9 @@ class FakeApp(DialogMixin):
         }
 
 
-def prompt_test(action, fields, timeout):
+def prompt_test(action, fields, timeout, app=None):
     """弹出带测试说明的真实拦截弹窗,返回决策(True=拦截)。"""
-    app = FakeApp(timeout=timeout)
+    app = app or FakeApp(timeout=timeout or 30)
     lines = [TEST_NOTICE, loc_threat_description("simplified_switch", action)]
 
     if fields.get("source"):
@@ -108,7 +108,7 @@ def run_single():
 
     print(f"\n>>> 弹出「{ACTIONS[action]}」测试弹窗(首行已标注为测试,可自行点击按钮)...")
     start = time.monotonic()
-    decision = prompt_test(action, fields, 30)
+    decision = prompt_test(action, fields, None)
     print(describe(decision, time.monotonic() - start))
 
 
@@ -136,11 +136,12 @@ def run_queue(timeout=None):
 
     print(f"\n>>> 同时模拟 2 个威胁,弹窗应逐个串行出现,每个 {timeout} 秒超时 ...")
     results = {}
+    app = FakeApp(timeout=timeout)
     start = time.monotonic()
 
     def worker(index, action, fields):
         began = time.monotonic()
-        results[index] = (prompt_test(action, fields, timeout), time.monotonic() - began)
+        results[index] = (prompt_test(action, fields, timeout, app), time.monotonic() - began)
 
     threads = [
         threading.Thread(target=worker, args=(index, *SAMPLES[index]), daemon=True)
@@ -159,7 +160,7 @@ def run_queue(timeout=None):
         name = ACTIONS[SAMPLES[index][0]]
         print(f"  {name}: {describe(decision, elapsed)}")
 
-    serialized = all(elapsed >= timeout for _, elapsed in results.values())
+    serialized = all(decision for decision, _ in results.values()) and timeout * 2 <= total < timeout * 2 + 5
     print(f"总耗时 {total:.1f} 秒(串行应约 {timeout * 2} 秒)")
     print("结果: " + ("PASS(排队串行生效)" if serialized else "FAIL"))
 

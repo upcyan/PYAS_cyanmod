@@ -27,6 +27,46 @@ document.addEventListener('DOMContentLoaded', () => {
         configCache: null
     };
 
+    const menuTextMap = {
+        traditional_switch: {
+            modern: '已添加新版選單', legacy: '已添加傳統選單', disabled: '未添加右鍵選單', pending: '正在確認選單狀態', failed: '右鍵選單添加失敗',
+            title: '新版右鍵選單添加失敗', fallback: '已回退至傳統選單，可在「顯示更多選項」中使用掃描。',
+            certificate: 'Windows 不信任此選單包的簽名憑證（0x800B0109）。', reason: '失敗原因：'
+        },
+        simplified_switch: {
+            modern: '已添加新版菜单', legacy: '已添加传统菜单', disabled: '未添加右键菜单', pending: '正在确认菜单状态', failed: '右键菜单添加失败',
+            title: '新版右键菜单添加失败', fallback: '已回退至传统菜单，可在“显示更多选项”中使用扫描。',
+            certificate: 'Windows 不信任此菜单包的签名证书（0x800B0109）。', reason: '失败原因：'
+        },
+        english_switch: {
+            modern: 'Modern menu added', legacy: 'Original menu added', disabled: 'Context menu disabled', pending: 'Checking menu status', failed: 'Context menu registration failed',
+            title: 'Modern context menu registration failed', fallback: 'Scanning is available in the original menu under “Show more options”.',
+            certificate: 'Windows does not trust the menu package signing certificate (0x800B0109).', reason: 'Reason: '
+        }
+    };
+    const menuTexts = () => menuTextMap[appState.lang] || menuTextMap.english_switch;
+    let menuStatusInFlight = false;
+    const renderMenuStatus = () => {
+        const label = document.getElementById('context_menu_status');
+        if (label) label.textContent = menuTexts()[appState.menuMode || 'pending'];
+    };
+    window.refreshContextMenuStatus = async () => {
+        const api = window.pywebview?.api;
+        if (!api?.get_context_menu_status || menuStatusInFlight) return;
+        menuStatusInFlight = true;
+        try {
+            const status = await api.get_context_menu_status();
+            appState.menuMode = status.mode;
+            renderMenuStatus();
+            if (status.notice) {
+                const text = menuTexts();
+                const reason = /0x800b0109/i.test(status.notice) ? text.certificate + '\n\n' + status.notice : status.notice;
+                await api.show_alert(text.title, (status.mode === 'legacy' ? text.fallback + '\n\n' : '') + text.reason + reason, 'warning');
+            }
+        } catch (error) { console.error('Menu status failed', error); }
+        finally { menuStatusInFlight = false; }
+    };
+
     const reverseI18nMap = Object.entries(dict["traditional_switch"]).reduce((acc, [key, val]) => {
         acc[val] = key;
         return acc;
@@ -161,14 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
     };
 
-    const themes = {
-        "white_switch": { "--bg-window": "245, 245, 247", "--bg-nav": "255, 255, 255", "--bg-panel": "255, 255, 255", "--bg-hover": "rgba(0,0,0,0.05)", "--text-primary": "29, 29, 31", "--text-secondary": "134, 134, 139", "--text-on-accent": "255, 255, 255", "--border-color":"210, 210, 215", "--accent-color":"0, 122, 255", "--accent-alpha":"rgba(0, 122, 255, 0.1)", "--accent-shadow":"rgba(0, 122, 255, 0.2)", "--accent-hover":"rgba(0, 122, 255, 0.3)" },
-        "black_switch": { "--bg-window": "0, 0, 0", "--bg-nav": "28, 28, 30", "--bg-panel": "28, 28, 30", "--bg-hover": "rgba(255,255,255,0.1)", "--text-primary": "216, 216, 220", "--text-secondary": "134, 134, 139", "--text-on-accent": "216, 216, 220", "--border-color":"44, 44, 46", "--accent-color":"10, 132, 255", "--accent-alpha":"rgba(10, 132, 255, 0.1)", "--accent-shadow":"rgba(10, 132, 255, 0.2)", "--accent-hover":"rgba(10, 132, 255, 0.3)" },
-        "red_switch": { "--bg-window": "253, 246, 246", "--bg-nav": "255, 240, 240", "--bg-panel": "255, 255, 255", "--bg-hover": "rgba(255,59,48,0.05)", "--text-primary": "29, 29, 31", "--text-secondary": "134, 134, 139", "--text-on-accent": "255, 255, 255", "--border-color":"250, 220, 220", "--accent-color":"255, 59, 48", "--accent-alpha":"rgba(255, 59, 48, 0.1)", "--accent-shadow":"rgba(255, 59, 48, 0.2)", "--accent-hover":"rgba(255, 59, 48, 0.3)" },
-        "yellow_switch": { "--bg-window": "254, 251, 243", "--bg-nav": "255, 248, 230", "--bg-panel": "255, 255, 255", "--bg-hover": "rgba(255,149,0,0.05)", "--text-primary": "29, 29, 31", "--text-secondary": "134, 134, 139", "--text-on-accent": "255, 255, 255", "--border-color":"250, 240, 215", "--accent-color":"255, 149, 0", "--accent-alpha":"rgba(255, 149, 0, 0.1)", "--accent-shadow":"rgba(255, 149, 0, 0.2)", "--accent-hover":"rgba(255, 149, 0, 0.3)" },
-        "green_switch": { "--bg-window": "246, 253, 248", "--bg-nav": "235, 250, 240", "--bg-panel": "255, 255, 255", "--bg-hover": "rgba(52,199,89,0.05)", "--text-primary": "29, 29, 31", "--text-secondary": "134, 134, 139", "--text-on-accent": "255, 255, 255", "--border-color":"220, 240, 225", "--accent-color":"52, 199, 89", "--accent-alpha":"rgba(52, 199, 89, 0.1)", "--accent-shadow":"rgba(52, 199, 89, 0.2)", "--accent-hover":"rgba(52, 199, 89, 0.3)" },
-        "blue_switch": { "--bg-window": "246, 249, 253", "--bg-nav": "235, 244, 255", "--bg-panel": "255, 255, 255", "--bg-hover": "rgba(0,122,255,0.05)", "--text-primary": "29, 29, 31", "--text-secondary": "134, 134, 139", "--text-on-accent": "255, 255, 255", "--border-color":"220, 230, 250", "--accent-color":"0, 122, 255", "--accent-alpha":"rgba(0, 122, 255, 0.1)", "--accent-shadow":"rgba(0, 122, 255, 0.2)", "--accent-hover":"rgba(0, 122, 255, 0.3)" }
-    };
+    const themes = window.PyasTheme.themes;
 
     const cols = {
         log: [{key: 'time_str', label: 'col_date', flex: 1.5, defaultDesc: true}, {key: 'level', label: 'col_type', flex: 0.8, isI18n: true}, {key: 'action', label: 'col_func', flex: 1.2, isI18n: true}, {key: 'source', label: 'col_path', flex: 3}],
@@ -291,6 +324,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (widget.renderData) widget.renderData();
         });
         document.documentElement.lang = langMap[lang] || "en";
+        const decisionTitle = document.getElementById('clear_alert_rules_title');
+        const decisionDescription = document.getElementById('clear_alert_rules_desc');
+        if (decisionTitle) decisionTitle.textContent = /^zh/.test(document.documentElement.lang) ? '清除已记住的告警决定' : 'Clear remembered alert decisions';
+        if (decisionDescription) decisionDescription.textContent = /^zh/.test(document.documentElement.lang) ? '撤销永久允许及 30 秒重复操作规则；保留普通白名单' : 'Revoke permanent and short-lived alert rules; keep the regular whitelist';
 
         const progressText = document.getElementById('progress_text');
         if (progressText && progressText.dataset.dynamicMsg) {
@@ -299,6 +336,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (msgs[lang]) progressText.textContent = msgs[lang];
             } catch (e) {}
         }
+        renderMenuStatus();
     };
 
     const applyTheme = (theme) => {
@@ -878,11 +916,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const attrs = lv === 'BLOCK'
                 ? ' data-action="' + escapeHtml(actionRaw) + '" data-pid="' + escapeHtml(String(e.pid ?? '')) + '" data-path="' + escapeHtml(String(e.source || '')) + '"'
                 : '';
-            return '<li class="home-log-item lv-' + escapeHtml(lv) + '"' + attrs + '>'
+            const sourceText = String(e.source || e.detail || '');
+            const rowText = [e.time_str || '', getMsg(lv) || lv, actionText, sourceText].join('\t');
+            const copyText = rowText + (e.detail && e.detail !== sourceText ? '\n' + e.detail : '');
+            return '<li class="home-log-item lv-' + escapeHtml(lv) + '" data-copy-text="' + escapeHtml(copyText) + '"' + attrs + '>'
                 + '<span class="hl-time">' + escapeHtml(e.time_str || '') + '</span>'
                 + '<span class="hl-level">' + escapeHtml(getMsg(lv) || lv) + '</span>'
                 + '<span class="hl-action">' + escapeHtml(actionText) + '</span>'
-                + '<span class="hl-source" title="' + escapeHtml(String(e.source || '')) + '">' + escapeHtml(String(e.source || '')) + '</span>'
+                + '<span class="hl-source" title="' + escapeHtml(sourceText) + '">' + escapeHtml(sourceText) + '</span>'
                 + '</li>';
         }).join('');
     };
@@ -892,7 +933,33 @@ document.addEventListener('DOMContentLoaded', () => {
         homeLogRenderTimer = setTimeout(renderHomeLogs, 300);
     };
 
+    let logGridTimer = null;
+    let logGridBusy = false;
+    let logGridDirty = false;
+    const refreshLogGrid = async () => {
+        logGridTimer = null;
+        if (logGridBusy || !logGridDirty) return;
+        if (!document.getElementById('log_export_window')?.classList.contains('active')) return;
+        if (document.body.classList.contains('resizing-active')) {
+            logGridTimer = setTimeout(refreshLogGrid, 300);
+            return;
+        }
+        logGridBusy = true;
+        logGridDirty = false;
+        try {
+            const logs = await window.pywebview.api.get_logs();
+            if (document.getElementById('log_export_window')?.classList.contains('active')) {
+                const logList = logs.reverse().map(log => ({ time_str: `[${log.time_str}]`, level: log.level, action: log.action, source: log.source || '-', id: log.id }));
+                renderDataGrid('#log_export_window', logList, cols.log, 'id', true);
+            }
+        } catch (error) { console.error('Log refresh failed', error); }
+        finally {
+            logGridBusy = false;
+            if (logGridDirty && logGridTimer === null) logGridTimer = setTimeout(refreshLogGrid, 300);
+        }
+    };
     window.updateLogs = (entry) => {
+        if (!entry) return;
         if (entry && entry.id && !homeLogs.some(l => l.id === entry.id)) {
             homeLogs.push(entry);
             if (homeLogs.length > 200) homeLogs.splice(0, homeLogs.length - 200);
@@ -900,10 +967,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (document.getElementById('log_export_window')?.classList.contains('active') && window.pywebview) {
-            window.pywebview.api.get_logs().then(logs => {
-                const logList = logs.reverse().map(log => ({ time_str: `[${log.time_str}]`, level: log.level, action: log.action, source: log.source || '-', id: log.id }));
-                renderDataGrid('#log_export_window', logList, cols.log, 'id', true);
-            });
+            logGridDirty = true;
+            if (!logGridBusy && logGridTimer === null) logGridTimer = setTimeout(refreshLogGrid, 300);
         }
 
         if ((entry.action === 'System' && entry.detail === 'Engine Initialization Complete') || (entry.level === 'WARN' && entry.action === 'init_engine_thread')) {
@@ -942,7 +1007,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('quick_update_btn')?.addEventListener('click', () => {
         if (!window.pywebview) return;
         window.pywebview.api.check_update().then(res => {
-            if (res.error) window.pywebview.api.show_alert(getMsg("title_error"), getMsg("msg_update_fail"), "error");
+            if (res.error) window.pywebview.api.show_alert(getMsg("title_error"), updateErrorMessage(res), "error");
             else if (res.has_update) openUpdateModal(res);
             else window.pywebview.api.show_alert(getMsg("title_prompt"), `${getMsg("msg_latest_version")} ${res.current}`, "info");
         });
@@ -960,9 +1025,23 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('theme_select')?.addEventListener('change', (e) => { applyTheme(e.target.value); window.pywebview?.api.update_config('theme', e.target.value); });
     document.getElementById('lang_select')?.addEventListener('change', (e) => { translateText(e.target.value); window.pywebview?.api.update_config('language', e.target.value); });
 
-    const syncInteractiveTimeoutState = (enabled) => {
+    const syncInteractiveTimeoutState = () => {
+        document.querySelectorAll('[data-setting-parent]').forEach(row => {
+            const parent = document.querySelector(`[data-config-key="${row.dataset.settingParent}"]`);
+            const visible = !appState.firstLaunch && !!parent?.checked;
+            row.classList.toggle('hidden', !visible);
+            row.querySelectorAll('input, button').forEach(control => {
+                control.disabled = !visible || parent.disabled || control.dataset.pending === '1';
+            });
+        });
+        const interactive = document.querySelector('[data-config-key="interactive_switch"]');
+        const automatic = document.querySelector('[data-config-key="interactive_auto_block"]');
         const timeoutInput = document.getElementById('interactive_timeout_input');
-        if (timeoutInput) timeoutInput.disabled = !enabled;
+        if (automatic) automatic.disabled = appState.firstLaunch || !interactive?.checked || interactive.disabled || automatic.dataset.pending === '1';
+        if (timeoutInput) {
+            timeoutInput.disabled = appState.firstLaunch || !interactive?.checked || interactive.disabled || !automatic?.checked || automatic.disabled;
+            timeoutInput.closest('.list-item')?.classList.toggle('hidden', appState.firstLaunch || !interactive?.checked || !automatic?.checked);
+        }
     };
 
     document.getElementById('interactive_timeout_input')?.addEventListener('change', (e) => {
@@ -982,23 +1061,34 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const applyToggle = async (key, checked, toggle) => {
+        let failed = false;
+        toggle.dataset.pending = '1';
         toggle.disabled = true;
+        syncInteractiveTimeoutState();
         try {
             const result = await window.pywebview.api.update_config(key, checked);
             if (result !== undefined && result !== null) toggle.checked = result;
-            if (key === 'interactive_switch') syncInteractiveTimeoutState(toggle.checked);
+            failed = toggle.checked !== checked;
             if (appState.configCache) {
-                appState.configCache[key] = checked;
+                appState.configCache[key] = toggle.checked;
                 updateProtectionLights(appState.configCache);
             }
-        } catch { toggle.checked = !checked; }
-        finally { toggle.disabled = false; }
+        } catch { toggle.checked = !checked; failed = true; }
+        finally {
+            delete toggle.dataset.pending;
+            toggle.disabled = false;
+            syncInteractiveTimeoutState();
+        }
+        if (key === 'context_switch' || key === 'classic_menu_switch') await window.refreshContextMenuStatus();
+        if (key === 'context_switch' && failed) {
+            try { await window.pywebview.api.show_alert(getMsg('title_error'), getMsg('msg_context_menu_failed'), 'error'); } catch {}
+        }
     };
 
     document.querySelectorAll('.toggle-switch input').forEach((toggle, index) => {
         toggle.addEventListener('change', async (e) => {
-            const switchMap = ["process_switch", "suspend_switch", "load_switch", "document_switch", "system_switch", "network_switch", "driver_switch", "sensitive_switch", "extension_switch", "cloud_switch", "suffix_switch", "autostart_switch", "context_switch", "classic_menu_switch", "interactive_switch"];
-            const key = switchMap[index];
+
+            const key = toggle.dataset.configKey;
             if (!window.pywebview || !key) return;
 
             if (key === 'classic_menu_switch') {
@@ -1233,54 +1323,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     document.getElementById('close_button')?.addEventListener('click', () => window.pywebview?.api.hide_window());
 
+    let resizeGestureActive = false;
     document.querySelectorAll('.window-resize-handle').forEach(handle => {
         handle.addEventListener('mousedown', (e) => {
             if (e.button !== 0 || !window.pywebview) return;
             e.preventDefault();
             e.stopPropagation();
-
-            const api = window.pywebview.api;
-            const startX = e.screenX;
-            const startY = e.screenY;
-            let lastDx = null;
-            let lastDy = null;
-            let pendingDx = null;
-            let pendingDy = null;
-            let rafPending = false;
-
-            const flushMove = () => {
-                if (pendingDx === null) return;
-                if (pendingDx === lastDx && pendingDy === lastDy) { pendingDx = null; return; }
-                lastDx = pendingDx;
-                lastDy = pendingDy;
-                api.update_window_resize(pendingDx, pendingDy);
-                pendingDx = null;
-            };
-
-            const onMove = (ev) => {
-                pendingDx = ev.screenX - startX;
-                pendingDy = ev.screenY - startY;
-
-                if (!rafPending) {
-                    rafPending = true;
-                    requestAnimationFrame(() => {
-                        rafPending = false;
-                        flushMove();
-                    });
-                }
-            };
-
-            const onUp = () => {
-                document.removeEventListener('mousemove', onMove);
-                document.removeEventListener('mouseup', onUp);
-                flushMove();
-                api.end_window_resize();
-            };
-
-            api.begin_window_resize(handle.dataset.dir).then(() => {
-                document.addEventListener('mousemove', onMove);
-                document.addEventListener('mouseup', onUp);
-            });
+            // 一次性触发原生尺寸循环,拖动期间不再有任何桥调用
+            window.pywebview.api.begin_window_resize(handle.dataset.dir);
         });
     });
 
@@ -1292,6 +1342,23 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
+    const pendingThreatButton = document.getElementById('pending_threats_btn');
+    pendingThreatButton?.addEventListener('click', () => {
+        window.pywebview?.api.show_pending_threats().catch(error => reportStartupError('pending-threats', error));
+    });
+    const refreshPendingThreats = async () => {
+        if (window.pywebview?.api && !document.hidden) {
+            try {
+                const count = await window.pywebview.api.get_pending_threat_count();
+                pendingThreatButton?.classList.toggle('hidden', count === 0);
+                const label = document.getElementById('pending_threats_count');
+                if (label && label.textContent !== String(count)) label.textContent = String(count);
+            } catch (error) { console.error('Pending threats refresh failed', error); }
+        }
+        window.setTimeout(refreshPendingThreats, 1500);
+    };
+    refreshPendingThreats();
+
     document.querySelectorAll('.log-filter').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.log-filter').forEach(b => b.classList.remove('active'));
@@ -1299,16 +1366,6 @@ document.addEventListener('DOMContentLoaded', () => {
             homeLogFilter = btn.dataset.filter;
             renderHomeLogs();
         });
-    });
-
-    document.getElementById('home_log_sort')?.addEventListener('click', () => {
-        homeLogSortDesc = !homeLogSortDesc;
-        const btn = document.getElementById('home_log_sort');
-        if (btn) {
-            const arrow = homeLogSortDesc ? '↓' : '↑';
-            btn.innerHTML = arrow + '&nbsp;<span data-i18n="col_date">' + getMsg('col_date') + '</span>';
-        }
-        renderHomeLogs();
     });
 
     document.getElementById('home_log_export')?.addEventListener('click', () => {
@@ -1351,9 +1408,30 @@ document.addEventListener('DOMContentLoaded', () => {
     contextMenu.innerHTML = `
         <div class="custom-context-menu-item" id="ctx_open_location"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg><span data-i18n="ctx_open_loc"></span></div>
         <div class="custom-context-menu-item" id="ctx_copy_cell"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><span data-i18n="ctx_copy_cell"></span></div>`;
+    const copyRowItem = contextMenu.querySelector('#ctx_copy_cell').cloneNode(true);
+    copyRowItem.id = 'ctx_copy_row';
+    copyRowItem.querySelector('span').setAttribute('data-i18n', 'ctx_copy_row');
+    contextMenu.appendChild(copyRowItem);
     document.body.appendChild(contextMenu);
     let ctxTarget = null;
     let ctxCellText = null;
+    let ctxRowText = null;
+
+    const showContextMenu = (e) => {
+        e.preventDefault();
+        contextMenu.querySelector('#ctx_open_location').classList.toggle('hidden', !ctxTarget);
+        contextMenu.querySelector('#ctx_copy_cell').classList.toggle('hidden', ctxCellText === null);
+        contextMenu.querySelector('#ctx_copy_row').classList.toggle('hidden', ctxRowText === null);
+        for (const key of ['ctx_open_loc', 'ctx_copy_cell', 'ctx_copy_row']) {
+            contextMenu.querySelector(`[data-i18n="${key}"]`).textContent = getMsg(key);
+        }
+        contextMenu.style.left = `${e.clientX}px`;
+        contextMenu.style.top = `${e.clientY}px`;
+        contextMenu.classList.add('show');
+        const rect = contextMenu.getBoundingClientRect();
+        contextMenu.style.left = `${Math.max(0, Math.min(e.clientX, window.innerWidth - rect.width - 5))}px`;
+        contextMenu.style.top = `${Math.max(0, Math.min(e.clientY, window.innerHeight - rect.height - 5))}px`;
+    };
 
     const copyTextToClipboard = async (text) => {
         if (navigator.clipboard?.writeText) {
@@ -1376,22 +1454,25 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     document.addEventListener('contextmenu', (e) => {
+        ctxTarget = null;
+        ctxCellText = null;
+        ctxRowText = null;
+        const logRow = e.target.closest('#home_log_list .home-log-item');
+        if (logRow) {
+            ctxRowText = logRow.dataset.copyText;
+            const cell = e.target.closest('span');
+            ctxCellText = cell ? cell.textContent : null;
+            showContextMenu(e);
+            return;
+        }
         const li = e.target.closest('.manage-list-item');
         const rowCol = e.target.closest('.row-col');
         if (li && rowCol) {
             const cb = li.querySelector('input[type="checkbox"]');
             if (cb && cb.dataset.path && cb.dataset.path !== "path_unknown") {
-                e.preventDefault();
                 ctxTarget = cb.dataset.path;
                 ctxCellText = rowCol.textContent;
-                contextMenu.querySelector('#ctx_open_location span').textContent = getMsg('ctx_open_loc');
-                contextMenu.querySelector('#ctx_copy_cell span').textContent = getMsg('ctx_copy_cell');
-                contextMenu.style.left = `${e.clientX}px`;
-                contextMenu.style.top = `${e.clientY}px`;
-                contextMenu.classList.add('show');
-                const rect = contextMenu.getBoundingClientRect();
-                if (rect.right > window.innerWidth) contextMenu.style.left = `${window.innerWidth - rect.width - 5}px`;
-                if (rect.bottom > window.innerHeight) contextMenu.style.top = `${window.innerHeight - rect.height - 5}px`;
+                showContextMenu(e);
                 return;
             }
         }
@@ -1399,12 +1480,19 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     document.addEventListener('click', (e) => { if (!e.target.closest('.custom-context-menu')) contextMenu.classList.remove('show'); });
     document.addEventListener('scroll', () => contextMenu.classList.remove('show'), true);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') contextMenu.classList.remove('show'); });
     document.getElementById('ctx_open_location').addEventListener('click', () => {
         if (window.pywebview && ctxTarget) window.pywebview.api.open_file_location(ctxTarget);
         contextMenu.classList.remove('show');
     });
     document.getElementById('ctx_copy_cell').addEventListener('click', async () => {
         const text = ctxCellText;
+        contextMenu.classList.remove('show');
+        if (text !== null) await copyTextToClipboard(text);
+    });
+
+    document.getElementById('ctx_copy_row').addEventListener('click', async () => {
+        const text = ctxRowText;
         contextMenu.classList.remove('show');
         if (text !== null) await copyTextToClipboard(text);
     });
@@ -1451,6 +1539,22 @@ document.addEventListener('DOMContentLoaded', () => {
     bindSettingAction('web_official', () => window.pywebview?.api.open_website());
 
     const updateModalState = { result: null, downloading: false };
+    const updateErrorMessage = res => {
+        const messages = {
+            repository_unavailable: '更新仓库不可访问（HTTP 404），请确认仓库已公开且地址正确。',
+            rate_limited: 'GitHub 暂时限制了请求，请稍后重试。',
+            network_error: '连接更新服务器失败，请检查网络和系统代理。',
+            invalid_response: '更新服务器返回的数据格式异常。',
+        };
+        const english = {
+            repository_unavailable: 'Update repository unavailable (HTTP 404). Check its visibility and address.',
+            rate_limited: 'GitHub temporarily limited requests. Please try again later.',
+            network_error: 'Could not connect to the update server. Check your network and system proxy.',
+            invalid_response: 'The update server returned an unexpected response.',
+        };
+        const reason = (/^zh/.test(document.documentElement.lang) ? messages : english)[res?.error_code];
+        return `${getMsg('msg_update_fail')}${reason ? `\n${reason}` : ''}${res?.detail ? `\n${res.detail}` : ''}`;
+    };
 
     const setModalElement = (id, show) => document.getElementById(id)?.classList.toggle('hidden', !show);
 
@@ -1559,7 +1663,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     bindSettingAction('update_check', () => {
         window.pywebview?.api.check_update().then(res => {
-            if (res.error) window.pywebview.api.show_alert(getMsg("title_error"), getMsg("msg_update_fail"), "error");
+            if (res.error) window.pywebview.api.show_alert(getMsg("title_error"), updateErrorMessage(res), "error");
             else if (res.has_update) openUpdateModal(res);
             else window.pywebview.api.show_alert(getMsg("title_prompt"), `${getMsg("msg_latest_version")} ${res.current}`, "info");
         });
@@ -1685,6 +1789,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res) window.pywebview.api.reset_config().then(() => window.pywebview.api.show_alert(getMsg("title_prompt"), getMsg("msg_reset_success"), "info"));
         });
     });
+    document.getElementById('clear_alert_rules')?.addEventListener('click', async () => {
+        const api = window.pywebview?.api;
+        if (!api) return;
+        const chinese = /^zh/.test(document.documentElement.lang);
+        if (!await api.show_confirm(getMsg('title_prompt'), chinese ? '清除全部已记住的告警决定？以后重新询问。' : 'Clear all remembered alert decisions? Future alerts will prompt again.')) return;
+        const success = await api.clear_alert_decisions();
+        await api.show_alert(getMsg('title_prompt'), success ? (chinese ? '已清除。' : 'Cleared.') : (chinese ? '保存失败，未清除。' : 'Could not save. Rules were preserved.'), success ? 'info' : 'error');
+    });
 
     document.querySelectorAll('select.modern-select').forEach(buildCustomSelectElement);
     renderDataGrid('#home_window', [], cols.log, 'id', false);
@@ -1703,6 +1815,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let gridResizeTimer = null;
     const rescaleAllGrids = () => {
         document.querySelectorAll('.manage-widget, .virus-widget').forEach(widget => {
+            if (!widget.getClientRects().length) return;
             const state = widget.gridState;
             if (!state || !Array.isArray(state.colWidths) || !state.colWidths.length) return;
             const containerWidth = widget.clientWidth || 800;
@@ -1726,7 +1839,14 @@ document.addEventListener('DOMContentLoaded', () => {
         row.classList.toggle('quick-compact', row.clientWidth < 470);
     };
     updateQuickScale();
-    window.addEventListener('resize', updateQuickScale);
+    let quickScaleFrame = null;
+    window.addEventListener('resize', () => {
+        if (quickScaleFrame !== null) return;
+        quickScaleFrame = requestAnimationFrame(() => {
+            quickScaleFrame = null;
+            updateQuickScale();
+        });
+    });
 
     let pywebviewInitStarted = false;
     let pywebviewInitReady = false;
@@ -1788,22 +1908,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (titleVersion) titleVersion.textContent = 'v' + (cfg.version || '');
                 appState.upstreamTracked = cfg.upstream_tracked || '3.7.0';
                 appState.configCache = cfg;
+                await window.refreshContextMenuStatus();
                 updateProtectionLights(cfg);
                 const timeoutInput = document.getElementById('interactive_timeout_input');
                 if (timeoutInput) {
                     const parsed = parseInt(cfg.interactive_timeout, 10);
                     timeoutInput.value = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 5), 300) : 30;
-                    timeoutInput.disabled = !cfg.interactive_switch;
                 }
-                const switchMap = ["process_switch", "suspend_switch", "load_switch", "document_switch", "system_switch", "network_switch", "driver_switch", "sensitive_switch", "extension_switch", "cloud_switch", "suffix_switch", "autostart_switch", "context_switch", "classic_menu_switch", "interactive_switch"];
+
                 document.querySelectorAll('.toggle-switch input').forEach((toggle, index) => {
                     if (appState.firstLaunch) {
                         toggle.checked = false;
                         toggle.disabled = true;
-                    } else if (switchMap[index]) {
-                        toggle.checked = !!cfg[switchMap[index]];
+                    } else if (toggle.dataset.configKey) {
+                        toggle.checked = !!cfg[toggle.dataset.configKey];
                     }
                 });
+                syncInteractiveTimeoutState();
                 stage = 'init_ui_ready';
                 await window.pywebview.api.init_ui_ready();
                 backfillHomeLogs();
@@ -1827,13 +1948,12 @@ document.addEventListener('DOMContentLoaded', () => {
     window.onEngineReady = async () => {
         if (!appState.firstLaunch) return;
         await window.pywebview.api.update_config("first_launch", false);
-        const switchMap = ["process_switch", "suspend_switch", "load_switch", "document_switch", "system_switch", "network_switch", "driver_switch", "sensitive_switch", "extension_switch", "cloud_switch", "suffix_switch", "autostart_switch", "context_switch"];
+
         const seq = ["autostart_switch", "suffix_switch", "process_switch", "suspend_switch", "load_switch", "document_switch", "system_switch", "network_switch", "driver_switch", "context_switch"];
         
         for (const key of seq) {
-            const index = switchMap.indexOf(key);
-            if (index !== -1) {
-                const toggle = document.querySelectorAll('.toggle-switch input')[index];
+            {
+                const toggle = document.querySelector(`.toggle-switch input[data-config-key="${key}"]`);
                 if (toggle) {
                     toggle.checked = true;
                     try {
@@ -1841,14 +1961,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (res !== undefined && res !== null) toggle.checked = res;
                     } catch { toggle.checked = false; } 
                     finally { toggle.disabled = false; }
+                    if (appState.configCache) appState.configCache[key] = toggle.checked;
                     await new Promise(r => setTimeout(r, 100));
                 }
             }
         }
         document.querySelectorAll('.toggle-switch input').forEach(t => t.disabled = false);
         appState.firstLaunch = false;
+        await window.refreshContextMenuStatus();
+        syncInteractiveTimeoutState();
         if (appState.configCache) {
-            seq.forEach(key => { appState.configCache[key] = true; });
             updateProtectionLights(appState.configCache);
         }
     };

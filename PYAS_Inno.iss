@@ -1,6 +1,6 @@
 #define AppId "{{a7d7bac3-93b8-4630-8308-c7a56bf7fdf4}"
 #define AppName "PYAS"
-#define AppVersion "3.7.0.1"
+#define AppVersion "3.7.0.17"
 #define AppPublisher "PYAS Security"
 #define AppURL "https://github.com/upcyan/PYAS_cyanmod"
 #define AppExeName "PYAS.exe"
@@ -39,6 +39,7 @@ OutputDir=Output
 OutputBaseFilename=PYAS_Setup
 UsePreviousTasks=no
 SetupLogging=yes
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -59,11 +60,22 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "Redist\VC_redist.x64.exe"; DestDir: "{tmp}\PYAS_Redist"; Flags: deleteafterinstall ignoreversion; AfterInstall: EnsureVCRedist
 Source: "Redist\MicrosoftEdgeWebview2Setup.exe"; Flags: dontcopy noencryption
+Source: "SetupResources\stop_menu.ps1"; Flags: dontcopy noencryption
+Source: "SetupResources\stop_menu.ps1"; DestDir: "{app}\Menu"; Flags: ignoreversion
 Source: "Payload\Engine\*"; DestDir: "{app}\Engine"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "Payload\Interface\*"; DestDir: "{app}\Interface"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "Payload\License\*"; DestDir: "{app}\License"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "Payload\PYAS.exe"; DestDir: "{app}"; Flags: ignoreversion; AfterInstall: FinalizeDriverRemoval
+Source: "Payload\PYAS_Menu.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "Payload\Menu\*"; DestDir: "{app}\Menu"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "Payload\Plugins\*"; DestDir: "{app}\Plugins"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Run]
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Menu\trust_menu.ps1"" -RespectConfig"; Flags: runhidden waituntilterminated; Check: IsModernMenuSupported
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Menu\register_menu.ps1"" -ExternalLocation ""{app}"" -RespectConfig"; Flags: runhidden waituntilterminated runasoriginaluser; Check: IsModernMenuSupported
+
+[UninstallRun]
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Menu\unregister_menu.ps1"""; Flags: runhidden waituntilterminated; RunOnceId: "PYASModernMenu"
 
 [Registry]
 Root: HKCU; Subkey: "Software\Classes\*\shell\PYAS_Scan"; Flags: uninsdeletekey dontcreatekey
@@ -189,6 +201,60 @@ var
 
 function FindWindow(lpClassName: LongWord; lpWindowName: string): HWND;
   external 'FindWindowW@user32.dll stdcall';
+
+function FindWindowEx(Parent, Previous: HWND; ClassName: LongWord; Title: string): HWND;
+  external 'FindWindowExW@user32.dll stdcall';
+function GetClassName(Window: HWND; Buffer: string; Capacity: Integer): Integer;
+  external 'GetClassNameW@user32.dll stdcall';
+function GetWindowThreadProcessId(Window: HWND; var ProcessId: Cardinal): Cardinal;
+  external 'GetWindowThreadProcessId@user32.dll stdcall';
+function OpenProcess(Access: Cardinal; Inherit: Boolean; ProcessId: Cardinal): THandle;
+  external 'OpenProcess@kernel32.dll stdcall';
+function QueryFullProcessImageName(Process: THandle; Flags: Cardinal; Buffer: string; var Capacity: Cardinal): Boolean;
+  external 'QueryFullProcessImageNameW@kernel32.dll stdcall';
+function CloseHandle(Handle: THandle): Boolean;
+  external 'CloseHandle@kernel32.dll stdcall';
+
+function FindVerifiedMainWindow: HWND;
+var
+  Window: HWND;
+  ProcessId, Capacity: Cardinal;
+  Process: THandle;
+  ClassName, ImagePath: string;
+begin
+  Result := 0;
+  Window := FindWindowEx(0, 0, 0, 'PYAS Security Cyanmod');
+  while Window <> 0 do
+  begin
+    ClassName := StringOfChar(#0, 256);
+    SetLength(ClassName, GetClassName(Window, ClassName, 256));
+    if Pos('WindowsForms10.Window.', ClassName) = 1 then
+    begin
+      ProcessId := 0;
+      GetWindowThreadProcessId(Window, ProcessId);
+      Process := OpenProcess($1000, False, ProcessId);
+      if Process <> 0 then
+      begin
+        try
+          Capacity := 32768;
+          ImagePath := StringOfChar(#0, Capacity);
+          if QueryFullProcessImageName(Process, 0, ImagePath, Capacity) then
+          begin
+            SetLength(ImagePath, Capacity);
+            if CompareText(ExtractFileName(ImagePath), '{#AppExeName}') = 0 then
+            begin
+              Result := Window;
+              Exit;
+            end;
+          end;
+        finally
+          CloseHandle(Process);
+        end;
+      end;
+    end;
+    Window := FindWindowEx(0, Window, 0, 'PYAS Security Cyanmod');
+  end;
+end;
 
 function GetTickCount: Cardinal;
   external 'GetTickCount@kernel32.dll stdcall';
@@ -323,11 +389,29 @@ begin
   Result := FmtMessage(CustomMessage('WebView2InstallFailed'), [Detail]);
 end;
 
+function StopMenuServer(InstallPath, ScriptPath: string): Boolean;
+var
+  ResultCode: Integer;
+begin
+  ResultCode := -1;
+  Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ScriptPath +
+    '" -InstallPath "' + InstallPath + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := Result and (ResultCode = 0);
+  Log(Format('Menu helper shutdown: directory=%s, exit=%d', [InstallPath, ResultCode]));
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): string;
 begin
   DependenciesReady := False;
   try
     Result := EnsureWebView2;
+    if Result = '' then
+    begin
+      ExtractTemporaryFile('stop_menu.ps1');
+      if not StopMenuServer(ExpandConstant('{app}'), ExpandConstant('{tmp}\stop_menu.ps1')) then
+        Result := CustomMessage('QuitFailed');
+    end;
   except
     Log('WebView2 prerequisite exception: ' + GetExceptionMessage);
     Result := FmtMessage(CustomMessage('WebView2InstallFailed'), [GetExceptionMessage]);
@@ -342,7 +426,7 @@ var
 begin
   Deadline := GetTickCount + TimeoutMs;
   repeat
-    if FindWindow(0, 'PYAS Security Cyanmod') = 0 then
+    if FindVerifiedMainWindow = 0 then
     begin
       Result := True;
       Exit;
@@ -360,17 +444,21 @@ begin
   Result := True;
   ExePath := InstallPath + '\{#AppExeName}';
   if not FileExists(ExePath) then Exit;
+  if FindVerifiedMainWindow = 0 then
+  begin
+    Log('No verified PYAS main window; ignoring unrelated windows with the same title');
+    Exit;
+  end;
 
-  Exec(ExePath, '-quit', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExePath, '-quit', InstallPath, SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   { -quit 的退出码受权限与消息通道影响;只要主窗口最终关闭即视为成功 }
   if WaitForMainWindowToClose(15000) then
     Exit;
 
-  { 兜底:优雅退出失败时强制结束进程,等价于用户手动退出后再安装 }
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM "{#AppExeName}"', '', SW_HIDE,
-    ewWaitUntilTerminated, ResultCode);
-  Result := WaitForMainWindowToClose(10000);
+  { A running driver must shut down through its controlled unload protocol. }
+  Log(Format('Controlled PYAS shutdown failed; exit code=%d', [ResultCode]));
+  Result := False;
 end;
 
 procedure FinalizeDriverRemoval;
@@ -379,7 +467,7 @@ var
   ExePath: string;
 begin
   ExePath := ExpandConstant('{app}\{#AppExeName}');
-  if not Exec(ExePath, '-quit', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+  if not Exec(ExePath, '-driver-uninstall', ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
     RaiseException(CustomMessage('QuitFailed'));
 end;
 
@@ -415,6 +503,8 @@ end;
 function InitializeUninstall(): Boolean;
 begin
   Result := QuitOldInstance(ExpandConstant('{app}'));
+  if Result and FileExists(ExpandConstant('{app}\Menu\stop_menu.ps1')) then
+    Result := StopMenuServer(ExpandConstant('{app}'), ExpandConstant('{app}\Menu\stop_menu.ps1'));
   if not Result then
     MsgBox(CustomMessage('QuitFailed'), mbCriticalError, MB_OK);
 end;
@@ -446,6 +536,14 @@ begin
   except
     Log('Task Scheduler COM was unavailable while cleaning the legacy startup task');
   end;
+end;
+
+function IsModernMenuSupported: Boolean;
+var
+  Version: TWindowsVersion;
+begin
+  GetWindowsVersionEx(Version);
+  Result := Version.Build >= 22000;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

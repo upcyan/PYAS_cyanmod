@@ -355,6 +355,9 @@ class WindowsMixin:
             ctypes.wintypes.UINT,
         ]
         self.user32.SetWindowPos.restype = ctypes.wintypes.BOOL
+        if hasattr(self.user32, 'GetDpiForWindow'):
+            self.user32.GetDpiForWindow.argtypes = [ctypes.wintypes.HWND]
+            self.user32.GetDpiForWindow.restype = ctypes.wintypes.UINT
         self.user32.SetLayeredWindowAttributes.argtypes = [
             ctypes.wintypes.HWND,
             ctypes.wintypes.DWORD,
