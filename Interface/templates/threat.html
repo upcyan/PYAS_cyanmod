@@ -35,7 +35,27 @@
                 <button id="threat_confirm" class="action-btn modern-btn" type="button">Confirm</button>
                 <button id="threat_cancel" class="action-btn modern-btn" type="button">Cancel</button>
             </div>
-            <label class="threat-repeat"><input id="threat_repeat" type="checkbox"><span id="threat_repeat_text"></span></label>
+            <div id="threat_fp_panel" class="hidden" role="group" aria-labelledby="threat_fp_title">
+                <p id="threat_fp_title"></p>
+                <p id="threat_fp_identity" class="fp-identity"></p>
+                <div class="fp-scope">
+                    <label><input type="radio" name="fp_scope" id="threat_fp_scope_this" value="file_rule" checked><span id="threat_fp_scope_this_text"></span></label>
+                    <label><input type="radio" name="fp_scope" id="threat_fp_scope_file" value="file"><span id="threat_fp_scope_file_text"></span></label>
+                </div>
+                <div class="fp-row">
+                    <label id="threat_fp_reason_label" for="threat_fp_reason"></label>
+                    <select id="threat_fp_reason" class="modern-select"></select>
+                </div>
+                <input type="text" id="threat_fp_note" class="fp-note" maxlength="200" spellcheck="false">
+                <div class="fp-actions">
+                    <button id="threat_fp_submit" class="action-btn modern-btn primary-btn" type="button"></button>
+                    <button id="threat_fp_cancel" class="action-btn modern-btn" type="button"></button>
+                </div>
+            </div>
+            <div class="threat-meta">
+                <label class="threat-repeat"><input id="threat_repeat" type="checkbox"><span id="threat_repeat_text"></span></label>
+                <button id="threat_fp" class="fp-link" type="button" hidden></button>
+            </div>
             <div class="threat-actions">
                 <button id="threat_ai" class="action-btn modern-btn ai-btn" type="button" hidden></button>
                 <button id="threat_permanent" class="action-btn modern-btn" type="button" disabled>Always allow</button>

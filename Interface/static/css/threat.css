@@ -48,6 +48,19 @@
 .threat-footer { flex-shrink: 0; padding: 0 20px 20px; }
 .threat-repeat { display: flex; gap: 8px; align-items: flex-start; color: var(--text-secondary); font-size: 12px; line-height: 1.5; margin-bottom: 12px; }
 .threat-repeat input { margin-top: 3px; accent-color: var(--accent-color); }
+.threat-meta { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
+.threat-meta .threat-repeat { margin-bottom: 0; }
+.fp-link { background: none; border: none; padding: 2px 4px; color: var(--text-secondary); font-size: 12px; cursor: pointer; flex-shrink: 0; }
+.fp-link:hover:not(:disabled) { color: var(--accent-color); }
+#threat_fp_panel { padding: 12px; border: 1px solid var(--border-color); border-radius: var(--radius-panel); background: var(--bg-panel); margin-bottom: 10px; font-size: 13px; line-height: 1.5; }
+#threat_fp_title { font-weight: 600; margin-bottom: 6px; }
+.fp-identity { color: var(--text-secondary); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 64px; overflow-y: auto; margin-bottom: 8px; }
+.fp-scope { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.fp-scope label { display: flex; gap: 8px; align-items: center; }
+.fp-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.fp-row label { flex-shrink: 0; color: var(--text-secondary); font-size: 12px; }
+.fp-note { width: 100%; margin-bottom: 8px; padding: 8px 10px; border: 1px solid var(--border-color); border-radius: var(--radius-control); background: var(--bg-panel); color: var(--text-primary); font-size: 13px; text-align: left; }
+.fp-actions { display: flex; gap: 10px; justify-content: flex-end; }
 #threat_permanent { margin-right: auto; }
 #threat_ai:not(:disabled) { border-color: var(--accent-color); color: var(--accent-color); background: transparent; }
 #threat_ai:not(:disabled):hover { background-color: var(--accent-alpha); }

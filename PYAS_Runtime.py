@@ -176,6 +176,7 @@ class RuntimeMixin:
             "white_list": [],
             "quarantine": [],
             "block_list": [],
+            "suppress_rules": [],
         }
 
         self.pass_windows = [

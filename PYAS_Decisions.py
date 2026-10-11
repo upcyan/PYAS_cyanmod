@@ -4,10 +4,17 @@ import json
 import os
 import time
 from contextlib import contextmanager
+from uuid import uuid4
 
 MAX_RULES = 256
 REPEAT_SECONDS = 30
 REPEAT_USES = 20
+
+# 误报抑制:只锚定文件内容(SHA-256),绝不锚定目录/进程名/扩展名。
+# scope 'file_rule' = 该内容 × 该检测结果(L1);'file' = 该内容 × 全部检测(L2)
+SUPPRESS_TTL = 90 * 86400
+SUPPRESS_SCOPES = ('file_rule', 'file')
+SUPPRESS_REASONS = ('dev_tool', 'installer', 'enterprise', 'game_patch', 'other')
 
 
 def alert_identity(action, source, target, detection, opener=None):
@@ -90,6 +97,8 @@ class AlertPolicyMixin:
             rules = self.pyas_config.get('alert_allow_rules', [])
             if isinstance(rules, list) and any(isinstance(item, dict) and item == rule for item in rules[:MAX_RULES]):
                 return 'allow'
+            if self._match_suppression_locked(rule) is not None:
+                return 'allow'
             recent = getattr(self, '_recent_alert_decisions', {})
             now = time.monotonic()
             for key in list(recent):
@@ -100,6 +109,105 @@ class AlertPolicyMixin:
                 item['uses'] -= uses
                 return item['choice']
         return None
+
+    def _match_suppression_locked(self, rule):
+        """内容锚定抑制匹配;命中即累计审计计数,过期条目顺带清理。"""
+        entries = self.pyas_config.get('suppress_rules', [])
+
+        if not isinstance(entries, list) or not entries or not rule.get('sha256'):
+            return None
+
+        now = time.time()
+        changed = False
+        matched = None
+
+        for entry in entries[:MAX_RULES]:
+            if not isinstance(entry, dict):
+                changed = True
+                continue
+
+            if entry.get('expires', 0) <= now:
+                changed = True
+                continue
+
+            if entry.get('sha256') != rule.get('sha256'):
+                continue
+
+            if entry.get('scope') == 'file' or (
+                entry.get('scope') == 'file_rule' and entry.get('detection') == rule.get('detection')
+            ):
+                matched = entry
+                break
+
+        if matched is not None:
+            matched['hits'] = int(matched.get('hits', 0)) + 1
+            matched['last_hit'] = now
+
+            # 命中计数主要留在内存,首次与每 50 次落盘一次,避免高频事件反复写配置
+            if matched['hits'] <= 1 or matched['hits'] % 50 == 0:
+                changed = True
+
+            if hasattr(self, 'write_log'):
+                self.write_log('INFO', 'Suppression Hit',
+                    source=rule.get('source', ''),
+                    detail=f"{matched.get('scope')} / {matched.get('reason')} / {rule.get('action', '')}",
+                    file_hash=rule.get('sha256'))
+
+        if changed:
+            kept = [entry for entry in entries if isinstance(entry, dict) and entry.get('expires', 0) > now]
+            self.pyas_config['suppress_rules'] = kept
+            self.save_config()
+
+        return matched
+
+    def _remember_suppression(self, request, reason, note, scope):
+        """登记误报抑制;内容重读校验与永久允许同一套,文件被替换即拒绝。"""
+        rule = request.rule
+
+        if not rule or reason not in SUPPRESS_REASONS or scope not in SUPPRESS_SCOPES:
+            return False
+
+        if scope == 'file_rule' and not rule.get('detection'):
+            return False
+
+        fresh = self._make_alert_identity(rule['action'], rule['source'], rule['target'], json.loads(rule['detection']))
+        if fresh != rule or request.done.is_set() or (request.deadline and request.deadline <= time.monotonic()):
+            return False
+
+        now = time.time()
+        entry = {'id': uuid4().hex, 'scope': scope, 'sha256': rule['sha256'],
+            'detection': rule['detection'] if scope == 'file_rule' else '',
+            'action': rule['action'], 'reason': reason,
+            'note': str(note or '').strip()[:200],
+            'created': now, 'expires': now + SUPPRESS_TTL,
+            'hits': 0, 'last_hit': 0, 'source': 'user'}
+
+        with self._alert_policy_lock():
+            old = self.pyas_config.get('suppress_rules', [])
+            rules = [item for item in old if isinstance(item, dict)] if isinstance(old, list) else []
+            duplicate = next((item for item in rules
+                if item.get('sha256') == entry['sha256'] and item.get('scope') == scope
+                and (scope == 'file' or item.get('detection') == entry['detection'])), None)
+
+            if duplicate is not None:
+                merged = {**duplicate, 'reason': entry['reason'], 'note': entry['note'],
+                    'created': entry['created'], 'expires': entry['expires']}
+                updated = [merged if item is duplicate else item for item in rules]
+            else:
+                if len(rules) >= MAX_RULES:
+                    return False
+                updated = [*rules, entry]
+
+            self.pyas_config['suppress_rules'] = updated
+            if self.save_config() is False:
+                self.pyas_config['suppress_rules'] = old
+                return False
+
+        if hasattr(self, 'write_log'):
+            self.write_log('INFO', 'False Positive Reported',
+                source=rule['source'],
+                detail=f"{scope} / {reason} / {rule['action']}", file_hash=rule['sha256'])
+        return True
 
     def _remember_alert_decision(self, request, choice, repeat=False):
         rule = request.rule

@@ -5,11 +5,35 @@ document.addEventListener('DOMContentLoaded', () => {
     const block = byId('threat_block');
     const permanent = byId('threat_permanent');
     const aiButton = byId('threat_ai');
+    const fpButton = byId('threat_fp');
+    const fpPanel = byId('threat_fp_panel');
     const repeat = byId('threat_repeat');
-    const allButtons = [allow, block, permanent, aiButton];
+    const allButtons = [allow, block, permanent, aiButton, fpButton];
     const disable = () => allButtons.forEach(button => { button.disabled = true; });
     let confirmationId = null;
     let aiVerdict = '';
+    let fpTexts = null;
+    const hideFpPanel = () => fpPanel.classList.add('hidden');
+    const openFpPanel = () => {
+        if (!fpTexts || !currentId) return;
+        byId('threat_fp_title').textContent = fpTexts.button;
+        byId('threat_fp_identity').textContent = latestIdentity;
+        byId('threat_fp_scope_this_text').textContent = fpTexts.scope_this;
+        byId('threat_fp_scope_file_text').textContent = fpTexts.scope_file;
+        byId('threat_fp_reason_label').textContent = fpTexts.reason;
+        byId('threat_fp_reason').replaceChildren(...fpTexts.reasons.map(([value, label]) => {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = label;
+            return option;
+        }));
+        byId('threat_fp_note').value = '';
+        byId('threat_fp_note').placeholder = fpTexts.note;
+        byId('threat_fp_submit').textContent = fpTexts.submit;
+        byId('threat_fp_cancel').textContent = fpTexts.cancel;
+        fpPanel.classList.remove('hidden');
+        byId('threat_fp_cancel').focus({ preventScroll: true });
+    };
     const texts = {
         simplified_switch: ['永久允许', '30 秒内对完全相同的告警重复此决定（最多 20 次，默认关闭）', '仅记住此防护、此完整路径、此 SHA-256 文件内容、此检测结果和此目标。文件变化后重新询问；不会放行目录或关闭扫描。可在设置中清除。确认永久允许？', '确认永久允许', '取消', '文件身份无法验证、已经变化或保存失败；未新增允许规则，请重新处理。', '无法确认文件身份或属于内存告警，不能记住决定。'],
         traditional_switch: ['永久允許', '30 秒內對完全相同的告警重複此決定（最多 20 次，預設關閉）', '僅記住此防護、此完整路徑、此 SHA-256 檔案內容、此偵測結果與此目標。檔案變更後重新詢問；不放行目錄或關閉掃描。可在設定中清除。確認永久允許？', '確認永久允許', '取消', '無法驗證檔案身分、檔案已變更或儲存失敗；未新增允許規則。', '無法確認檔案身分或屬於記憶體告警，不能記住決定。'],
@@ -22,6 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let latestTheme = 'system_switch';
     let nextTimer;
     let revision = 0;
+    let latestIdentity = '';
 
     const setText = (id, text) => {
         const element = byId(id);
@@ -81,6 +106,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 aiVerdict = '';
                 aiButton.disabled = true;
             }
+            // 误报入口:仅文件类告警(有内容身份)显示
+            const fp = data.fp;
+            if (fp && fp.button) {
+                fpButton.hidden = false;
+                fpButton.textContent = fp.button;
+                fpButton.disabled = busy || !!data.resolving;
+                fpTexts = fp;
+            } else {
+                fpButton.hidden = true;
+                fpTexts = null;
+                hideFpPanel();
+            }
+            latestIdentity = data.identity_summary || '';
             const key = JSON.stringify(data.events);
             if (key !== queueKey) {
                 queueKey = key;
@@ -96,6 +134,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 repeat.checked = false;
                 confirmationId = null;
                 byId('threat_confirmation').classList.add('hidden');
+                hideFpPanel();
                 byId('threat_message').scrollTop = 0;
                 block.focus({ preventScroll: true });
             }
@@ -123,6 +162,22 @@ document.addEventListener('DOMContentLoaded', () => {
     aiButton.addEventListener('click', () => {
         // 只执行就绪的 AI 建议;失败/分析中点击无效,绝不隐式放行
         if (aiVerdict) decide(aiVerdict);
+    });
+    fpButton.addEventListener('click', openFpPanel);
+    byId('threat_fp_cancel').addEventListener('click', hideFpPanel);
+    byId('threat_fp_submit').addEventListener('click', async () => {
+        if (busy || !currentId || fpPanel.classList.contains('hidden')) return;
+        const scope = document.querySelector('input[name="fp_scope"]:checked')?.value || 'file_rule';
+        const reason = byId('threat_fp_reason').value || 'other';
+        const note = byId('threat_fp_note').value || '';
+        busy = true;
+        revision += 1;
+        clearTimeout(nextTimer);
+        disable();
+        hideFpPanel();
+        try { await window.pywebview.api.report_false_positive(currentId, reason, note, scope); }
+        catch (error) { console.error('False positive report failed', error); }
+        finally { busy = false; await refresh(); }
     });
     permanent.addEventListener('click', () => {
         confirmationId = currentId;

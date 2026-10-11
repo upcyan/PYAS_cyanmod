@@ -247,6 +247,106 @@ DIALOG_TEXTS.update({
     },
 })
 
+# 误报上报表单:抑制范围仅限内容锚定,永远不提供目录/进程名选项
+DIALOG_TEXTS.update({
+    "fp_button": {
+        "simplified_switch": "报告误报", "traditional_switch": "報告誤報",
+        "english_switch": "Report false positive", "japanese_switch": "誤検知を報告",
+        "korean_switch": "오탐 보고", "french_switch": "Signaler un faux positif",
+        "spanish_switch": "Informar de falso positivo", "hindi_switch": "गलत सकारात्मक रिपोर्ट करें",
+        "arabic_switch": "الإبلاغ عن إنذار خاطئ", "russian_switch": "Сообщить о ложном срабатывании",
+        "slovenian_switch": "Prijavi lažni alarm",
+    },
+    "fp_scope_this": {
+        "simplified_switch": "仅此检测结果", "traditional_switch": "僅此檢測結果",
+        "english_switch": "This detection only", "japanese_switch": "この検出のみ",
+        "korean_switch": "이 탐지만", "french_switch": "Cette détection uniquement",
+        "spanish_switch": "Solo esta detección", "hindi_switch": "केवल यह पहचान",
+        "arabic_switch": "هذا الكشف فقط", "russian_switch": "Только это обнаружение",
+        "slovenian_switch": "Samo to zaznanje",
+    },
+    "fp_scope_file": {
+        "simplified_switch": "此文件的任何检测", "traditional_switch": "此檔案的任何檢測",
+        "english_switch": "Any detection for this file", "japanese_switch": "このファイルのすべての検出",
+        "korean_switch": "이 파일의 모든 탐지", "french_switch": "Toute détection pour ce fichier",
+        "spanish_switch": "Cualquier detección para este archivo", "hindi_switch": "इस फ़ाइल के लिए कोई भी पहचान",
+        "arabic_switch": "أي كشف لهذا الملف", "russian_switch": "Любое обнаружение для этого файла",
+        "slovenian_switch": "Vsaka zaznanja za to datoteko",
+    },
+    "fp_reason": {
+        "simplified_switch": "原因", "traditional_switch": "原因",
+        "english_switch": "Reason", "japanese_switch": "理由",
+        "korean_switch": "이유", "french_switch": "Raison",
+        "spanish_switch": "Motivo", "hindi_switch": "कारण",
+        "arabic_switch": "السبب", "russian_switch": "Причина",
+        "slovenian_switch": "Razlog",
+    },
+    "fp_reason_dev_tool": {
+        "simplified_switch": "开发工具", "traditional_switch": "開發工具",
+        "english_switch": "Development tool", "japanese_switch": "開発ツール",
+        "korean_switch": "개발 도구", "french_switch": "Outil de développement",
+        "spanish_switch": "Herramienta de desarrollo", "hindi_switch": "विकास उपकरण",
+        "arabic_switch": "أداة تطوير", "russian_switch": "Инструмент разработки",
+        "slovenian_switch": "Razvojno orodje",
+    },
+    "fp_reason_installer": {
+        "simplified_switch": "安装程序", "traditional_switch": "安裝程式",
+        "english_switch": "Installer", "japanese_switch": "インストーラー",
+        "korean_switch": "설치 프로그램", "french_switch": "Programme d'installation",
+        "spanish_switch": "Instalador", "hindi_switch": "इंस्टॉलर",
+        "arabic_switch": "مثبّت", "russian_switch": "Установщик",
+        "slovenian_switch": "Namestni program",
+    },
+    "fp_reason_enterprise": {
+        "simplified_switch": "企业内部软件", "traditional_switch": "企業內部軟體",
+        "english_switch": "Enterprise software", "japanese_switch": "社内ソフトウェア",
+        "korean_switch": "사내 소프트웨어", "french_switch": "Logiciel d'entreprise",
+        "spanish_switch": "Software empresarial", "hindi_switch": "एंटरप्राइज़ सॉफ़्टवेयर",
+        "arabic_switch": "برنامج مؤسسي", "russian_switch": "Корпоративное ПО",
+        "slovenian_switch": "Poslovni program",
+    },
+    "fp_reason_game_patch": {
+        "simplified_switch": "游戏补丁", "traditional_switch": "遊戲補丁",
+        "english_switch": "Game patch", "japanese_switch": "ゲームパッチ",
+        "korean_switch": "게임 패치", "french_switch": "Patch de jeu",
+        "spanish_switch": "Parche de juego", "hindi_switch": "गेम पैच",
+        "arabic_switch": "رقعة لعبة", "russian_switch": "Игровой патч",
+        "slovenian_switch": "Igralni popravek",
+    },
+    "fp_reason_other": {
+        "simplified_switch": "其他", "traditional_switch": "其他",
+        "english_switch": "Other", "japanese_switch": "その他",
+        "korean_switch": "기타", "french_switch": "Autre",
+        "spanish_switch": "Otro", "hindi_switch": "अन्य",
+        "arabic_switch": "أخرى", "russian_switch": "Другое",
+        "slovenian_switch": "Drugo",
+    },
+    "fp_note": {
+        "simplified_switch": "备注(可选)", "traditional_switch": "備註(可選)",
+        "english_switch": "Note (optional)", "japanese_switch": "メモ(任意)",
+        "korean_switch": "メモ(선택)", "french_switch": "Note (facultatif)",
+        "spanish_switch": "Nota (opcional)", "hindi_switch": "नोट (वैकल्पिक)",
+        "arabic_switch": "ملاحظة (اختياري)", "russian_switch": "Заметка (необязательно)",
+        "slovenian_switch": "Opomba (neobvezno)",
+    },
+    "fp_submit": {
+        "simplified_switch": "提交", "traditional_switch": "提交",
+        "english_switch": "Submit", "japanese_switch": "送信",
+        "korean_switch": "제출", "french_switch": "Envoyer",
+        "spanish_switch": "Enviar", "hindi_switch": "सबमिट करें",
+        "arabic_switch": "إرسال", "russian_switch": "Отправить",
+        "slovenian_switch": "Pošlji",
+    },
+    "fp_cancel": {
+        "simplified_switch": "取消", "traditional_switch": "取消",
+        "english_switch": "Cancel", "japanese_switch": "キャンセル",
+        "korean_switch": "취소", "french_switch": "Annuler",
+        "spanish_switch": "Cancelar", "hindi_switch": "रद्द करें",
+        "arabic_switch": "إلغاء", "russian_switch": "Отмена",
+        "slovenian_switch": "Prekliči",
+    },
+})
+
 THREAT_DESCRIPTIONS = {
     "Process Block": {
         "traditional_switch": "偵測到可疑程式正在啟動，現已暫停並等待您處理。攔截將終止該進程；放行將恢復其執行。",
@@ -506,6 +606,26 @@ def ai_snapshot_view(request):
     return {"state": "failed", "verdict": "", "label": label, "hint": loc_dialog_text(lang, "ai_failed_hint")}
 
 
+def fp_snapshot_view(request):
+    """误报表单的本地化文案;无文件身份(内存告警)时返回 None,入口隐藏。"""
+    if request.rule is None:
+        return None
+
+    lang = request.lang
+
+    return {
+        "button": loc_dialog_text(lang, "fp_button"),
+        "scope_this": loc_dialog_text(lang, "fp_scope_this"),
+        "scope_file": loc_dialog_text(lang, "fp_scope_file"),
+        "reason": loc_dialog_text(lang, "fp_reason"),
+        "reasons": [[key, loc_dialog_text(lang, f"fp_reason_{key}")] for key in
+                    ("dev_tool", "installer", "enterprise", "game_patch", "other")],
+        "note": loc_dialog_text(lang, "fp_note"),
+        "submit": loc_dialog_text(lang, "fp_submit"),
+        "cancel": loc_dialog_text(lang, "fp_cancel"),
+    }
+
+
 class _WebDecisionAPI:
     """Only decision-window operations are exposed to its JavaScript bridge."""
 
@@ -546,6 +666,7 @@ class _WebDecisionAPI:
                 "block": loc_dialog_text(request.lang, "btn_block"),
                 "countdown": loc_dialog_text(request.lang, "countdown_auto_block").replace("{0}", str(remaining)),
                 "ai": ai_snapshot_view(request),
+                "fp": fp_snapshot_view(request),
             }
         with session.owner.lock_config:
             result["theme"] = session.owner.pyas_config.get("theme", "system_switch")
@@ -575,6 +696,37 @@ class _WebDecisionAPI:
                     return False
                 session.decision_error = False
                 session.queue.complete('allow' if choice == 'permanent' else choice)
+                session.queue.take_next()
+                return True
+        finally:
+            request.resolving = False
+
+    def report_false_positive(self, request_id, reason, note, scope):
+        """登记内容锚定抑制并放行本次;语义与 decide() 一致,失败置 decision_error。"""
+        if not isinstance(reason, str) or not isinstance(note, str) or not isinstance(scope, str):
+            return False
+
+        session = self._session
+
+        with session.queue.condition:
+            request = session.queue.active
+            if request is None or request.id != request_id or session.queue.closed or request.resolving:
+                return False
+            # 截止时间已过的过期点击一律拒绝,与 decide() 同规
+            if request.deadline and request.deadline <= time.monotonic():
+                return False
+            request.resolving = True
+
+        try:
+            if not session.owner._remember_suppression(request, reason, note.strip(), scope):
+                session.decision_error = True
+                return False
+
+            with session.queue.condition:
+                if session.queue.active is not request or session.queue.closed:
+                    return False
+                session.decision_error = False
+                session.queue.complete('allow')
                 session.queue.take_next()
                 return True
         finally:
