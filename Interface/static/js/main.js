@@ -1037,9 +1037,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const interactive = document.querySelector('[data-config-key="interactive_switch"]');
         const automatic = document.querySelector('[data-config-key="interactive_auto_block"]');
         const timeoutInput = document.getElementById('interactive_timeout_input');
-        if (automatic) automatic.disabled = appState.firstLaunch || !interactive?.checked || interactive.disabled || automatic.dataset.pending === '1';
+        // AI 輔助決策與超時自動攔截互斥:AI 開啟時自動攔截置灰,懸浮提示避讓原因
+        const aiAssist = document.querySelector('[data-config-key="ai_assist_switch"]');
+        const aiActive = !!aiAssist?.checked;
+        const aiMutexHint = aiActive ? getMsg('ai_decision_hint') : '';
+        if (automatic) {
+            automatic.disabled = appState.firstLaunch || !interactive?.checked || interactive.disabled || aiActive || automatic.dataset.pending === '1';
+            automatic.title = aiMutexHint;
+            automatic.closest('.list-item')?.setAttribute('title', aiMutexHint);
+        }
         if (timeoutInput) {
-            timeoutInput.disabled = appState.firstLaunch || !interactive?.checked || interactive.disabled || !automatic?.checked || automatic.disabled;
+            timeoutInput.disabled = appState.firstLaunch || !interactive?.checked || interactive.disabled || aiActive || !automatic?.checked || automatic.disabled;
             timeoutInput.closest('.list-item')?.classList.toggle('hidden', appState.firstLaunch || !interactive?.checked || !automatic?.checked);
         }
     };
@@ -1999,7 +2007,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         }
-        document.querySelectorAll('.toggle-switch input').forEach(t => { if (t.dataset.configKey !== 'ai_assist_switch') t.disabled = false; });
+        document.querySelectorAll('.toggle-switch input').forEach(t => { t.disabled = false; });
         appState.firstLaunch = false;
         await window.refreshContextMenuStatus();
         syncInteractiveTimeoutState();

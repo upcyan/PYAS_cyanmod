@@ -1,0 +1,204 @@
+"""AI 建议接入测试:不启动杀毒引擎,不发起真实网络请求。"""
+import threading
+import time
+import unittest
+from unittest.mock import Mock, patch
+
+from PYAS_AI import parse_ai_verdict
+from PYAS_Dialog import (
+    DialogMixin, _DecisionRequest, _ThreatPromptQueue, _WebThreatDialogSession,
+    ai_deadline_choice, ai_snapshot_view,
+)
+
+
+class ConfigApp(DialogMixin):
+    def __init__(self, **config):
+        self.lock_config = threading.RLock()
+        self.pyas_config = {
+            'ai_assist_switch': False,
+            'ai_base_url': 'http://ai.local/v1',
+            'ai_api_key': '',
+            'ai_model': 'test-model',
+            **config,
+        }
+
+
+class ParseVerdictTests(unittest.TestCase):
+    def test_plain_and_fenced_json(self):
+        self.assertEqual(parse_ai_verdict('{"verdict":"block","reason":"r"}'),
+                         {"verdict": "block", "reason": "r"})
+        self.assertEqual(parse_ai_verdict('```json\n{"verdict":"allow","reason":"ok"}\n```'),
+                         {"verdict": "allow", "reason": "ok"})
+
+    def test_invalid_inputs_return_none(self):
+        for content in (None, 123, '', 'no json here', '{"verdict":"delete","reason":"r"}',
+                        '{"verdict":"allow"', '{"verdict":"allow","reason":}'):
+            self.assertIsNone(parse_ai_verdict(content))
+
+    def test_surrounding_noise_is_tolerated(self):
+        self.assertEqual(parse_ai_verdict('Verdict: {"verdict":"block","reason":"r"} done'),
+                         {"verdict": "block", "reason": "r"})
+
+    def test_reason_is_trimmed_text(self):
+        parsed = parse_ai_verdict('{"verdict":"allow","reason":"  padded  "}')
+        self.assertEqual(parsed['reason'], 'padded')
+
+
+class StarterTests(unittest.TestCase):
+    def test_disabled_without_assist_or_model(self):
+        app = ConfigApp()
+        request = _DecisionRequest('english_switch', 't', 'm', None)
+        app._threat_queue = _ThreatPromptQueue()
+        app._start_ai_suggestion(request)
+        self.assertEqual(request.ai['state'], 'unavailable')
+
+        app2 = ConfigApp(ai_assist_switch=True, ai_model='')
+        request2 = _DecisionRequest('english_switch', 't', 'm', None)
+        app2._threat_queue = _ThreatPromptQueue()
+        app2._start_ai_suggestion(request2)
+        self.assertEqual(request2.ai['state'], 'unavailable')
+
+    def test_worker_sets_ready_and_failed_without_resolving(self):
+        app = ConfigApp(ai_assist_switch=True)
+        queue = _ThreatPromptQueue()
+        ready = _DecisionRequest('english_switch', 't', 'm', None)
+        with patch('PYAS_Dialog.request_ai_verdict',
+                   return_value={'verdict': 'allow', 'reason': 'legit updater'}) as mocked:
+            app._ai_suggestion_worker(queue, ready, 'http://ai.local/v1', 'test-model', '')
+            detail = mocked.call_args[0][5]
+        self.assertIn('Message:', detail)
+        self.assertEqual(ready.ai, {'state': 'ready', 'verdict': 'allow', 'reason': 'legit updater'})
+        # LLM 成功也绝不代替用户裁决:请求保持未决、默认拦截
+        self.assertFalse(ready.done.is_set())
+        self.assertEqual(ready.choice, 'block')
+
+        failed = _DecisionRequest('english_switch', 't', 'm', None)
+        with patch('PYAS_Dialog.request_ai_verdict', return_value=None):
+            app._ai_suggestion_worker(queue, failed, 'http://ai.local/v1', 'test-model', '')
+        self.assertEqual(failed.ai['state'], 'failed')
+        self.assertFalse(failed.done.is_set())
+        self.assertEqual(failed.choice, 'block')
+        queue.close()
+
+    def test_worker_skips_already_decided_request(self):
+        app = ConfigApp(ai_assist_switch=True)
+        queue = _ThreatPromptQueue()
+        request = _DecisionRequest('english_switch', 't', 'm', None)
+        request.done.set()
+        with patch('PYAS_Dialog.request_ai_verdict') as mocked:
+            app._ai_suggestion_worker(queue, request, 'http://ai.local/v1', 'test-model', '')
+        mocked.assert_not_called()
+        self.assertIsNone(request.ai)
+        queue.close()
+
+    def test_queue_starts_analysis_once_not_for_followers(self):
+        starter = Mock()
+        queue = _ThreatPromptQueue(ai_starter=starter)
+        request = _DecisionRequest('english_switch', 't', 'm', None, dedup_key=('k', 1))
+        follower = _DecisionRequest('english_switch', 't', 'm', None, dedup_key=('k', 1))
+        try:
+            first = threading.Thread(target=queue.submit, args=(request,))
+            first.start()
+            deadline = time.monotonic() + 2
+            while starter.call_count < 1 and time.monotonic() < deadline:
+                time.sleep(.005)
+            self.assertEqual(starter.call_count, 1)
+
+            second = threading.Thread(target=queue.submit, args=(follower,))
+            second.start()
+            deadline = time.monotonic() + 1
+            while queue.count < 2 and time.monotonic() < deadline:
+                time.sleep(.005)
+            self.assertEqual(queue.count, 2)
+            self.assertEqual(starter.call_count, 1)
+        finally:
+            queue.close()
+        for thread in (first, second):
+            thread.join(2)
+            self.assertFalse(thread.is_alive())
+
+
+class DeadlineChoiceTests(unittest.TestCase):
+    def test_ready_verdict_is_applied(self):
+        request = _DecisionRequest('english_switch', 't', 'm', None)
+        request.ai = {'state': 'ready', 'verdict': 'allow', 'reason': 'ok'}
+        self.assertEqual(ai_deadline_choice(request), 'allow')
+        request.ai = {'state': 'ready', 'verdict': 'block', 'reason': 'bad'}
+        self.assertEqual(ai_deadline_choice(request), 'block')
+
+    def test_failure_never_defaults_to_allow(self):
+        for state in (None, {}, {'state': 'failed', 'verdict': '', 'reason': ''},
+                      {'state': 'analyzing', 'verdict': '', 'reason': ''},
+                      {'state': 'ready', 'verdict': 'maybe', 'reason': ''}):
+            request = _DecisionRequest('english_switch', 't', 'm', None)
+            request.ai = state
+            self.assertEqual(ai_deadline_choice(request), 'block', state)
+
+
+class TimeoutTests(unittest.TestCase):
+    def test_ai_mode_takes_over_countdown(self):
+        app = ConfigApp(ai_assist_switch=True)
+        self.assertEqual(app.get_interactive_timeout(), 30)
+        app.pyas_config['interactive_timeout'] = 999
+        self.assertEqual(app.get_interactive_timeout(), 300)
+        app.pyas_config['interactive_timeout'] = 1
+        self.assertEqual(app.get_interactive_timeout(), 5)
+
+    def test_classic_mode_still_opt_in(self):
+        app = ConfigApp()
+        self.assertIsNone(app.get_interactive_timeout())
+        app.pyas_config['interactive_auto_block'] = True
+        self.assertEqual(app.get_interactive_timeout(), 30)
+
+
+class SnapshotTests(unittest.TestCase):
+    def _session(self, lang='english_switch'):
+        owner = ConfigApp(theme='black_switch', language=lang)
+        queue = _ThreatPromptQueue()
+        request = _DecisionRequest(lang, 't', 'm', None)
+        queue.pending.append(request)
+        queue.take_next()
+        session = _WebThreatDialogSession('en', 't', 'm', None, str, queue, owner)
+        session.api.ready()
+        return queue, request, session
+
+    def test_ready_state_localized(self):
+        queue, request, session = self._session()
+        request.ai = {'state': 'ready', 'verdict': 'allow', 'reason': 'legit'}
+        view = session.api.snapshot()['ai']
+        self.assertEqual(view['verdict'], 'allow')
+        self.assertEqual(view['label'], 'AI suggests allowing')
+        self.assertEqual(view['hint'], 'legit')
+        queue.close()
+
+    def test_states_for_failed_and_hidden(self):
+        queue, request, session = self._session('simplified_switch')
+        request.ai = {'state': 'failed', 'verdict': '', 'reason': ''}
+        view = session.api.snapshot()['ai']
+        self.assertEqual(view['label'], 'AI 建议不可用')
+        self.assertIn('不会自动放行', view['hint'])
+        self.assertEqual(view['verdict'], '')
+
+        request.ai = {'state': 'unavailable', 'verdict': '', 'reason': ''}
+        self.assertIsNone(session.api.snapshot()['ai'])
+        request.ai = None
+        self.assertIsNone(session.api.snapshot()['ai'])
+        queue.close()
+
+    def test_ai_snapshot_view_is_module_function(self):
+        request = _DecisionRequest('english_switch', 't', 'm', None)
+        self.assertIsNone(ai_snapshot_view(request))
+
+
+class SetAiStateTests(unittest.TestCase):
+    def test_no_late_writes_after_decision(self):
+        queue = _ThreatPromptQueue()
+        request = _DecisionRequest('english_switch', 't', 'm', None)
+        request.done.set()
+        queue.set_ai_state(request, {'state': 'ready', 'verdict': 'allow', 'reason': ''})
+        self.assertIsNone(request.ai)
+        queue.close()
+
+
+if __name__ == '__main__':
+    unittest.main()

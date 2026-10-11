@@ -4,10 +4,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const allow = byId('threat_allow');
     const block = byId('threat_block');
     const permanent = byId('threat_permanent');
+    const aiButton = byId('threat_ai');
     const repeat = byId('threat_repeat');
-    const allButtons = [allow, block, permanent];
+    const allButtons = [allow, block, permanent, aiButton];
     const disable = () => allButtons.forEach(button => { button.disabled = true; });
     let confirmationId = null;
+    let aiVerdict = '';
     const texts = {
         simplified_switch: ['永久允许', '30 秒内对完全相同的告警重复此决定（最多 20 次，默认关闭）', '仅记住此防护、此完整路径、此 SHA-256 文件内容、此检测结果和此目标。文件变化后重新询问；不会放行目录或关闭扫描。可在设置中清除。确认永久允许？', '确认永久允许', '取消', '文件身份无法验证、已经变化或保存失败；未新增允许规则，请重新处理。', '无法确认文件身份或属于内存告警，不能记住决定。'],
         traditional_switch: ['永久允許', '30 秒內對完全相同的告警重複此決定（最多 20 次，預設關閉）', '僅記住此防護、此完整路徑、此 SHA-256 檔案內容、此偵測結果與此目標。檔案變更後重新詢問；不放行目錄或關閉掃描。可在設定中清除。確認永久允許？', '確認永久允許', '取消', '無法驗證檔案身分、檔案已變更或儲存失敗；未新增允許規則。', '無法確認檔案身分或屬於記憶體告警，不能記住決定。'],
@@ -66,6 +68,19 @@ document.addEventListener('DOMContentLoaded', () => {
             permanent.disabled = repeat.disabled = busy || !!data.resolving || !data.can_remember;
             permanent.title = data.can_remember ? localized[2] : localized[6];
             if (!data.can_remember) repeat.checked = false;
+            // AI 建议第四按钮:分析中/失败置灰,仅就绪建议可点击;未启用则隐藏
+            const ai = data.ai;
+            if (ai && ai.label) {
+                aiButton.hidden = false;
+                aiButton.textContent = ai.label;
+                aiButton.title = ai.hint || '';
+                aiVerdict = ai.state === 'ready' ? ai.verdict : '';
+                aiButton.disabled = busy || !!data.resolving || !aiVerdict;
+            } else {
+                aiButton.hidden = true;
+                aiVerdict = '';
+                aiButton.disabled = true;
+            }
             const key = JSON.stringify(data.events);
             if (key !== queueKey) {
                 queueKey = key;
@@ -105,6 +120,10 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     allow.addEventListener('click', () => decide('allow'));
     block.addEventListener('click', () => decide('block'));
+    aiButton.addEventListener('click', () => {
+        // 只执行就绪的 AI 建议;失败/分析中点击无效,绝不隐式放行
+        if (aiVerdict) decide(aiVerdict);
+    });
     permanent.addEventListener('click', () => {
         confirmationId = currentId;
         byId('threat_confirmation').classList.remove('hidden');

@@ -49,6 +49,8 @@
 .threat-repeat { display: flex; gap: 8px; align-items: flex-start; color: var(--text-secondary); font-size: 12px; line-height: 1.5; margin-bottom: 12px; }
 .threat-repeat input { margin-top: 3px; accent-color: var(--accent-color); }
 #threat_permanent { margin-right: auto; }
+#threat_ai:not(:disabled) { border-color: var(--accent-color); color: var(--accent-color); background: transparent; }
+#threat_ai:not(:disabled):hover { background-color: var(--accent-alpha); }
 #threat_confirmation { padding: 12px; border: 1px solid var(--border-color); border-radius: var(--radius-panel); background: var(--bg-panel); margin-bottom: 10px; font-size: 13px; line-height: 1.5; }
 #threat_confirmation p { margin-bottom: 8px; max-height: 100px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .threat-window button:disabled { opacity: .55; cursor: wait; }

@@ -8,6 +8,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from uuid import uuid4
 from urllib.parse import urljoin
+from PYAS_AI import request_ai_verdict
 from PYAS_Decisions import AlertPolicyMixin
 
 
@@ -197,6 +198,55 @@ DIALOG_TEXTS["btn_allow"].update({
     "simplified_switch": "本次允许", "traditional_switch": "本次允許", "english_switch": "Allow this time",
 })
 
+# AI 建议第四按钮:标签随分析状态变化,失败文案明确"不会自动放行"
+DIALOG_TEXTS.update({
+    "ai_suggest_block": {
+        "simplified_switch": "AI 建议拦截", "traditional_switch": "AI 建議攔截",
+        "english_switch": "AI suggests blocking", "japanese_switch": "AIはブロックを推奨",
+        "korean_switch": "AI 차단 권장", "french_switch": "L'IA recommande de bloquer",
+        "spanish_switch": "La IA recomienda bloquear", "hindi_switch": "AI ब्लॉक करने की सलाह देता है",
+        "arabic_switch": "الذكاء الاصطناعي يوصي بالحظر", "russian_switch": "ИИ рекомендует блокировать",
+        "slovenian_switch": "AI priporoča blokado",
+    },
+    "ai_suggest_allow": {
+        "simplified_switch": "AI 建议放行", "traditional_switch": "AI 建議放行",
+        "english_switch": "AI suggests allowing", "japanese_switch": "AIは許可を推奨",
+        "korean_switch": "AI 허용 권장", "french_switch": "L'IA recommande d'autoriser",
+        "spanish_switch": "La IA recomienda permitir", "hindi_switch": "AI अनुमति देने की सलाह देता है",
+        "arabic_switch": "الذكاء الاصطناعي يوصي بالسماح", "russian_switch": "ИИ рекомендует разрешить",
+        "slovenian_switch": "AI priporoča dovoljenje",
+    },
+    "ai_analyzing": {
+        "simplified_switch": "AI 分析中…", "traditional_switch": "AI 分析中…",
+        "english_switch": "AI analyzing…", "japanese_switch": "AI分析中…",
+        "korean_switch": "AI 분석 중…", "french_switch": "Analyse IA en cours…",
+        "spanish_switch": "Análisis de IA en curso…", "hindi_switch": "AI विश्लेषण जारी…",
+        "arabic_switch": "جارٍ تحليل الذكاء الاصطناعي…", "russian_switch": "ИИ-анализ…",
+        "slovenian_switch": "Analiza AI poteka …",
+    },
+    "ai_unavailable": {
+        "simplified_switch": "AI 建议不可用", "traditional_switch": "AI 建議不可用",
+        "english_switch": "AI suggestion unavailable", "japanese_switch": "AIの提案は利用できません",
+        "korean_switch": "AI 제안을 사용할 수 없음", "french_switch": "Suggestion IA indisponible",
+        "spanish_switch": "Sugerencia de IA no disponible", "hindi_switch": "AI सुझाव अनुपलब्ध",
+        "arabic_switch": "اقتراح الذكاء الاصطناعي غير متوفر", "russian_switch": "ИИ-рекомендация недоступна",
+        "slovenian_switch": "AI priporočilo ni na voljo",
+    },
+    "ai_failed_hint": {
+        "simplified_switch": "AI 服务未返回有效建议;已保持等待您决定,不会自动放行。",
+        "traditional_switch": "AI 服務未返回有效建議;已保持等待您決定,不會自動放行。",
+        "english_switch": "The AI service returned no valid suggestion. Your decision is still required; nothing will be allowed automatically.",
+        "japanese_switch": "AIサービスから有効な提案が返されませんでした。引き続きご判断を待っています。自動で許可されることはありません。",
+        "korean_switch": "AI 서비스에서 유효한 제안이 반환되지 않았습니다. 계속 사용자의 결정을 기다리며 자동으로 허용되지 않습니다.",
+        "french_switch": "Le service d'IA n'a renvoyé aucune suggestion valide. Votre décision reste requise ; rien ne sera autorisé automatiquement.",
+        "spanish_switch": "El servicio de IA no devolvió una sugerencia válida. Se sigue esperando su decisión; nada se permitirá automáticamente.",
+        "hindi_switch": "AI सेवा से कोई मान्य सुझाव नहीं मिला; आपके निर्णय की प्रतीक्षा जारी है, स्वतः अनुमति नहीं दी जाएगी।",
+        "arabic_switch": "لم تُعد خدمة الذكاء الاصطناعي اقتراحًا صالحًا؛ ما زلنا ننتظر قرارك، ولن يُسمح بأي شيء تلقائيًا.",
+        "russian_switch": "Служба ИИ не вернула корректную рекомендацию. Решение остаётся за вами; ничего не будет разрешено автоматически.",
+        "slovenian_switch": "Storitev AI ni vrnila veljavnega priporočila; odločitev še vedno prepuščamo vam, nič ne bo samodejno dovoljeno.",
+    },
+})
+
 THREAT_DESCRIPTIONS = {
     "Process Block": {
         "traditional_switch": "偵測到可疑程式正在啟動，現已暫停並等待您處理。攔截將終止該進程；放行將恢復其執行。",
@@ -278,6 +328,19 @@ def loc_threat_description(lang, action):
     return text_dict.get(lang) or text_dict.get("traditional_switch", "")
 
 
+def ai_deadline_choice(request):
+    """倒计时到点时的裁决:AI 就绪执行其建议(含放行),否则一律拦截。
+
+    LLM 失败或未就绪绝不默认放行——放行只能来自就绪的 AI 建议或用户手动点击。
+    """
+    state = request.ai if isinstance(request.ai, dict) else {}
+
+    if state.get("state") == "ready" and state.get("verdict") in ("allow", "block"):
+        return state["verdict"]
+
+    return "block"
+
+
 _queue_init_lock = threading.Lock()
 
 
@@ -296,12 +359,13 @@ class _DecisionRequest:
     dedup_key: tuple | None = None
     followers: list = field(default_factory=list)
     resolving: bool = False
+    ai: dict | None = None
 
 
 class _ThreatPromptQueue:
     """One UI worker per application; FIFO decisions never expire while queued."""
 
-    def __init__(self, session_factory=None, capacity=256, policy_lookup=None):
+    def __init__(self, session_factory=None, capacity=256, policy_lookup=None, ai_starter=None):
         self.condition = threading.Condition()
         self.pending = deque()
         self.active = None
@@ -311,6 +375,13 @@ class _ThreatPromptQueue:
         self.capacity = capacity
         self.session_factory = session_factory or _ThreatDialogSession
         self.policy_lookup = policy_lookup
+        self.ai_starter = ai_starter
+
+    def set_ai_state(self, request, state):
+        """AI 分析线程回写建议状态;用户已裁决的事件不再更新。"""
+        with self.condition:
+            if not request.done.is_set():
+                request.ai = state
 
     def submit(self, request):
         with self.condition:
@@ -325,6 +396,12 @@ class _ThreatPromptQueue:
                 self.condition.notify_all()
             else:
                 self.pending.append(request)
+                # 入队即异步分析;失败只影响建议可用性,绝不影响裁决本身
+                if self.ai_starter:
+                    try:
+                        self.ai_starter(request)
+                    except Exception:
+                        log_exception("PYAS_Dialog._ThreatPromptQueue.submit.ai_starter")
             if self.worker is None:
                 self.worker = threading.Thread(target=self._run, daemon=True, name="PYAS.ThreatQueue")
                 self.worker.start()
@@ -407,6 +484,28 @@ class _ThreatPromptQueue:
             self.condition.notify_all()
 
 
+def ai_snapshot_view(request):
+    """把请求上的 AI 状态转成弹窗可用的本地化视图;未启用时返回 None(按钮隐藏)。"""
+    state = request.ai if isinstance(request.ai, dict) else None
+
+    if not state or state.get("state") == "unavailable":
+        return None
+
+    lang = request.lang
+
+    if state.get("state") == "ready":
+        verdict = state.get("verdict")
+        label = loc_dialog_text(lang, "ai_suggest_block" if verdict == "block" else "ai_suggest_allow")
+        return {"state": "ready", "verdict": verdict, "label": label, "hint": state.get("reason", "")}
+
+    if state.get("state") == "analyzing":
+        label = loc_dialog_text(lang, "ai_analyzing")
+        return {"state": "analyzing", "verdict": "", "label": label, "hint": label}
+
+    label = loc_dialog_text(lang, "ai_unavailable")
+    return {"state": "failed", "verdict": "", "label": label, "hint": loc_dialog_text(lang, "ai_failed_hint")}
+
+
 class _WebDecisionAPI:
     """Only decision-window operations are exposed to its JavaScript bridge."""
 
@@ -446,6 +545,7 @@ class _WebDecisionAPI:
                 "allow": loc_dialog_text(request.lang, "btn_allow"),
                 "block": loc_dialog_text(request.lang, "btn_block"),
                 "countdown": loc_dialog_text(request.lang, "countdown_auto_block").replace("{0}", str(remaining)),
+                "ai": ai_snapshot_view(request),
             }
         with session.owner.lock_config:
             result["theme"] = session.owner.pyas_config.get("theme", "system_switch")
@@ -535,7 +635,16 @@ class _WebThreatDialogSession:
                     if self.queue.closed or request is None:
                         break
                     if request.deadline and request.deadline <= time.monotonic():
-                        self.queue.complete("block")
+                        verdict = ai_deadline_choice(request)
+                        if verdict != "block":
+                            try:
+                                self.owner.write_log(
+                                    "INFO", "AI Suggestion Applied",
+                                    detail=f"{request.title} / {verdict}",
+                                )
+                            except Exception:
+                                pass
+                        self.queue.complete(verdict)
                         self.queue.take_next()
                         continue
                     self.queue.condition.wait(.2)
@@ -980,7 +1089,10 @@ class DialogMixin(AlertPolicyMixin):
                 factory = None
                 if getattr(self, "_window", None) is not None:
                     factory = lambda *args, **kwargs: _WebThreatDialogSession(*args, **kwargs, owner=self)
-                self._threat_queue = _ThreatPromptQueue(factory, policy_lookup=self._lookup_alert_decision)
+                self._threat_queue = _ThreatPromptQueue(
+                    factory, policy_lookup=self._lookup_alert_decision,
+                    ai_starter=self._start_ai_suggestion,
+                )
             return self._threat_queue
 
     def get_pending_threat_count(self):
@@ -997,6 +1109,18 @@ class DialogMixin(AlertPolicyMixin):
 
     def get_interactive_timeout(self):
         with self.lock_config:
+            if self.pyas_config.get("ai_assist_switch", False):
+                # AI 辅助接管倒计时:到点执行 AI 建议(未就绪/失败一律拦截),
+                # 经典"超时自动拦截"自动避让并停用(设置项置灰)
+                try:
+                    timeout = int(
+                        self.pyas_config.get("interactive_timeout", INTERACTIVE_TIMEOUT_DEFAULT)
+                    )
+                except Exception:
+                    timeout = INTERACTIVE_TIMEOUT_DEFAULT
+
+                return max(INTERACTIVE_TIMEOUT_MIN, min(timeout, INTERACTIVE_TIMEOUT_MAX))
+
             if not self.pyas_config.get("interactive_auto_block", False):
                 return None
             try:
@@ -1007,6 +1131,57 @@ class DialogMixin(AlertPolicyMixin):
                 timeout = INTERACTIVE_TIMEOUT_DEFAULT
 
         return max(INTERACTIVE_TIMEOUT_MIN, min(timeout, INTERACTIVE_TIMEOUT_MAX))
+
+    def _start_ai_suggestion(self, request):
+        """入队即异步发起 AI 分析;结果只写入 request.ai,绝不改变裁决流程。"""
+        queue = self._threat_queue
+
+        with self.lock_config:
+            enabled = bool(self.pyas_config.get("ai_assist_switch", False))
+            base_url = str(self.pyas_config.get("ai_base_url", "")).strip().rstrip("/")
+            model = str(self.pyas_config.get("ai_model", "")).strip()
+            api_key = str(self.pyas_config.get("ai_api_key", "")).strip()
+
+        if not enabled or not base_url or not model:
+            queue.set_ai_state(request, {"state": "unavailable", "verdict": "", "reason": ""})
+            return
+
+        queue.set_ai_state(request, {"state": "analyzing", "verdict": "", "reason": ""})
+        threading.Thread(
+            target=self._ai_suggestion_worker,
+            args=(queue, request, base_url, model, api_key),
+            daemon=True,
+            name="PYAS.AISuggestion",
+        ).start()
+
+    def _ai_suggestion_worker(self, queue, request, base_url, model, api_key):
+        if request.done.is_set():
+            return
+
+        rule = request.rule or {}
+
+        if rule:
+            detail = "\n".join(filter(None, (
+                f"Source: {rule.get('source', '')}" if rule.get("source") else "",
+                f"Target: {rule.get('target', '')}" if rule.get("target") else "",
+                f"SHA-256: {rule.get('sha256', '')}" if rule.get("sha256") else "",
+            )))
+        else:
+            detail = f"Message: {request.message}"
+
+        suggestion = request_ai_verdict(
+            base_url, model, api_key, request.category or request.title,
+            request.title, detail, request.lang,
+        )
+
+        if suggestion is None:
+            queue.set_ai_state(request, {"state": "failed", "verdict": "", "reason": ""})
+            return
+
+        queue.set_ai_state(
+            request,
+            {"state": "ready", "verdict": suggestion["verdict"], "reason": suggestion["reason"]},
+        )
 
     def get_interactive_lang(self):
         with self.lock_config:
