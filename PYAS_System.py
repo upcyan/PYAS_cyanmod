@@ -465,6 +465,10 @@ class SystemMixin:
             )
 
     def repair_system_image(self):
+        # IFEO 修复需要 HKLM 写权限;普通权限下静默跳过(用户手动触发的路径)
+        if not ctypes.windll.shell32.IsUserAnAdmin():
+            return
+
         try:
             with winreg.OpenKey(
                 winreg.HKEY_LOCAL_MACHINE,
@@ -486,8 +490,10 @@ class SystemMixin:
                                     pass
 
                         i += 1
-                    except OSError:
-                        log_exception("PYAS_System.SystemMixin.repair_system_image:292")
+                    except OSError as error:
+                        # 枚举到末尾抛 259(ERROR_NO_MORE_ITEMS),属正常结束,不记异常
+                        if getattr(error, "winerror", None) != 259:
+                            log_exception("PYAS_System.SystemMixin.repair_system_image:292")
                         break
 
         except Exception as e:
@@ -565,11 +571,14 @@ class SystemMixin:
                     break
 
             try:
-                self.repair_system_mbr()
-                self.repair_system_restrict()
-                self.repair_system_file_type()
-                self.repair_system_file_icon()
-                self.repair_system_image()
+                # IFEO/注册表修复均需 HKLM 写权限;普通权限下跳过修复,
+                # 只保留进程守护,避免保护线程每 0.5 秒刷一遍拒绝访问日志
+                if ctypes.windll.shell32.IsUserAnAdmin():
+                    self.repair_system_mbr()
+                    self.repair_system_restrict()
+                    self.repair_system_file_type()
+                    self.repair_system_file_icon()
+                    self.repair_system_image()
                 self.check_process_survival()
                 time.sleep(0.5)
 

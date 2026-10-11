@@ -233,6 +233,18 @@ if ($Legacy -and (Resolve-Sid $Legacy.Definition.Principal.UserId) -eq $Sid -and
         )
 
     def manage_autostart(self, enable):
+        # 注册/修改提权计划任务需要管理员;普通权限下保留既有任务状态,
+        # 每次会话只记一条提示,避免启动时刷 PowerShell 报错
+        if not ctypes.windll.shell32.IsUserAnAdmin():
+            if not getattr(self, "_autostart_elevation_noticed", False):
+                self._autostart_elevation_noticed = True
+                self.write_log(
+                    "INFO",
+                    "manage_autostart",
+                    detail="Elevated autostart changes require administrator; keeping existing task state",
+                )
+            return True
+
         try:
             sid = self._get_autostart_user_sid()
             command = self._autostart_task_script(enable, sid)
