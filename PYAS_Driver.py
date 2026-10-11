@@ -1462,6 +1462,9 @@ class DriverMixin:
                             operate=None,
                             success=True,
                         )
+                        # 驱动拦截永远不经弹窗,托盘通知是用户唯一知情渠道
+                        if hasattr(self, "trigger_block_notification"):
+                            self.trigger_block_notification("Driver Block", safe_source, target, code)
 
                 self._close_driver_port(owned_port)
                 owned_port = None

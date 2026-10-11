@@ -1344,6 +1344,9 @@ class DialogMixin(AlertPolicyMixin):
     def request_block_decision(self, action, source=None, target=None, pid=None, detection=None):
         with self.lock_config:
             if not self.pyas_config.get("interactive_switch", False):
+                # 交互确认关闭:自动拦截不经弹窗,托盘通知是用户唯一知情渠道
+                if hasattr(self, "trigger_block_notification"):
+                    self.trigger_block_notification(action, source, target, None)
                 return True
 
         lang = self.get_interactive_lang()

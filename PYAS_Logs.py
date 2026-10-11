@@ -60,9 +60,9 @@ class LogMixin:
             ui_visible=ui_visible,
         )
         self._append_log_entry(entry)
-
-        if level == "BLOCK" and self.tray_icon:
-            self.trigger_block_notification(action, source, target, code)
+        # 托盘 toast 不再随 BLOCK 日志自动触发:弹窗裁决的拦截用户刚刚亲眼
+        # 确认过,重复通知会被误读为"绕过弹窗的自动拦截"。自动拦截的知情
+        # 通知改由各自动拦截点显式调用 trigger_block_notification。
 
     def _append_log_entry(self, entry):
         with self.lock_logs:

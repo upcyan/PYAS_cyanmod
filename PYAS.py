@@ -930,17 +930,17 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin, AIMixin):
 
         path = source or ""
         messages = {
-            "traditional_switch": f"威脅已終止: {path}",
-            "simplified_switch": f"威胁已终止: {path}",
-            "english_switch": f"Threat terminated: {path}",
-            "japanese_switch": f"脅威が終了しました: {path}",
-            "korean_switch": f"위협이 종료되었습니다: {path}",
-            "french_switch": f"Menace terminée : {path}",
-            "spanish_switch": f"Amenaza terminada: {path}",
-            "hindi_switch": f"खतरा समाप्त: {path}",
-            "arabic_switch": f"تم إنهاء التهديد: {path}",
-            "russian_switch": f"Угроза устранена: {path}",
-            "slovenian_switch": f"Grožnja odpravljena: {path}",
+            "traditional_switch": f"已自動攔截: {path}",
+            "simplified_switch": f"已自动拦截: {path}",
+            "english_switch": f"Blocked automatically: {path}",
+            "japanese_switch": f"自動ブロックしました: {path}",
+            "korean_switch": f"자동 차단됨: {path}",
+            "french_switch": f"Blocage automatique : {path}",
+            "spanish_switch": f"Bloqueado automáticamente: {path}",
+            "hindi_switch": f"स्वतः ब्लॉक किया गया: {path}",
+            "arabic_switch": f"تم الحظر تلقائيًا: {path}",
+            "russian_switch": f"Заблокировано автоматически: {path}",
+            "slovenian_switch": f"Samodejno blokirano: {path}",
         }
 
         title = self.get_block_action_title(action)
