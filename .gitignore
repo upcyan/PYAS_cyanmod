@@ -4,7 +4,10 @@ dist/
 Output/
 Payload/
 Redist/
-SetupResources/
+# SetupResources 里只有这三个是构建时生成的,脚本类资源(如 stop_menu.ps1)需要入库
+SetupResources/licence.rtf
+SetupResources/wizardImage.bmp
+SetupResources/headerImage.png
 versionfile.txt
 *.pyc
 PYAS.spec
