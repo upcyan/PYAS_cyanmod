@@ -79,6 +79,9 @@
                 <button class="nav-btn" data-target="protect_window">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
                 </button>
+                <button class="nav-btn" data-target="ai_window">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+                </button>
                 <div class="spacer"></div>
                 <button class="nav-btn" data-target="setting_window">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
@@ -415,6 +418,69 @@
                                 <h2 data-i18n>重置選項</h2><p data-i18n>此選項可以重置所有設定</p>
                             </div>
                             <button class="action-btn modern-btn danger-btn" data-i18n>執行</button>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="ai_window" class="page">
+                    <div class="list-widget">
+                        <div class="list-item">
+                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="5" y="8" width="14" height="12" rx="2"/><path d="M12 8V5m0 0a2 2 0 1 0-2-2"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/><path d="M9.5 17h5"/></svg>
+                            <div class="item-info">
+                                <h2 data-i18n>智能體加固</h2><p data-i18n>收錄主流智能體的進程監控、權限與行為審計</p>
+                            </div>
+                            <span class="ai-soon" data-i18n>即將上線</span>
+                        </div>
+                        <div class="list-item">
+                            <div class="item-info ai-chips">
+                                <span class="ai-chip">WorkBuddy</span><span class="ai-chip">ZCode</span><span class="ai-chip">AutoBot</span><span class="ai-chip">ChatGPT</span><span class="ai-chip">Trae</span><span class="ai-chip">Kimi Code</span><span class="ai-chip">MimoCode</span>
+                            </div>
+                        </div>
+                        <div class="list-item">
+                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></svg>
+                            <div class="item-info">
+                                <h2 data-i18n>AI 輔助決策</h2><p data-i18n>由 AI 分析攔截事件並給出建議，可選超時自動執行</p>
+                            </div>
+                            <label class="toggle-switch"><input type="checkbox" data-config-key="ai_assist_switch" disabled><span class="slider"></span></label>
+                        </div>
+                        <div class="list-item">
+                            <div class="item-info"><p class="ai-hint" data-i18n>開啟後，互動模式中的自動超時攔截將自動避讓並停用</p></div>
+                        </div>
+                        <div class="list-item">
+                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v3m6-3v3M9 19v3m6-3v3M2 9h3m-3 6h3m14-6h3m-3 6h3"/></svg>
+                            <div class="item-info">
+                                <h2 data-i18n>模型接入</h2><p data-i18n>可選雲端或本地模型，由使用者自訂</p>
+                            </div>
+                            <select id="ai_mode_select" class="modern-select">
+                                <option value="local" data-i18n>本地模型</option>
+                                <option value="cloud" data-i18n>雲端模型</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="settings-group">
+                        <div class="list-item">
+                            <div class="item-info">
+                                <h2 data-i18n>服務地址</h2><p data-i18n>OpenAI 相容的 /v1 根地址</p>
+                            </div>
+                            <input type="text" id="ai_base_url_input" class="modern-input" placeholder="服務地址" data-i18n-placeholder="服務地址" spellcheck="false">
+                        </div>
+                        <div class="list-item">
+                            <div class="item-info">
+                                <h2 data-i18n>API 金鑰</h2><p data-i18n>雲端必填，本地通常留空</p>
+                            </div>
+                            <input type="password" id="ai_api_key_input" class="modern-input" placeholder="API 金鑰" data-i18n-placeholder="API 金鑰" spellcheck="false" autocomplete="off">
+                        </div>
+                        <div class="list-item">
+                            <div class="item-info">
+                                <h2 data-i18n>模型名稱</h2><p data-i18n>例如 qwen2.5:7b 或 gpt-4o-mini</p>
+                            </div>
+                            <input type="text" id="ai_model_input" class="modern-input" placeholder="模型名稱" data-i18n-placeholder="模型名稱" spellcheck="false">
+                        </div>
+                        <div class="list-item">
+                            <div class="item-info">
+                                <h2 data-i18n>連接狀態</h2><p id="ai_test_status" class="ai-hint"></p>
+                            </div>
+                            <button class="modern-btn" id="ai_test_button" data-i18n>測試連接</button>
                         </div>
                     </div>
                 </section>

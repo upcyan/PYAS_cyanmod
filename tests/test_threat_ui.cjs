@@ -65,7 +65,7 @@ const assert = require('node:assert/strict');
         await page.getByRole('button', { name: '拦截', exact: true }).waitFor();
         await page.waitForFunction(() => !document.getElementById('threat_block').disabled);
         assert.equal(await page.locator('#queue_count').textContent(), '3');
-        await page.locator('#threat_close').click();
+        await page.keyboard.press('Escape');
         assert.equal(await page.evaluate(() => window.fixture.minimized), 1);
         assert.equal(await page.evaluate(() => window.fixture.decisions.length), 0);
         await page.locator('#threat_allow').focus();

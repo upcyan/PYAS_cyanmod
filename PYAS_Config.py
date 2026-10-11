@@ -18,11 +18,44 @@ class ConfigMixin:
 
         return text_dict.get(lang, text_dict.get("traditional_switch", ""))
 
+    # 主语言 ID(LANGID 低 10 位)到界面语言选项的映射
+    SYSTEM_UI_LANGUAGES = {
+        0x0001: "arabic_switch",
+        0x000A: "spanish_switch",
+        0x000C: "french_switch",
+        0x0011: "japanese_switch",
+        0x0012: "korean_switch",
+        0x0019: "russian_switch",
+        0x0024: "slovenian_switch",
+        0x0039: "hindi_switch",
+    }
+
+    def detect_system_language(self):
+        """首次生成配置时没有用户偏好,按用户 UI 语言选择界面语言;
+        中文细分简繁,非 Windows 或检测失败时回退英文。"""
+        try:
+            import ctypes
+
+            windll = getattr(ctypes, "windll", None)
+
+            if windll is None:
+                return "english_switch"
+
+            langid = int(windll.kernel32.GetUserDefaultUILanguage()) & 0xFFFF
+        except Exception:
+            return "english_switch"
+
+        if (langid & 0x03FF) == 0x0004:
+            return "simplified_switch" if langid in (0x0804, 0x1004) else "traditional_switch"
+
+        return self.SYSTEM_UI_LANGUAGES.get(langid & 0x03FF, "english_switch")
+
     def load_config(self):
         with self.lock_config:
 
             if not os.path.exists(self.file_config):
                 self.pyas_config = copy.deepcopy(self.pyas_default)
+                self.pyas_config["language"] = self.detect_system_language()
                 self.write_log("INFO", "Config Update", detail="Create default config")
                 self.save_config()
 
@@ -51,6 +84,7 @@ class ConfigMixin:
                 except Exception as e:
                     log_exception("PYAS_Config.ConfigMixin.load_config:40")
                     self.pyas_config = copy.deepcopy(self.pyas_default)
+                    self.pyas_config["language"] = self.detect_system_language()
                     self.write_log("WARN", "load_config", detail=str(e), success=False)
 
     def save_config(self):
@@ -215,6 +249,7 @@ class ConfigMixin:
             with self.lock_config:
                 previous = self.pyas_config
                 self.pyas_config = copy.deepcopy(self.pyas_default)
+                self.pyas_config["language"] = self.detect_system_language()
 
                 if self.save_config() is False:
                     self.pyas_config = previous

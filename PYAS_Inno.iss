@@ -1,6 +1,6 @@
 #define AppId "{{a7d7bac3-93b8-4630-8308-c7a56bf7fdf4}"
 #define AppName "PYAS"
-#define AppVersion "3.7.0.18"
+#define AppVersion "3.7.0.19"
 #define AppPublisher "PYAS Security"
 #define AppURL "https://github.com/upcyan/PYAS_cyanmod"
 #define AppExeName "PYAS.exe"
@@ -33,6 +33,8 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
+; 防止重复点击安装包启动多个安装程序实例(Inno 6.3+ 指令)
+SetupMutex=PYAS_Setup_Mutex
 Compression=lzma2/max
 SolidCompression=yes
 OutputDir=Output

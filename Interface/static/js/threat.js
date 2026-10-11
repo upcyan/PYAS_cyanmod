@@ -119,8 +119,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (confirmationId === currentId) decide('permanent');
     });
     const minimize = () => window.pywebview?.api.minimize().catch(console.error);
-    byId('threat_minimize').addEventListener('click', minimize);
-    byId('threat_close').addEventListener('click', minimize);
     document.addEventListener('keydown', event => {
         if (event.key === 'Escape') { event.preventDefault(); minimize(); }
     });

@@ -1547,3 +1547,36 @@ body.resizing-active * {
         }
     }
 }
+
+/* AI+ 页 */
+.ai-soon {
+    flex-shrink: 0;
+    align-self: center;
+    margin-left: 12px;
+    padding: 3px 12px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-pill);
+    white-space: nowrap;
+}
+
+.ai-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.ai-chip {
+    padding: 2px 10px;
+    font-size: 12px;
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-pill);
+    opacity: 0.75;
+}
+
+.ai-hint {
+    font-size: 12px;
+    color: var(--text-secondary);
+}

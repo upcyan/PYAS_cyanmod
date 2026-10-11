@@ -1052,6 +1052,35 @@ document.addEventListener('DOMContentLoaded', () => {
         e.target.value = value;
         window.pywebview.api.update_config('interactive_timeout', value);
     });
+
+    // AI+ 页:模型接入配置(P1 只有连接测试;P2 的决策辅助复用同一套配置)
+    document.getElementById('ai_mode_select')?.addEventListener('change', (e) => {
+        window.pywebview?.api.update_config('ai_provider_mode', e.target.value);
+    });
+    const bindAiField = (id, key) => {
+        document.getElementById(id)?.addEventListener('change', (e) => {
+            window.pywebview?.api.update_config(key, e.target.value.trim());
+        });
+    };
+    bindAiField('ai_base_url_input', 'ai_base_url');
+    bindAiField('ai_api_key_input', 'ai_api_key');
+    bindAiField('ai_model_input', 'ai_model');
+    document.getElementById('ai_test_button')?.addEventListener('click', async () => {
+        const status = document.getElementById('ai_test_status');
+        const button = document.getElementById('ai_test_button');
+        if (!window.pywebview || !button) return;
+        button.disabled = true;
+        if (status) status.textContent = '…';
+        try {
+            const res = await window.pywebview.api.test_ai_connection();
+            if (status) status.textContent = res?.ok ? getMsg('ai_test_ok')
+                : `${getMsg('ai_test_fail')} (${res?.error || 'unknown'})`;
+        } catch (error) {
+            if (status) status.textContent = `${getMsg('ai_test_fail')} (${error})`;
+        } finally {
+            button.disabled = false;
+        }
+    });
     
     document.getElementById('scan_method_select')?.addEventListener('change', (e) => {
         const val = e.target.value;
@@ -1082,6 +1111,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (key === 'context_switch' || key === 'classic_menu_switch') await window.refreshContextMenuStatus();
         if (key === 'context_switch' && failed) {
             try { await window.pywebview.api.show_alert(getMsg('title_error'), getMsg('msg_context_menu_failed'), 'error'); } catch {}
+        }
+        if (key === 'driver_switch' && failed) {
+            try { await window.pywebview.api.show_alert(getMsg('title_error'), getMsg('msg_driver_switch_failed'), 'error'); } catch {}
         }
     };
 
@@ -1904,6 +1936,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     const parsed = parseInt(cfg.interactive_timeout, 10);
                     timeoutInput.value = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 5), 300) : 30;
                 }
+                const aiModeSelect = document.getElementById('ai_mode_select');
+                if (aiModeSelect) {
+                    const aiMode = cfg.ai_provider_mode === 'cloud' ? 'cloud' : 'local';
+                    aiModeSelect.value = aiMode;
+                    updateCustomSelectUI('ai_mode_select', aiMode);
+                    const baseUrl = document.getElementById('ai_base_url_input');
+                    const apiKey = document.getElementById('ai_api_key_input');
+                    const aiModel = document.getElementById('ai_model_input');
+                    if (baseUrl) baseUrl.value = cfg.ai_base_url || '';
+                    if (apiKey) apiKey.value = cfg.ai_api_key || '';
+                    if (aiModel) aiModel.value = cfg.ai_model || '';
+                }
 
                 document.querySelectorAll('.toggle-switch input').forEach((toggle, index) => {
                     if (appState.firstLaunch) {
@@ -1955,7 +1999,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         }
-        document.querySelectorAll('.toggle-switch input').forEach(t => t.disabled = false);
+        document.querySelectorAll('.toggle-switch input').forEach(t => { if (t.dataset.configKey !== 'ai_assist_switch') t.disabled = false; });
         appState.firstLaunch = false;
         await window.refreshContextMenuStatus();
         syncInteractiveTimeoutState();

@@ -87,9 +87,10 @@ from PYAS_WinAPI import WindowsMixin
 from PYAS_Config import ConfigMixin
 from PYAS_Logs import LogMixin
 from PYAS_Runtime import RuntimeMixin
+from PYAS_AI import AIMixin
 
 
-class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin):
+class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin, AIMixin):
     def __init__(self):
         self._window = None
         self.tray_icon = None
