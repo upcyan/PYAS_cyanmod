@@ -137,6 +137,19 @@ class SystemMixin:
                 log_exception("PYAS_System.SystemMixin.backup_mbr:97")
                 continue
 
+    def _log_repair_failure(self, action, error):
+        # 修复循环每 0.5 秒重试一次;持续失败(如 ACL 保护的键)只在错误内容
+        # 变化时记一条 WARN,避免提权与普通权限两种状态下都刷屏
+        detail = str(error)
+        cache = getattr(self, "_repair_failure_cache", None)
+
+        if cache is None:
+            cache = self._repair_failure_cache = {}
+
+        if cache.get(action) != detail:
+            cache[action] = detail
+            self.write_log("WARN", action, detail=detail, success=False)
+
     def check_system_mbr(self):
         for drive, mbr_value in list(self.mbr_backup.items()):
             try:
@@ -498,7 +511,7 @@ class SystemMixin:
 
         except Exception as e:
             log_exception("PYAS_System.SystemMixin.repair_system_image:295")
-            self.write_log("WARN", "repair_system_image", detail=str(e), success=False)
+            self._log_repair_failure("repair_system_image", e)
 
     def repair_system_wallpaper(self):
         try:
@@ -528,7 +541,7 @@ class SystemMixin:
 
         except Exception as e:
             log_exception("PYAS_System.SystemMixin.repair_system_wallpaper:316")
-            self.write_log("WARN", "repair_system_wallpaper", detail=str(e), success=False)
+            self._log_repair_failure("repair_system_wallpaper", e)
 
     def execute_system_repair(self, items):
         try:
@@ -584,7 +597,7 @@ class SystemMixin:
 
             except Exception as e:
                 log_exception("PYAS_System.SystemMixin.protect_system_thread:357")
-                self.write_log("WARN", "protect_system_thread", detail=str(e), success=False)
+                self._log_repair_failure("protect_system_thread", e)
 
     def check_process_survival(self):
         try:
