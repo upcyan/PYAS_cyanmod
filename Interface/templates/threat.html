@@ -27,6 +27,7 @@
                 </div>
                 <div id="threat_message" class="threat-message" tabindex="0"></div>
                 <p id="threat_status" class="threat-status" role="status"></p>
+                <p id="threat_ai_reason" class="ai-reason hidden" role="status"></p>
             </section>
         </main>
         <footer class="threat-footer">
@@ -41,6 +42,7 @@
                 <div class="fp-scope">
                     <label><input type="radio" name="fp_scope" id="threat_fp_scope_this" value="file_rule" checked><span id="threat_fp_scope_this_text"></span></label>
                     <label><input type="radio" name="fp_scope" id="threat_fp_scope_file" value="file"><span id="threat_fp_scope_file_text"></span></label>
+                    <label id="threat_fp_scope_signer_wrap" hidden><input type="radio" name="fp_scope" id="threat_fp_scope_signer" value="signer"><span id="threat_fp_scope_signer_text"></span></label>
                 </div>
                 <div class="fp-row">
                     <label id="threat_fp_reason_label" for="threat_fp_reason"></label>

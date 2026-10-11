@@ -1605,3 +1605,15 @@ body.resizing-active * {
 #ai_window .item-info .ai-chips {
     margin-top: 8px;
 }
+
+/* AI+ 管理(抑制规则/草稿/智能体) */
+.suppress-row { gap: 10px; }
+.suppress-title { font-size: 13px; color: var(--text-primary); }
+.mono { font-family: Consolas, Menlo, monospace; font-size: 12px; }
+
+/* 拦截弹窗:AI 理由可见渲染 */
+.ai-reason {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: var(--accent-color);
+}

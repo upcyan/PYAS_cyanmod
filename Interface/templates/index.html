@@ -321,6 +321,13 @@
                             <label class="toggle-switch"><input type="checkbox" checked data-config-key="suffix_switch"><span class="slider"></span></label>
                         </div>
                         <div class="list-item">
+                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                            <div class="item-info">
+                                <h2 data-i18n>免打擾模式</h2><p data-i18n>系統忙碌、全螢幕或演示時,攔截彈窗靜默排隊不彈出</p>
+                            </div>
+                            <label class="toggle-switch"><input type="checkbox" data-config-key="dnd_switch"><span class="slider"></span></label>
+                        </div>
+                        <div class="list-item">
                             <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="14" rx="2"/><path d="M8 21h8m-4-4v4M12 6v4m-2.5-2.5a3.5 3.5 0 1 0 5 0"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>開機啟動</h2><p data-i18n>此選項可以設定開機自動執行</p>
@@ -432,7 +439,10 @@
                                     <span class="ai-chip">WorkBuddy</span><span class="ai-chip">ZCode</span><span class="ai-chip">AutoBot</span><span class="ai-chip">ChatGPT</span><span class="ai-chip">Trae</span><span class="ai-chip">Kimi Code</span><span class="ai-chip">MimoCode</span>
                                 </div>
                             </div>
-                            <span class="ai-soon" data-i18n>即將上線</span>
+                            <button class="modern-btn" id="ai_agent_scan" data-i18n>掃描本機</button>
+                        </div>
+                        <div class="list-item hidden" id="ai_agent_results_item">
+                            <div class="item-info" id="ai_agent_results"></div>
                         </div>
                         <div class="list-item">
                             <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></svg>
@@ -469,7 +479,9 @@
                         <div class="list-item">
                             <div class="item-info">
                                 <h2 data-i18n>模型名稱</h2><p data-i18n>例如 qwen2.5:7b 或 gpt-4o-mini</p>
+                                <p id="ai_models_hint" class="ai-hint"></p>
                             </div>
+                            <button class="modern-btn" id="ai_models_scan" data-i18n>掃描模型</button>
                             <input type="text" id="ai_model_input" class="modern-input" placeholder="模型名稱" data-i18n-placeholder="模型名稱" spellcheck="false">
                         </div>
                         <div class="list-item">
@@ -478,6 +490,30 @@
                             </div>
                             <button class="modern-btn" id="ai_test_button" data-i18n>測試連接</button>
                         </div>
+                    </div>
+                    <div class="settings-group">
+                        <div class="list-item">
+                            <div class="item-info">
+                                <h2 data-i18n>誤報抑制規則</h2><p data-i18n>內容或簽名錨定的誤報豁免,90 天自動過期</p>
+                            </div>
+                            <button class="modern-btn" id="suppress_refresh" data-i18n>重新整理</button>
+                        </div>
+                        <div class="list-item" id="suppress_empty">
+                            <div class="item-info"><p class="ai-hint" data-i18n>暫無抑制規則</p></div>
+                        </div>
+                        <div id="suppress_list"></div>
+                    </div>
+                    <div class="settings-group">
+                        <div class="list-item">
+                            <div class="item-info">
+                                <h2 data-i18n>AI 規則草稿</h2><p data-i18n>從放行記錄歸納候選抑制規則,須逐條審核</p>
+                            </div>
+                            <button class="modern-btn" id="drafts_generate" data-i18n>產生草稿</button>
+                        </div>
+                        <div class="list-item" id="drafts_empty">
+                            <div class="item-info"><p class="ai-hint" data-i18n>暫無草稿;產生後在此逐條批准或拒絕</p></div>
+                        </div>
+                        <div id="drafts_list"></div>
                     </div>
                 </section>
 

@@ -20,6 +20,13 @@ document.addEventListener('DOMContentLoaded', () => {
         byId('threat_fp_identity').textContent = latestIdentity;
         byId('threat_fp_scope_this_text').textContent = fpTexts.scope_this;
         byId('threat_fp_scope_file_text').textContent = fpTexts.scope_file;
+        const signerWrap = byId('threat_fp_scope_signer_wrap');
+        if (fpTexts.scope_signer) {
+            byId('threat_fp_scope_signer_text').textContent = fpTexts.scope_signer;
+            signerWrap.hidden = false;
+        } else {
+            signerWrap.hidden = true;
+        }
         byId('threat_fp_reason_label').textContent = fpTexts.reason;
         byId('threat_fp_reason').replaceChildren(...fpTexts.reasons.map(([value, label]) => {
             const option = document.createElement('option');
@@ -38,6 +45,14 @@ document.addEventListener('DOMContentLoaded', () => {
         simplified_switch: ['永久允许', '30 秒内对完全相同的告警重复此决定（最多 20 次，默认关闭）', '仅记住此防护、此完整路径、此 SHA-256 文件内容、此检测结果和此目标。文件变化后重新询问；不会放行目录或关闭扫描。可在设置中清除。确认永久允许？', '确认永久允许', '取消', '文件身份无法验证、已经变化或保存失败；未新增允许规则，请重新处理。', '无法确认文件身份或属于内存告警，不能记住决定。'],
         traditional_switch: ['永久允許', '30 秒內對完全相同的告警重複此決定（最多 20 次，預設關閉）', '僅記住此防護、此完整路徑、此 SHA-256 檔案內容、此偵測結果與此目標。檔案變更後重新詢問；不放行目錄或關閉掃描。可在設定中清除。確認永久允許？', '確認永久允許', '取消', '無法驗證檔案身分、檔案已變更或儲存失敗；未新增允許規則。', '無法確認檔案身分或屬於記憶體告警，不能記住決定。'],
         english_switch: ['Always allow', 'Repeat this decision for identical alerts for 30 seconds (up to 20 uses, off by default)', 'Remember only this protection, exact path, SHA-256 content, detection and target. Changed files will prompt again. Scanning stays enabled. Clear rules in Settings. Always allow?', 'Confirm always allow', 'Cancel', 'File identity changed, could not be verified, or saving failed. No allow rule added.', 'File identity cannot be verified or this is a memory alert. Decisions cannot be remembered.'],
+        japanese_switch: ['常に許可', '同一アラートに対し30秒間この決定を繰り返す（最大20回、既定はオフ）', 'この保護・完全なパス・SHA-256内容・検出・対象のみ記憶します。ファイルが変われば再確認します。ディレクトリの許可やスキャン停止はしません。設定で削除できます。常に許可しますか？', '常に許可を確認', 'キャンセル', 'ファイルの身元を検証できないか、変更または保存に失敗しました。許可ルールは追加されていません。', 'ファイルの身元を確認できないかメモリ警告のため、決定を記憶できません。'],
+        korean_switch: ['항상 허용', '동일한 경고에 대해 30초간 이 결정을 반복합니다(최대 20회, 기본값 꺼짐)', '이 보호, 전체 경로, SHA-256 내용, 탐지, 대상만 기억합니다. 파일이 변경되면 다시 묻습니다. 디렉터리 허용이나 검사 중지는 하지 않습니다. 설정에서 삭제할 수 있습니다. 항상 허용할까요?', '항상 허용 확인', '취소', '파일 신원을 확인할 수 없거나 변경·저장에 실패했습니다. 허용 규칙이 추가되지 않았습니다.', '파일 신원을 확인할 수 없거나 메모리 경고이므로 결정을 기억할 수 없습니다.'],
+        french_switch: ['Toujours autoriser', 'Répéter cette décision pour des alertes identiques pendant 30 secondes (jusqu’à 20 fois, désactivé par défaut)', 'Seuls cette protection, ce chemin exact, ce contenu SHA-256, cette détection et cette cible sont mémorisés. Les fichiers modifiés redemanderont. Aucun dossier autorisé, scan jamais désactivé. Supprimable dans les réglages. Toujours autoriser ?', 'Confirmer l’autorisation', 'Annuler', 'Identité du fichier invérifiable, modifiée ou échec d’enregistrement ; aucune règle ajoutée.', 'Identité invérifiable ou alerte mémoire : la décision ne peut pas être mémorisée.'],
+        spanish_switch: ['Permitir siempre', 'Repetir esta decisión ante alertas idénticas durante 30 segundos (hasta 20 usos, desactivado por defecto)', 'Solo se recuerdan esta protección, esta ruta exacta, este contenido SHA-256, esta detección y este destino. Los archivos modificados volverán a preguntar. No se permiten directorios ni se desactiva el análisis. Se puede borrar en Ajustes. ¿Permitir siempre?', 'Confirmar permiso', 'Cancelar', 'No se pudo verificar la identidad del archivo, cambió o falló el guardado; no se añadió regla.', 'No se puede verificar la identidad o es una alerta de memoria; no se puede recordar la decisión.'],
+        hindi_switch: ['सदा अनुमति दें', 'समान चेतावनियों के लिए 30 सेकंड तक यह निर्णय दोहराएँ (अधिकतम 20 बार, डिफ़ॉल्ट रूप से बंद)', 'केवल यह सुरक्षा, पूर्ण पथ, SHA-256 सामग्री, पहचान और लक्ष्य याद रखा जाता है। फ़ाइल बदलने पर फिर पूछा जाएगा; निर्देशिका अनुमति या स्कैन बंद करना नहीं। सेटिंग में साफ़ किया जा सकता है। सदा अनुमति दें?', 'सदा अनुमति की पुष्टि करें', 'रद्द करें', 'फ़ाइल पहचान सत्यापित नहीं हो सकी, बदल गई या सहेजने में विफल; कोई अनुमति नियम नहीं जोड़ा गया।', 'फ़ाइल पहचान सत्यापित नहीं या मेमोरी चेतावनी है; निर्णय याद नहीं रखा जा सकता।'],
+        arabic_switch: ['السماح دائماً', 'تكرار هذا القرار للتنبيهات المتطابقة لمدة 30 ثانية (حتى 20 مرة، معطّل افتراضياً)', 'يُحفظ فقط هذه الحماية والمسار الكامل ومحتوى SHA-256 والكشف والهدف. الملفات المتغيرة ستُسأل من جديد؛ لن يُسمح بمجلد ولن يتوقف الفحص. يمكن حذفه من الإعدادات. السماح دائماً؟', 'تأكيد السماح الدائم', 'إلغاء', 'تعذّر التحقق من هوية الملف أو تغيّر أو فشل الحفظ؛ لم تُضَف قاعدة سماح.', 'لا يمكن التحقق من هوية الملف أو أنها تنبيه ذاكرة؛ لا يمكن حفظ القرار.'],
+        russian_switch: ['Всегда разрешать', 'Повторять это решение для одинаковых предупреждений 30 секунд (до 20 раз, по умолчанию выключено)', 'Запоминаются только эта защита, точный путь, содержимое SHA-256, детект и цель. Изменённый файл спросит снова; каталоги не разрешаются, сканирование не отключается. Можно удалить в настройках. Всегда разрешать?', 'Подтвердить разрешение', 'Отмена', 'Не удалось проверить подлинность файла, он изменён или сохранение не удалось; правило не добавлено.', 'Подлинность не подтверждается или это предупреждение памяти; решение не может быть запомнено.'],
+        slovenian_switch: ['Vedno dovoli', 'Ponovi to odločitev za enaka opozorila 30 sekund (do 20-krat, privzeto izklopljeno)', 'Zapomni se samo ta zaščita, celotna pot, vsebina SHA-256, zaznanje in cilj. Spremenjena datoteka bo vprašala znova; mape niso dovoljene, pregled ostaja vklopljen. Lze izbrisati v nastavitvah. Vedno dovoli?', 'Potrdi vedno dovoli', 'Prekliči', 'Identitete datoteke ni bilo mogoče preveriti, je spremenjena ali shranjevanje ni uspelo; pravilo ni dodano.', 'Identitete ni mogoče preveriti ali je opozorilo iz pomnilnika; odločitve ni mogoče zapomniti.'],
     };
     let currentId = null;
     let busy = false;
@@ -105,6 +120,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 aiButton.hidden = true;
                 aiVerdict = '';
                 aiButton.disabled = true;
+            }
+            // AI 理由可见渲染:不再只藏在 tooltip 里
+            const reasonEl = byId('threat_ai_reason');
+            if (reasonEl) {
+                if (ai && ai.label) {
+                    reasonEl.textContent = ai.state === 'ready' && ai.hint
+                        ? `${ai.label} · ${ai.hint}` : ai.label;
+                    reasonEl.classList.remove('hidden');
+                } else {
+                    reasonEl.classList.add('hidden');
+                }
             }
             // 误报入口:仅文件类告警(有内容身份)显示
             const fp = data.fp;

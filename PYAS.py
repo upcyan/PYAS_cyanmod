@@ -88,9 +88,10 @@ from PYAS_Config import ConfigMixin
 from PYAS_Logs import LogMixin
 from PYAS_Runtime import RuntimeMixin
 from PYAS_AI import AIMixin
+from PYAS_Agents import AgentMonitorMixin
 
 
-class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin, AIMixin):
+class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin, AIMixin, AgentMonitorMixin):
     def __init__(self):
         self._window = None
         self.tray_icon = None

@@ -231,7 +231,8 @@ class ScannerMixin(CloudQueueMixin):
         result = self.safe_scan_engine(file_path)
 
         if result:
-            if self.request_block_decision("Deferred Scan Block", source=file_path, detection=result):
+            if self.request_block_decision("Deferred Scan Block", source=file_path, detection=result,
+                finding_description=self.heuristic.last_description()):
                 self.manage_named_list(
                     "quarantine", [file_path], action="add", lock_func=self.lock_file
                 )

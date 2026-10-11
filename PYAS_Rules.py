@@ -1,5 +1,6 @@
 from PYAS_Diagnostics import log_exception
 import os
+import threading
 import yara
 
 
@@ -7,6 +8,12 @@ class RuleScanner:
     def __init__(self):
         self.rules = None
         self.network = []
+        # 检测结果翻译层:命中规则的 meta description,按扫描线程隔离
+        self._meta_local = threading.local()
+
+    def last_description(self):
+        """同线程最近一次 yara_scan 的规则描述;无则空串。"""
+        return str(getattr(self._meta_local, "description", "") or "")
 
     def load_path(self, path, callback=None):
         yara_files = {}
@@ -65,6 +72,7 @@ class RuleScanner:
 
             if matches:
                 rule_name = str(matches[0])
+                self._meta_local.description = str(matches[0].meta.get("description", "") or "")
 
                 try:
                     label = rule_name.split("_")[0]
@@ -90,6 +98,7 @@ class RuleScanner:
 
             if matches:
                 rule_name = str(matches[0])
+                self._meta_local.description = str(matches[0].meta.get("description", "") or "")
 
                 try:
                     label = rule_name.split("_")[0]

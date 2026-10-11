@@ -1,6 +1,7 @@
 from PYAS_Diagnostics import log_exception
 import ctypes
 import ctypes.wintypes
+import os
 import threading
 import time
 import math
@@ -273,6 +274,14 @@ DIALOG_TEXTS.update({
         "arabic_switch": "أي كشف لهذا الملف", "russian_switch": "Любое обнаружение для этого файла",
         "slovenian_switch": "Vsaka zaznanja za to datoteko",
     },
+    "fp_scope_signer": {
+        "simplified_switch": "同一签名者的任何已签名文件", "traditional_switch": "同一簽名者的任何已簽名檔案",
+        "english_switch": "Any signed file by this signer", "japanese_switch": "この署名者による署名済みファイル",
+        "korean_switch": "이 서명자의 서명된 파일", "french_switch": "Tout fichier signé par ce signataire",
+        "spanish_switch": "Cualquier archivo firmado por este firmante", "hindi_switch": "इस हस्ताक्षरकर्ता की कोई भी हस्ताक्षरित फ़ाइल",
+        "arabic_switch": "أي ملف موقّع من هذا الموقّع", "russian_switch": "Любой файл, подписанный этим подписантом",
+        "slovenian_switch": "Katera koli datoteka tega podpisnika",
+    },
     "fp_reason": {
         "simplified_switch": "原因", "traditional_switch": "原因",
         "english_switch": "Reason", "japanese_switch": "理由",
@@ -544,6 +553,15 @@ class _ThreatPromptQueue:
                     self.worker = None
                     return
             try:
+                while self.popup_hold and self.popup_hold():
+                    with self.condition:
+                        if self.closed:
+                            break
+                        # 有截止时间的请求不无限等待:到点后走会话超时路径,快速失败-关闭
+                        if self.active and self.active.deadline and self.active.deadline <= time.monotonic() + 0.5:
+                            break
+                    time.sleep(2)
+
                 with self.condition:
                     self.session = self.session_factory(
                         request.lang, request.title, request.message, request.timeout,
@@ -606,14 +624,14 @@ def ai_snapshot_view(request):
     return {"state": "failed", "verdict": "", "label": label, "hint": loc_dialog_text(lang, "ai_failed_hint")}
 
 
-def fp_snapshot_view(request):
+def fp_snapshot_view(request, signer_ok=None):
     """误报表单的本地化文案;无文件身份(内存告警)时返回 None,入口隐藏。"""
     if request.rule is None:
         return None
 
     lang = request.lang
 
-    return {
+    view = {
         "button": loc_dialog_text(lang, "fp_button"),
         "scope_this": loc_dialog_text(lang, "fp_scope_this"),
         "scope_file": loc_dialog_text(lang, "fp_scope_file"),
@@ -624,6 +642,11 @@ def fp_snapshot_view(request):
         "submit": loc_dialog_text(lang, "fp_submit"),
         "cancel": loc_dialog_text(lang, "fp_cancel"),
     }
+
+    if signer_ok:
+        view["scope_signer"] = loc_dialog_text(lang, "fp_scope_signer")
+
+    return view
 
 
 class _WebDecisionAPI:
@@ -666,7 +689,8 @@ class _WebDecisionAPI:
                 "block": loc_dialog_text(request.lang, "btn_block"),
                 "countdown": loc_dialog_text(request.lang, "countdown_auto_block").replace("{0}", str(remaining)),
                 "ai": ai_snapshot_view(request),
-                "fp": fp_snapshot_view(request),
+                "fp": fp_snapshot_view(request,
+                    signer_ok=bool(request.rule and session.owner._rule_signer(request.rule))),
             }
         with session.owner.lock_config:
             result["theme"] = session.owner.pyas_config.get("theme", "system_switch")
@@ -700,6 +724,21 @@ class _WebDecisionAPI:
                 return True
         finally:
             request.resolving = False
+
+
+    # 免打扰:开关开启且系统处于忙碌/全屏/演示状态时,弹窗静默排队
+    POPUP_BUSY_STATES = {2, 3, 4}
+
+    def _popup_suppressed(self):
+        try:
+            with self.lock_config:
+                if not self.pyas_config.get("dnd_switch", False):
+                    return False
+
+            return query_user_notification_state() in self.POPUP_BUSY_STATES
+        except Exception:
+            log_exception("PYAS_Dialog.DialogMixin._popup_suppressed")
+            return False
 
     def report_false_positive(self, request_id, reason, note, scope):
         """登记内容锚定抑制并放行本次;语义与 decide() 一致,失败置 decision_error。"""
@@ -1234,6 +1273,20 @@ class _ThreatDialogSession:
         return 1.0
 
 
+def query_user_notification_state():
+    """SHQueryUserNotificationState:2=忙碌 3=全屏游戏 4=演示模式;非 Windows 返回 -1。"""
+    if os.name != "nt":
+        return -1
+
+    try:
+        result = ctypes.c_int(0)
+        ctypes.windll.shell32.SHQueryUserNotificationState(ctypes.byref(result))
+        return result.value
+    except Exception:
+        log_exception("PYAS_Dialog.query_user_notification_state")
+        return -1
+
+
 class DialogMixin(AlertPolicyMixin):
     def _get_threat_queue(self):
         with _queue_init_lock:
@@ -1244,6 +1297,7 @@ class DialogMixin(AlertPolicyMixin):
                 self._threat_queue = _ThreatPromptQueue(
                     factory, policy_lookup=self._lookup_alert_decision,
                     ai_starter=self._start_ai_suggestion,
+                    popup_hold=self._popup_suppressed,
                 )
             return self._threat_queue
 
@@ -1341,7 +1395,8 @@ class DialogMixin(AlertPolicyMixin):
 
         return lang if lang in SUPPORTED_LANGS else "traditional_switch"
 
-    def request_block_decision(self, action, source=None, target=None, pid=None, detection=None):
+    def request_block_decision(self, action, source=None, target=None, pid=None, detection=None,
+        finding_description=None):
         with self.lock_config:
             if not self.pyas_config.get("interactive_switch", False):
                 # 交互确认关闭:自动拦截不经弹窗,托盘通知是用户唯一知情渠道
@@ -1361,6 +1416,9 @@ class DialogMixin(AlertPolicyMixin):
 
         if pid:
             lines.append(f"{loc_dialog_text(lang, 'label_pid')}: {pid}")
+
+        if finding_description:
+            lines.append(f"YARA: {str(finding_description)[:200]}")
 
         timeout = self.get_interactive_timeout()
         with self.lock_config:

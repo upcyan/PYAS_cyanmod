@@ -13,6 +13,9 @@ class CloudScanner:
 
         self.lock = threading.RLock()
         self.local = threading.local()
+        # 连续失败熔断:避免对不可达的云端每 30 秒刷超时日志
+        self.fail_streak = 0
+        self.cooldown_until = 0.0
 
     def _get_session(self, api_host, api_key):
         if (
@@ -34,17 +37,27 @@ class CloudScanner:
         return self.local.session
 
     def _request(self, method, endpoint, api_host, api_key, **kwargs):
+        if time.time() < getattr(self, "cooldown_until", 0.0):
+            return None
+
         session = self._get_session(api_host, api_key)
 
         try:
             r = session.request(method, f"{api_host}{endpoint}", timeout=self.timeout, **kwargs)
 
             if r.status_code == 200:
+                self.fail_streak = 0
+                self.cooldown_until = 0.0
                 return r
 
         except Exception:
             log_exception("PYAS_Cloud.CloudScanner._request:31")
-            pass
+
+        # 连续 3 次失败进入指数退避冷却(30s 起步,封顶 30 分钟)
+        self.fail_streak = getattr(self, "fail_streak", 0) + 1
+
+        if self.fail_streak >= 3:
+            self.cooldown_until = time.time() + min(30 * (2 ** (self.fail_streak - 3)), 1800)
 
         return None
 

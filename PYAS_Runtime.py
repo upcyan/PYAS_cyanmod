@@ -172,6 +172,8 @@ class RuntimeMixin:
             "ai_base_url": "http://127.0.0.1:11434/v1",
             "ai_api_key": "",
             "ai_model": "",
+            "ai_rule_drafts": [],
+            "dnd_switch": False,
             "custom_rule": [],
             "white_list": [],
             "quarantine": [],
