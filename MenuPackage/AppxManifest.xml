@@ -12,7 +12,7 @@
     <Identity
         Name="PYAS-Cyanmod-Menu"
         Publisher="CN=PYAS Cyanmod Menu"
-        Version="3.7.0.17"
+        Version="3.7.0.19"
         ProcessorArchitecture="x64"/>
     <Properties>
         <DisplayName>PYAS Security Cyanmod</DisplayName>

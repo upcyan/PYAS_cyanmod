@@ -1,3 +1,3 @@
 [Files]
-"E:\Project Files\PYAS_Cyanmod\MenuPackage\AppxManifest.xml" "AppxManifest.xml"
-"E:\Project Files\PYAS_Cyanmod\MenuPackage\Assets\icon.png" "Assets/icon.png"
+"Z:\vol1\1000\deepseek_harness\PYAS_Cyanmod\MenuPackage\AppxManifest.xml" "AppxManifest.xml"
+"Z:\vol1\1000\deepseek_harness\PYAS_Cyanmod\MenuPackage\Assets\icon.png" "Assets/icon.png"
