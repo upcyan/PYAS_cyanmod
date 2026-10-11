@@ -420,6 +420,8 @@ def build_exe():
     if not ICON_FILE.is_file():
         die(f"找不到图标文件: {ICON_FILE}")
 
+    # 本机 Python 环境若装了 torch/numba/tensorflow,PyInstaller 会整包收进 exe;
+    # 主程序推理走 onnxruntime,这些训练用依赖一律排除。
     command = [
         sys.executable,
         "-m",
@@ -432,8 +434,12 @@ def build_exe():
         "PYAS",
         "--icon",
         str(ICON_FILE),
-        str(ROOT / "PYAS.py"),
     ]
+
+    for excluded in ("torch", "numba", "tensorflow"):
+        command += ["--exclude-module", excluded]
+
+    command += [str(ROOT / "PYAS.py")]
     result = run(command)
 
     if result.returncode != 0:

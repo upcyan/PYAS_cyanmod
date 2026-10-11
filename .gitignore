@@ -15,5 +15,4 @@ PYAS.spec
 _release_notes.md
 _patch*.py
 _*.py
-MenuPackage/PYAS_Menu.exe
-MenuPackage/Assets/
+MenuPackage/
