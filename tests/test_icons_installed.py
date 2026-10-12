@@ -124,10 +124,10 @@ class IconInstallTests(unittest.TestCase):
                 continue
             m = re.search(r'stroke-width="([^"]*)"', body)
             self.assertIsNotNone(m, '%s 缺 stroke-width' % sid)
-        declared = re.findall(r'stroke-width="([^"]*)"', self.sprite)
-        self.assertTrue(declared, 'sprite 未声明描边')
-        var_count = sum(1 for d in declared if d == 'var(--icon-stroke, 2)')
-        self.assertEqual(var_count, 51, '除 i-spinner 外的 51 个 symbol 都应使用描边变量,实际 %d' % var_count)
+        var_count = sum(1 for sid, tag in self.sprite_symbols.items()
+                        if sid != 'i-spinner' and 'stroke-width="var(--icon-stroke, 2)"' in tag)
+        self.assertEqual(var_count, 51,
+                         '除 i-spinner 外的 51 个 symbol 都应在 symbol 上用描边变量,实际 %d' % var_count)
         style = read(STYLE)
         self.assertIn('--icon-stroke: 1.5', style, '.item-icon 需用变量把描边传进 shadow')
         self.assertNotIn('stroke-width: 1.5', style, '对 use 无效的旧写法应已移除')

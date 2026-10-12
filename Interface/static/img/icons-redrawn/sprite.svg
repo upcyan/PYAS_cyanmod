@@ -1,6 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
   <!--
-    PYAS Cyanmod · 界面图标重绘稿（未实装）
+    PYAS Cyanmod · 界面图标重绘稿
+
     网格 24x24 / 描边 2 / 圆帽圆角 / 2px 安全边距 / currentColor 自动跟随主题
 
     【锐利度铁律】描边 2(偶数) 必须配整数坐标:
@@ -13,6 +14,16 @@
       例外:盾族(i-shield / shield-check / shield-pulse / shield-bot / shield-wifi)
       保持线上原版盾形 16x20(x4~20 / y2~22) —— 用户明确偏好原版盾,且族内必须同尺寸。
     命名: i-<语义>; 同族共享词根(shield-*, monitor-*, chevron-*)
+
+    【实装方式】本文件是唯一源文件,整份内联进 index.html / threat.html 的 <body> 开头
+      (display:none),界面各处用 <use> 引用 #i-<语义> 形式的 id。选内联而非外部引用,
+      是因为外部 svg 在 file:// 下会被 CORS 拦掉。改动本文件后需同步重新内联,
+      tests/test_icons_installed.py 会逐字节比对,漏同步会直接测红。
+    【描边取值】symbol 上写 stroke-width="var(--icon-stroke, 2)":
+      外层 CSS 选不中 use 的 shadow 内容,只能靠自定义属性把描边传进去。
+      默认 2;列表图标上下文(style.css 的 .item-icon)给 1.5,保持线上原有观感。
+    【未纳入重绘】关于按钮的信息圆、進程管理的显示器+心电 —— 本集没有对应图元,
+      在 index.html 里保持内联原几何(见该文件内注释)。
   -->
 
   <!-- 窗口控制 -->
