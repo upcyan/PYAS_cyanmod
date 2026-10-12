@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title></title>
+    <!-- 同步加载主题脚本:在首帧前落主题,避免通知窗闪一下浅色 -->
+    <script src="/static/js/theme.js"></script>
+    <script>
+        (() => {
+            const theme = new URLSearchParams(location.search).get('theme') || 'white_switch';
+            window.PyasTheme.apply(theme);
+        })();
+    </script>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        /* 通知窗:复用全局设计令牌(style.css),不再内联硬编码色值,跟随主题 */
+        body {
+            background: var(--bg-panel);
+            color: var(--text-primary);
+            overflow: hidden;
+            user-select: none;
+            font-size: var(--text-md);
+        }
+        .wrap {
+            position: relative;
+            padding: var(--space-3) var(--space-4) var(--space-3) var(--space-5);
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        .head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: var(--space-2);
+            flex-shrink: 0;
+        }
+        .title {
+            font-size: var(--text-md);
+            font-weight: 600;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .dismiss {
+            border: none;
+            background: transparent;
+            font-size: var(--text-xl);
+            line-height: 1;
+            cursor: pointer;
+            color: var(--text-secondary);
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: var(--radius-sm);
+            flex-shrink: 0;
+            transition: background-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
+        }
+        .dismiss:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .body {
+            margin-top: var(--space-3);
+            font-size: var(--text-sm);
+            line-height: 1.6;
+            color: var(--text-primary);
+            white-space: pre-wrap;
+            word-break: break-word;
+            overflow-y: auto;
+            flex: 1;
+        }
+        /* 语义色条:走 danger 令牌,随主题 */
+        .accent {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: var(--color-danger);
+            border-radius: 3px 0 0 3px;
+        }
+    </style>
+</head>
+<body role="alert">
+    <div class="wrap">
+        <span class="accent" aria-hidden="true"></span>
+        <div class="head">
+            <div class="title" id="t"></div>
+            <button class="dismiss" id="x" type="button">&#10005;</button>
+        </div>
+        <div class="body" id="b"></div>
+    </div>
+    <script src="/static/js/i18n.js"></script>
+    <script>
+        const params = new URLSearchParams(location.search);
+        document.getElementById('t').textContent = decodeURIComponent(params.get('title') || '');
+        document.getElementById('b').textContent = decodeURIComponent(params.get('body') || '');
+        const lang = params.get('lang') || 'english_switch';
+        document.documentElement.lang = (window.AppI18n && window.AppI18n.langMap && window.AppI18n.langMap[lang]) || 'en';
+        // 关闭键的读屏/悬停标签走词库,不再硬编码
+        const closeLabel = (window.AppI18n?.dict?.[lang]?.btn_close) || 'Close';
+        const dismiss = document.getElementById('x');
+        dismiss.setAttribute('aria-label', closeLabel);
+        dismiss.title = closeLabel;
+        const dismissWindow = () => {
+            if (window.pywebview && window.pywebview.api) window.pywebview.api.dismiss();
+        };
+        dismiss.addEventListener('click', dismissWindow);
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape') { event.preventDefault(); dismissWindow(); }
+        });
+        window.addEventListener('pywebviewready', () => { /* 点击绑定不依赖 pywebview 就绪 */ });
+    </script>
+</body>
+</html>

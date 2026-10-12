@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PYAS 图标重绘预览（未实装）</title>
+<style>
+  :root {
+    --bg: #F5F5F7; --panel: #FFFFFF; --text: #1D1D1F; --muted: #86868B; --border: #D2D2D7;
+    --accent: #007AFF; --accent-alpha: rgba(0,122,255,.10);
+  }
+  body.dark {
+    --bg: #000000; --panel: #1C1C1E; --text: #D8D8DC; --muted: #86868B; --border: #2C2C2E;
+    --accent: #0A84FF; --accent-alpha: rgba(10,132,255,.12);
+  }
+  body[data-accent="red"]    { --accent: #FF3B30; --accent-alpha: rgba(255,59,48,.10); }
+  body[data-accent="green"]  { --accent: #34C759; --accent-alpha: rgba(52,199,89,.10); }
+  body[data-accent="yellow"] { --accent: #FF9500; --accent-alpha: rgba(255,149,0,.10); }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text); min-height: 100vh; padding: 28px clamp(16px, 4vw, 48px) 64px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", Roboto, sans-serif;
+    transition: background .25s;
+  }
+  h1 { font-size: 20px; font-weight: 700; letter-spacing: -.3px; }
+  .sub { font-size: 13px; color: var(--muted); margin-top: 6px; line-height: 1.7; max-width: 760px; }
+  .sub code { background: var(--accent-alpha); color: var(--accent); border-radius: 4px; padding: 1px 6px; font-size: 12px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0 8px; align-items: center; }
+  .toolbar .label { font-size: 12px; color: var(--muted); margin-right: 2px; }
+  .tbtn {
+    border: 1px solid var(--border); background: var(--panel); color: var(--text);
+    border-radius: 8px; padding: 6px 14px; font-size: 13px; cursor: pointer;
+  }
+  .tbtn.on { border-color: var(--accent); color: var(--accent); background: var(--accent-alpha); font-weight: 600; }
+  .mock {
+    margin: 22px 0 8px; border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+    background: var(--panel); display: flex; flex-direction: column;
+  }
+  .mock-bar { height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px 0 18px; border-bottom: 1px solid var(--border); }
+  .mock-bar .t { font-size: 14px; font-weight: 600; }
+  .mock-ctrls { display: flex; gap: 4px; color: var(--muted); }
+  .mock-ctrls .ic { color: var(--muted); }
+  .mock-body { display: flex; min-height: 168px; }
+  .mock-rail { width: 64px; border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding: 14px 0; gap: 12px; color: var(--muted); }
+  .mock-rail .on { color: var(--accent); background: var(--accent-alpha); border-radius: 10px; }
+  .mock-main { flex: 1; padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; }
+  .mock-status { display: flex; align-items: center; gap: 14px; color: var(--accent); }
+  .mock-status .txt { color: var(--text); font-size: 17px; font-weight: 600; }
+  .mock-cards { display: flex; gap: 12px; flex-wrap: wrap; }
+  .mock-card { flex: 1; min-width: 180px; display: flex; align-items: center; gap: 12px; border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; color: var(--accent); }
+  .mock-card .txt { color: var(--text); font-size: 14px; font-weight: 500; }
+  .mock-card .chev { margin-left: auto; color: var(--muted); }
+  h2.grp { font-size: 15px; font-weight: 700; margin: 34px 0 10px; display: flex; align-items: center; gap: 10px; }
+  h2.grp::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+  .tbl { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--panel); }
+  .row { display: grid; grid-template-columns: 190px 52px 52px 40px 56px 1fr; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--border); }
+  .row:last-child { border-bottom: none; }
+  .row.head { background: var(--bg); font-size: 11px; color: var(--muted); font-weight: 600; padding: 7px 14px; }
+  .meta b { font-size: 12.5px; font-weight: 600; display: block; }
+  .meta span { font-size: 11px; color: var(--muted); }
+  .cell { display: flex; align-items: center; justify-content: center; color: var(--accent); }
+  .cur svg, .new svg { display: block; }
+  .cur svg { width: 24px; height: 24px; }
+  .ic { width: 24px; height: 24px; }
+  .ic16 { width: 16px; height: 16px; }
+  .ic32 { width: 32px; height: 32px; }
+  .note { font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+  .foot { margin-top: 40px; font-size: 12px; color: var(--muted); line-height: 1.8; border-top: 1px solid var(--border); padding-top: 16px; }
+  .spinner { width: 28px; height: 28px; }
+  .spinner .path { stroke: var(--muted); stroke-linecap: round; animation: dash 1.5s ease-in-out infinite; }
+  @keyframes rotate { 100% { transform: rotate(360deg); } }
+  @keyframes dash {
+    0% { stroke-dasharray: 1,150; stroke-dashoffset: 0; }
+    50% { stroke-dasharray: 90,150; stroke-dashoffset: -35; }
+    100% { stroke-dasharray: 90,150; stroke-dashoffset: -124; }
+  }
+  .spinner { animation: rotate 2s linear infinite; }
+</style>
+</head>
+<body>
+
+<!-- ===== 重绘图标集（与 static/img/icons-redrawn/sprite.svg 同源，内嵌便于本页预览） ===== -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <!--
+    PYAS Cyanmod · 界面图标重绘稿（未实装）
+    网格 24x24 / 描边 2 / 圆帽圆角 / 2px 安全边距 / currentColor 自动跟随主题
+
+    【锐利度铁律】描边 2(偶数) 必须配整数坐标:
+      · 整数坐标 → 描边覆盖 [x-1, x+1],边缘正好压在像素边界上 → 目视锐利清晰
+      · x.5 坐标 → 描边覆盖 [x-0.5, x+1.5],正好骑在像素中点 → 抗锯齿发虚
+      · 因此本版直线/矩形/圆一律整数坐标;此前为消除"撑破边距"而加的 scale()
+        等比缩放会把整数坐标乘成小数(齿轮 61 处、垃圾桶 35 处…),已全部移除。
+    【视觉尺寸统一】除天然偏小的 close/chevron(14)、minimize(16)、grid(18) 外,
+      全部对齐到视觉框 20(几何最大维 18),与线上原版观感一致。
+    命名: i-<语义>; 同族共享词根(shield-*, monitor-*, chevron-*)
+  -->
+
+  <!-- 窗口控制 -->
+  <symbol id="i-minimize" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></symbol>
+  <symbol id="i-maximize" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/></symbol>
+  <symbol id="i-restore" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 0 1 2-2h10"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6 18 18M18 6 6 18"/></symbol>
+
+  <!-- 侧栏导航 -->
+  <symbol id="i-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11 12 3l9 8"/><path d="M5 10v11h14V10"/><path d="M9 21v-6h6v6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M17 17 21 21"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6 10 12 3 18"/><path d="M12 18h9"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M21 12 18 14.5 18.4 18.4 14.5 18 12 21 9.5 18 5.6 18.4 6 14.5 3 12 6 9.5 5.6 5.6 9.5 6 12 3 14.5 6 18.4 5.6 18 9.5Z"/></symbol>
+
+  <!-- 首页 -->
+  <symbol id="i-shield-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-scan-smart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M16 16 20 20"/><path d="m7 11 3 3 5-5"/></symbol>
+  <symbol id="i-archive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M12 12v5M9 14l3 3 3-3"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10a9 9 0 1 0-2 8M21 4v6h-6"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></symbol>
+  <symbol id="i-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></symbol>
+
+  <!-- 防护引擎 -->
+  <symbol id="i-shield-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M8 12h2l1-3 2 6 1-3h2"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M10 8v8M14 8v8"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="m12 4 9 4-9 4-9-4 9-4Z"/><path d="m3 12 9 4 9-4"/><path d="m3 16 9 4 9-4"/></symbol>
+  <symbol id="i-file-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="m8 14 3 3 5-6"/></symbol>
+  <symbol id="i-monitor-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/><path d="m8 10 3 3 5-5"/></symbol>
+  <symbol id="i-shield-wifi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M8 10a6 6 0 0 1 8 0"/><path d="M10 13a3 3 0 0 1 4 0"/><circle cx="12" cy="16" r="0.5"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/><path d="m8 12 3 3 5-6"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2Z"/><path d="M7 12h10M7 16h6"/></symbol>
+
+  <!-- 工具 -->
+  <symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="4"/><path d="M6 7h12v4a6 6 0 0 1-6 6 6 6 0 0 1-6-6V7zM12 17v4"/></symbol>
+  <symbol id="i-power" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M6 6a8 8 0 1 0 12 0"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18"/><path d="M9 7V4h6v3"/><path d="M5 7v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7"/><path d="M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-wrench" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M14 5a5 5 0 0 0-6 6l-5 5a2 2 0 0 0 3 3l5-5a5 5 0 0 0 6-6l-3 3-3-3 3-3Z"/></symbol>
+  <symbol id="i-window-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18m-12 3 6 6m0-6-6 6"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m7 15 3-4 3 3 5-7"/></symbol>
+  <symbol id="i-clipboard-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="17" rx="2"/><rect x="9" y="3" width="6" height="4" rx="2"/><path d="m8 13 3 3 5-5"/></symbol>
+
+  <!-- 设置 · 引擎 -->
+  <symbol id="i-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3 6 13h5l-1 8 8-11h-5l1-7Z"/></symbol>
+  <symbol id="i-plus-square" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 7v10M7 12h10"/></symbol>
+  <symbol id="i-cloud-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18H6a4 4 0 0 1-.8-7.9A7 7 0 0 1 18.7 8a5 5 0 0 1-.7 10h-1m-5 3V11m-4 4 4-4 4 4"/></symbol>
+  <symbol id="i-funnel" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h18l-7 8v7l-4 2v-9L3 4Z"/></symbol>
+
+  <!-- 设置 · 交互 -->
+  <symbol id="i-monitor-power" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="14" rx="2"/><path d="M8 21h8m-4-4v4M12 6v4m-2.5-2.5a3.5 3.5 0 1 0 5 0"/></symbol>
+  <symbol id="i-search-window" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 7h10M7 11h3"/><circle cx="13" cy="14" r="3"/><path d="m15.2 16.2 2.8 2.8"/></symbol>
+  <symbol id="i-copy-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="13" height="13" rx="2"/><path d="M5 7H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-1"/><path d="M11 8h6m-6 4h6m-6 4h3"/></symbol>
+  <symbol id="i-message-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-4 4v-4H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 8v6M9 11h6"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2.5"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></symbol>
+  <symbol id="i-palette" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 0 0 0 18h1a2 2 0 0 0 1.5-3.3 1.5 1.5 0 0 1 1.1-2.7h2.4a3 3 0 0 0 3-3A9 9 0 0 0 12 3Z"/><circle cx="8" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="11" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="9" r="1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 4 9 15 15 0 0 1-4 9 15 15 0 0 1-4-9 15 15 0 0 1 4-9Z"/></symbol>
+  <symbol id="i-reset" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 6 6 0 0 0-6 3L3 9"/><path d="M3 3v6h6"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 11.5 8 16 9.5 11.5 11 10 16 8.5 11 4 9.5 8.5 8 10 3Z"/><path d="M17 14l1 2.5 2.5 1-2.5 1-1 2.5-1-2.5L13 17.5l2.5-1 1-2.5Z"/></symbol>
+
+  <!-- AI -->
+  <symbol id="i-shield-bot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M8 9 11 12 8 15"/><path d="M13 15h3"/></symbol>
+  <symbol id="i-chip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v3m6-3v3M9 19v3m6-3v3M2 9h3m-3 6h3m14-6h3m-3 6h3"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="12" r="5"/><path d="M13 12h8"/><path d="M17 12v3M20 12v3"/></symbol>
+
+  <!-- 通用 -->
+  <symbol id="i-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></symbol>
+  <symbol id="i-spinner" viewBox="0 0 50 50"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"><animate attributeName="stroke-dasharray" values="1,150;90,150;90,150" dur="1.5s" repeatCount="indefinite"/><animate attributeName="stroke-dashoffset" values="0;-35;-124" dur="1.5s" repeatCount="indefinite"/><animateTransform attributeName="transform" type="rotate" values="0 25 25;360 25 25" dur="2s" repeatCount="indefinite"/></circle></symbol>
+</svg>
+
+<h1>PYAS 界面图标重绘预览</h1>
+<p class="sub">
+  共 <b>52</b> 个功能图标全部重绘，统一规范：<code>24×24 网格</code> <code>描边 2</code> <code>圆帽圆角</code> <code>2px 安全边距</code> <code>currentColor 自动跟主题</code>。
+  左列是当前线上版本，后三列是重绘稿在 16/24/32px 的效果。<b>本页仅供确认，未改动任何现有代码</b>；AI 品牌 logo（12 个）不属重绘范围。
+</p>
+
+
+<div class="passlog">
+  <div class="pl-title">七轮进展（可对照下面的「现状 / 重绘」两列核验）</div>
+  <ol>
+    <li><b>v7 插头上部改方框（本轮）</b>：<code>i-plug</code> 的两根竖插针换成闭合方框 <code>rect x8 y3 w8 h4</code>——插针在 24px 下像两根悬空天线，方框更像「插头壳体」，也与下方半圆插座形成清晰分件；插座、垂线不动。</li>
+    <li><b>v1 初版重绘</b>：52 个图标按 24 网格重画，统一描边、圆帽圆角、语义化命名；含 6 处语义/几何修正（隔离区、扩展引擎、产品密钥、云上传、齿轮、夹板勾）。</li>
+    <li><b>v2 复审回退</b>：逐个体放大比对后，<b>i-gear</b>（糊成太阳）与 <b>i-wrench</b>（钳口发虚）判定不如原版，回退原版几何。</li>
+    <li><b>v3 全量体检修正（本轮）</b>
+      <ul>
+        <li><b>描边 1.75 → 2</b>：原版就是 2，1.75 让整套比线上偏细偏弱；且偶数描边配整数坐标边缘最锐利。</li>
+        <li><b>再回退 4 个</b>：<code>i-cloud-upload</code>（重绘后像蘑菇）、<code>i-chevron-right/left/down</code>（刻意加宽 12%，密集行显臃肿）——均判定重绘不如原版。</li>
+      </ul>
+    </li>
+    <li><b>v4 三图标定稿（本轮）</b>
+      <ul>
+        <li><b>盾族盾形统一（连带修复）</b>：<code>i-shield-wifi</code> 单独回退原版大盾后，会比同组 4 个新绘小盾大一圈（48px 下肉眼可见）→ 把 <code>i-shield / i-shield-check / i-shield-pulse / i-shield-bot</code> 的盾形一并回退原版 16×20，内图案同步归位，整族尺寸一致。</li>
+        <li><b>v5 窗口图标回退 + 四图标优化（本轮）</b>
+      <ul>
+        <li><b>i-maximize / i-restore · 回退原版</b>：最大化自绘放大到 3–21(18×18) 偏大、顶到标题栏留白，还原同受影响；一并回退原版 16×16 / 12×12。</li>
+        <li><b>i-file-check · 横线改勾</b>：横线版上半片与 i-folder 撞形且 check 语义丢失；保留文件本体，横线换成大勾 <code>m8 14 3 3 5-6</code>。</li>
+        <li><b>i-sliders · 滑块放大</b>：r=2 内洞 16px 下几乎不可见；r=2→<b>r=3</b>（内洞直径 4），线端缩短贴住滑块边缘。</li>
+        <li><b>i-plug · 真插头</b>：方框+接口块仍读作芯片；改为两插针+半圆插座+垂线，与 i-power 电源符号彻底分开。</li>
+        <li><b>i-search-window · 补内容行</b>：放大镜右移让位，加回正文行 <code>M7 11h3</code>，窗口「有内容」。</li>
+      </ul>
+    </li>
+
+        <li><b>i-shield-wifi · 100% 回退原版</b>：自绘小盾(14×18)把 wifi 挤在一起、圆点 r=1 过粗；原版大盾(16×20) + 双弧 + r=.5 点更透气，整体回退。</li>
+        <li><b>i-cpu · 去盾 + 纯芯片优化</b>：盾+芯片在 16px 糊成一团；改回纯芯片，外框 12×12→<b>14×14</b> 更饱满，8 引脚由长 4 收到<b>长 3</b>（与 i-chip 同规格），中心勾放大到 <code>m8 12 3 3 5-6</code> 撑住框心。</li>
+        <li><b>i-file-check · 换图案</b>：弃「盾+文件」，改回文件本体（折角文件 x4~20/y2~22）+ 中间一道横线 <code>M2 12h20</code>（左右各超出文件 2px）。</li>
+      </ul>
+    </li>
+  </ol>
+  <div class="pl-stat">当前状态：<b>52</b> 个图标中 <b>39</b> 个采用重绘几何、<b>13</b> 个回退原版（齿轮／扳手／云上传／三个箭头／最大化／还原／盾族 5 枚）；描边统一 <b>2</b>。</div>
+</div>
+<style>
+.passlog { margin: -6px 0 14px; padding: 12px 16px; border: 1px solid var(--border, #d2d2d7); border-radius: 10px; background: #f7f8fa; font-size: 12.5px; line-height: 1.7; color: #3a3a3c; }
+.passlog .pl-title { font-weight: 700; font-size: 13px; margin-bottom: 6px; color: #1d1d1f; }
+.passlog ol { margin: 0; padding-left: 20px; }
+.passlog li { margin-bottom: 6px; }
+.passlog ul { margin: 4px 0 0; padding-left: 18px; }
+.passlog code { font-family: Consolas, monospace; background: rgba(0,0,0,.05); padding: 0 4px; border-radius: 4px; }
+.passlog .pl-stat { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #d2d2d7; }
+body.dark .passlog { background: #1c1c1e; border-color: #2c2c2e; color: #d8d8dc; }
+body.dark .passlog .pl-title { color: #f2f2f7; }
+body.dark .passlog code { background: rgba(255,255,255,.1); }
+</style>
+
+<div class="toolbar">
+  <span class="label">主题</span>
+  <button class="tbtn on" data-theme="light">浅色</button>
+  <button class="tbtn" data-theme="dark">深色</button>
+  <span class="label" style="margin-left:14px">强调色</span>
+  <button class="tbtn on" data-accent="blue">蓝</button>
+  <button class="tbtn" data-accent="red">红</button>
+  <button class="tbtn" data-accent="green">绿</button>
+  <button class="tbtn" data-accent="yellow">黄</button>
+</div>
+
+<div class="mock">
+  <div class="mock-bar">
+    <span class="t">PYAS Security Cyanmod</span>
+    <span class="mock-ctrls">
+      <svg class="ic"><use href="#i-minimize"/></svg>
+      <svg class="ic"><use href="#i-maximize"/></svg>
+      <svg class="ic"><use href="#i-close"/></svg>
+    </span>
+  </div>
+  <div class="mock-body">
+    <div class="mock-rail">
+      <svg class="ic on"><use href="#i-home"/></svg>
+      <svg class="ic"><use href="#i-search"/></svg>
+      <svg class="ic"><use href="#i-grid"/></svg>
+      <svg class="ic"><use href="#i-shield"/></svg>
+      <svg class="ic"><use href="#i-terminal"/></svg>
+      <svg class="ic"><use href="#i-gear"/></svg>
+    </div>
+    <div class="mock-main">
+      <div class="mock-status">
+        <svg class="ic32"><use href="#i-shield-check"/></svg>
+        <span class="txt">此裝置已受到防護</span>
+      </div>
+      <div class="mock-cards">
+        <div class="mock-card"><svg class="ic"><use href="#i-scan-smart"/></svg><span class="txt">智能掃描</span><svg class="ic chev"><use href="#i-chevron-right"/></svg></div>
+        <div class="mock-card"><svg class="ic"><use href="#i-archive"/></svg><span class="txt">隔離區</span><svg class="ic chev"><use href="#i-chevron-right"/></svg></div>
+        <div class="mock-card"><svg class="ic"><use href="#i-refresh"/></svg><span class="txt">檢查更新</span><svg class="ic chev"><use href="#i-chevron-right"/></svg></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="tbl">
+  <div class="row head"><span>图标 / 用途</span><span>现状</span><span>重绘 24</span><span>16</span><span>32</span><span>备注</span></div>
+
+  <div class="row"><div class="meta"><b>i-minimize</b><span>标题栏 · 最小化</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-minimize"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-minimize"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-minimize"/></svg></div>
+    <div class="note">几何不变，统一线宽</div></div>
+
+  <div class="row"><div class="meta"><b>i-maximize</b><span>标题栏 · 最大化</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"></rect></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-maximize"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-maximize"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-maximize"/></svg></div>
+    <div class="note"><b>v5 回退原版</b>：自绘 50% 放大到 3–21(18×18) 后比同组 minimize(14)/close(12) 明显偏大、且顶到标题栏留白；恢复原版 4–20(16×16)/圆角 2</div></div>
+
+  <div class="row"><div class="meta"><b>i-restore</b><span>标题栏 · 还原</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"></rect><path d="M4 16V6a2 2 0 0 1 2-2h10"></path></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-restore"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-restore"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-restore"/></svg></div>
+    <div class="note"><b>v5 回退原版</b>：前窗随最大化一起放大到 13×13、后窗轮廓展到 x3–19，整枚变重；恢复原版前窗 12×12 + <code>M4 16V6…h10</code>，与最大化图标同尺寸</div></div>
+
+  <div class="row"><div class="meta"><b>i-close</b><span>标题栏 · 关闭</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-close"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-close"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-close"/></svg></div>
+    <div class="note">端点 6.5/17.5，留出圆帽空间不溢出色盒</div></div>
+</div>
+
+<h2 class="grp">侧栏导航</h2>
+<div class="tbl">
+  <div class="row head"><span>图标 / 用途</span><span>现状</span><span>重绘 24</span><span>16</span><span>32</span><span>备注</span></div>
+
+  <div class="row"><div class="meta"><b>i-home</b><span>侧栏 · 首页</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-home"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-home"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-home"/></svg></div>
+    <div class="note">屋顶与墙身断开，门洞居中对齐</div></div>
+
+  <div class="row"><div class="meta"><b>i-search</b><span>侧栏 · 扫描 / 各页搜索框</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-search"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-search"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-search"/></svg></div>
+    <div class="note">镜圈 10.5 居中、手柄 45° 标准角</div></div>
+
+  <div class="row"><div class="meta"><b>i-grid</b><span>侧栏 · 工具箱</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-grid"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-grid"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-grid"/></svg></div>
+    <div class="note"><b>v6 回退原版</b>：自绘 6×6、带 1px 圆角、起点 x4 比原版小一圈；恢复原版 7×7 直角方块（x3/14、y3/14）</div></div>
+
+  <div class="row"><div class="meta"><b>i-shield</b><span>侧栏 · 防护</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-shield"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-shield"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-shield"/></svg></div>
+    <div class="note"><b>v4 统一：整枚回退原版盾</b>（16×20，x4~20 / y2~22）；此前 14×18 小盾在盾族里窄一圈</div></div>
+
+  <div class="row"><div class="meta"><b>i-terminal</b><span>侧栏 · AI+</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-terminal"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-terminal"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-terminal"/></svg></div>
+    <div class="note">提示符角度与基线对齐文字行</div></div>
+
+  <div class="row"><div class="meta"><b>i-gear</b><span>侧栏 · 设置</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-gear"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-gear"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-gear"/></svg></div>
+    <div class="note">复审结论：旧版齿位不均但辨识度高；重绘齿轮在小尺寸糊成团，已回退旧几何（统一 2 描边）</div></div>
+</div>
+
+<h2 class="grp">首页与快捷操作</h2>
+<div class="tbl">
+  <div class="row head"><span>图标 / 用途</span><span>现状</span><span>重绘 24</span><span>16</span><span>32</span><span>备注</span></div>
+
+  <div class="row"><div class="meta"><b>i-shield-check</b><span>首页 · 防护状态大图标</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-shield-check"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-shield-check"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-shield-check"/></svg></div>
+    <div class="note"><b>v4 统一：盾回退原版 16×20</b>，勾同时用回原版行程 (9,12)→(11,14)→(15,10)，随大盾一起居中</div></div>
+
+  <div class="row"><div class="meta"><b>i-scan-smart</b><span>首页 · 智能扫描</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="6"/><path d="m14.5 14.5 5 5M8 10l1.5 1.5L12 8.5"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-scan-smart"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-scan-smart"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-scan-smart"/></svg></div>
+    <div class="note">圈内勾与镜圈间距加大，不糊</div></div>
+
+  <div class="row"><div class="meta"><b>i-archive</b><span>首页/工具 · 隔离区</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18m-13 5h8m-4-4v8M8 5V3h8v2"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-archive"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-archive"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-archive"/></svg></div>
+    <div class="note">原版是"盒子+十字"语义混乱；重绘为存档盒+下行箭头（移入隔离区）</div></div>
+
+  <div class="row"><div class="meta"><b>i-refresh</b><span>首页/关于 · 检查更新</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10a9 9 0 1 0-2 8M21 4v6h-6"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-refresh"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-refresh"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-refresh"/></svg></div>
+    <div class="note"><b>v5 回退原版</b>：自绘版弧半径收到 8、箭头贴到 x20/y3，整枚比同组小一圈且箭头离圆过近；恢复原版 9 半径 + <code>M21 4v6h-6</code> 箭头</div></div>
+
+  <div class="row"><div class="meta"><b>i-chevron-right</b><span>全站 · 右箭头（15 处复用）</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-chevron-right"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-chevron-right"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-chevron-right"/></svg></div>
+    <div class="note">复审结论：重绘加宽 12% 后密集行显臃肿；已回退原版行程 6×12</div></div>
+
+  <div class="row"><div class="meta"><b>i-chevron-left</b><span>子页面 · 返回（9 处复用）</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-chevron-left"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-chevron-left"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-chevron-left"/></svg></div>
+    <div class="note">复审结论：与右箭头同构；一并回退原版行程</div></div>
+</div>
+
+<h2 class="grp">防护引擎</h2>
+<div class="tbl">
+  <div class="row head"><span>图标 / 用途</span><span>现状</span><span>重绘 24</span><span>16</span><span>32</span><span>备注</span></div>
+
+  <div class="row"><div class="meta"><b>i-shield-pulse</b><span>进程防护</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M8 12h2l1-3 2 6 1-3h2"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-shield-pulse"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-shield-pulse"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-shield-pulse"/></svg></div>
+    <div class="note"><b>v4 统一：盾回退原版 16×20</b>，心电波用回原版行 y=12 起笔；下探 y=15 在大盾内边距充足，不再顶轮廓</div></div>
+
+  <div class="row"><div class="meta"><b>i-pause</b><span>进程挂起</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 8v8m6-8v8"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-pause"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-pause"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-pause"/></svg></div>
+    <div class="note">双杠间距按黄金位重排</div></div>
+
+  <div class="row"><div class="meta"><b>i-layers</b><span>镜像劫持防护</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5 9-5zM3 12l9 5 9-5M3 16l9 5 9-5"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-layers"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-layers"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-layers"/></svg></div>
+    <div class="note">三层间距均分</div></div>
+
+  <div class="row"><div class="meta"><b>i-file-check</b><span>文件防勒索</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6m-12 7 3 3 5-5"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-file-check"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-file-check"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-file-check"/></svg></div>
+    <div class="note"><b>v5 优化·横线改勾</b>：横线版上半片与 <code>i-folder</code> 撞形（几乎无法区分）且 check 语义丢失；保留文件本体，把横线换成大勾 <code>m8 14 3 3 5-6</code>（居中放大，16px 也能认）</div></div>
+
+  <div class="row"><div class="meta"><b>i-monitor-check</b><span>系统防护</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M8 21h8m-4-5v5M8 10l3 3 5-6"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-monitor-check"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-monitor-check"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-monitor-check"/></svg></div>
+    <div class="note">复审结论：与选单扫描撞形；明确为「显示器」结构——宽扁屏(18x12) + 底座 + 对勾</div></div>
+
+  <div class="row"><div class="meta"><b>i-shield-wifi</b><span>网络防护</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM8 10a6 6 0 0 1 8 0m-6 3a3 3 0 0 1 4 0"/><circle cx="12" cy="16" r="0.5"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-shield-wifi"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-shield-wifi"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-shield-wifi"/></svg></div>
+    <div class="note">终稿·整枚回退原版：自绘小盾(14×18)把 wifi 三档挤在一起、圆点 r=1 过粗；原版大盾(16×20) + 双弧(y=10/13) + r=.5 小点最透气，逐像素回退</div></div>
+
+  <div class="row"><div class="meta"><b>i-cpu</b><span>驱动防护</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4m6-4v4M9 18v4m6-4v4M2 9h4m-4 6h4m12-6h4m-4 6h4"/><polyline points="9 12 11 14 15 10"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-cpu"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-cpu"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-cpu"/></svg></div>
+    <div class="note">终稿·去盾 + 纯芯片优化：外框 12×12→<b>14×14</b>(5~19) 更饱满，8 引脚由长 4 收到<b>长 3</b>(2~5 / 19~22，与 i-chip 同规格)，中心勾放大到 <code>m8 12 3 3 5-6</code> 撑住框心；盾+芯片版在 16px 糊团，已弃</div></div>
+
+  <div class="row"><div class="meta"><b>i-sliders</b><span>敏感目录过滤</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2Z"/><path d="M7 12h10M7 16h6"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-sliders"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-sliders"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-sliders"/></svg></div>
+    <div class="note"><b>v5 优化·换图案</b>：三线三滑块表达的是「参数可调」，读不出「目录」；改成文件夹 + 内部清单线（<code>M7 12h10M7 16h6</code>）= 目录与其下的规则条目。该条在界面里是 <code>custom_protect_window</code>「自訂防護」清单页入口，与同组各「XX 防护」的盾族保持区分（此条强调「目录/清单」而非盾）</div></div>
+</div>
+
+<h2 class="grp">工具箱</h2>
+<div class="tbl">
+  <div class="row head"><span>图标 / 用途</span><span>现状</span><span>重绘 24</span><span>16</span><span>32</span><span>备注</span></div>
+
+  <div class="row"><div class="meta"><b>i-plug</b><span>扩展引擎</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v9m-6.4-6.4a9 9 0 1 0 12.8 0"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-plug"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-plug"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-plug"/></svg></div>
+    <div class="note"><b>v7 优化·上部改闭合方框</b>：两根竖插针（<code>M9 7V3M15 7V3</code>）在 24px 下像两根天线、且与插座之间没有明确分件；改为闭合方框 <code>rect x8 y3 w8 h4</code>（外沿 x7~17 / y2~8，与原插针跨度 x8~16 / y3~7 同 footprint），半圆插座与垂线不动</div></div>
+
+  <div class="row"><div class="meta"><b>i-power</b><span>开机启动</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v9m-6.4-6.4a9 9 0 1 0 12.8 0"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-power"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-power"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-power"/></svg></div>
+    <div class="note">弧线张角重算，与竖线同源</div></div>
+
+  <div class="row"><div class="meta"><b>i-trash</b><span>垃圾清理</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-trash"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-trash"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-trash"/></svg></div>
+    <div class="note">桶身改单条轮廓线，盖钮内缩</div></div>
+
+  <div class="row"><div class="meta"><b>i-wrench</b><span>系统修复</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M14 6a5 5 0 0 0-6 6l-5 5a2.1 2.1 0 0 0 3 3l5-5a5 5 0 0 0 6-6l-3 3-3-3 3-3z"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-wrench"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-wrench"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-wrench"/></svg></div>
+    <div class="note">复审结论：重绘钳口过小显虚，已回退旧几何（统一 2 描边）</div></div>
+
+  <div class="row"><div class="meta"><b>i-window-x</b><span>弹窗拦截</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18m-12 3 6 6m0-6-6 6"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-window-x"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-window-x"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-window-x"/></svg></div>
+    <div class="note">复审结论：自绘版 X 偏左 0.5 且窗口偏高，不如原版；已回退原版几何</div></div>
+
+  <div class="row"><div class="meta"><b>i-activity</b><span>流量监控</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v18h16M8 15l4-5 4 3 5-7"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-activity"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-activity"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-activity"/></svg></div>
+    <div class="note">轴点留白、折线峰谷重排</div></div>
+
+  <div class="row"><div class="meta"><b>i-clipboard-check</b><span>白名单</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="m7 8 1 1 2-2m3 1h4m-10 7 2 2 3-4m2 2h3"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-clipboard-check"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-clipboard-check"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-clipboard-check"/></svg></div>
+    <div class="note">再优化：纯大框+勾读起来像复选框；加回顶部夹子（突出板身）确立剪贴板特征，勾保持宽 8（占内容宽 50%）</div></div>
+
+  <div class="row"><div class="meta"><b>i-archive</b><span>隔离区（复用首页）</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18m-13 5h8m-4-4v8M8 5V3h8v2"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-archive"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-archive"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-archive"/></svg></div>
+    <div class="note">与首页快捷入口同形，建立"隔离区=存档盒"心智</div></div>
+</div>
+
+<h2 class="grp">设置</h2>
+<div class="tbl">
+  <div class="row head"><span>图标 / 用途</span><span>现状</span><span>重绘 24</span><span>16</span><span>32</span><span>备注</span></div>
+
+  <div class="row"><div class="meta"><b>i-zap</b><span>增强模式</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="m13 2-9 12h7l-1 8 10-12h-7l1-8z"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-zap"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-zap"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-zap"/></svg></div>
+    <div class="note">闪电斜率与尖端重算</div></div>
+
+  <div class="row"><div class="meta"><b>i-plus-square</b><span>扩展引擎（设置项）</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 12h8m-4-4v8"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-plus-square"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-plus-square"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-plus-square"/></svg></div>
+    <div class="note">圆角 3→2.5 与全局统一</div></div>
+
+  <div class="row"><div class="meta"><b>i-cloud-upload</b><span>云端服务</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18H6a4 4 0 0 1-.8-7.9A7 7 0 0 1 18.7 8a5 5 0 0 1-.7 10h-1m-5 3V11m-4 4 4-4 4 4"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-cloud-upload"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-cloud-upload"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-cloud-upload"/></svg></div>
+    <div class="note">复审结论：自绘云体弧度失真、读起来像蘑菇，不如原版；已回退原版几何</div></div>
+
+  <div class="row"><div class="meta"><b>i-funnel</b><span>副档名过滤</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h18l-7 8v7l-4 2v-9L3 4z"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-funnel"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-funnel"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-funnel"/></svg></div>
+    <div class="note">漏斗锥角与管颈加宽</div></div>
+
+  <div class="row"><div class="meta"><b>i-monitor-power</b><span>开机启动（设置项）</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="14" rx="2"/><path d="M8 21h8m-4-4v4M12 6v4m-2.5-2.5a3.5 3.5 0 1 0 5 0"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-monitor-power"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-monitor-power"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-monitor-power"/></svg></div>
+    <div class="note">复审结论：自绘版屏幕偏矮(12 vs 14)、底座偏窄、电源符号偏上，不如原版；已回退原版布局</div></div>
+
+  <div class="row"><div class="meta"><b>i-search-window</b><span>选单扫描</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 7h10M7 11h3"/><circle cx="13" cy="14" r="3"/><path d="m15.2 16.2 2.8 2.8"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-search-window"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-search-window"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-search-window"/></svg></div>
+    <div class="note"><b>v6 回退原版</b>：v5 补的正文行 + 大放大镜仍不如原版；恢复原版窗口两行内容（<code>M7 7h10</code> / <code>M7 11h3</code>）+ 半径 3 放大镜</div></div>
+
+  <div class="row"><div class="meta"><b>i-copy-list</b><span>经典右键选单</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="13" height="13" rx="2"/><path d="M5 7H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-1"/><path d="M11 8h6m-6 4h6m-6 4h3"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-copy-list"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-copy-list"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-copy-list"/></svg></div>
+    <div class="note">复审结论：自绘版后框只有 12 格、清单行起点偏右，整体不如原版；已回退原版几何</div></div>
+
+  <div class="row"><div class="meta"><b>i-message-plus</b><span>交互模式</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/><path d="M9 11h6M12 8v6"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-message-plus"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-message-plus"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-message-plus"/></svg></div>
+    <div class="note">气泡尾尖重锚，加号居中</div></div>
+
+  <div class="row"><div class="meta"><b>i-clock</b><span>超时时间（2 处）</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-clock"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-clock"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-clock"/></svg></div>
+    <div class="note">表耳改短柄、指针角度标准化</div></div>
+
+  <div class="row"><div class="meta"><b>i-bell</b><span>通知</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-bell"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-bell"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-bell"/></svg></div>
+    <div class="note">复审结论：自绘版钟顶偏低(10 vs 8)、底沿偏窄，整体不如原版饱满；已回退原版几何</div></div>
+
+  <div class="row"><div class="meta"><b>i-palette</b><span>显色主题</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1.4-3.4 1.5 1.5 0 0 1 1.1-2.6H18a3 3 0 0 0 3-3 9 9 0 0 0-9-9z"/><circle cx="7.5" cy="10" r=".7"/><circle cx="11" cy="7" r=".7"/><circle cx="15.5" cy="8" r=".7"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-palette"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-palette"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-palette"/></svg></div>
+    <div class="note">拇指缺口改右侧；颜料点加大并实心</div></div>
+
+  <div class="row"><div class="meta"><b>i-globe</b><span>语言 / 官方网站（2 处）</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-globe"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-globe"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-globe"/></svg></div>
+    <div class="note">经线椭圆收敛角重算，与赤道相切</div></div>
+
+  <div class="row"><div class="meta"><b>i-reset</b><span>重置选项</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 6 6 0 0 0-6 3L3 9"/><path d="M3 3v6h6"/><path d="M12 7v5l3 2"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-reset"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-reset"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-reset"/></svg></div>
+    <div class="note"><b>v6 修正连接点</b>：原版弧的缺口只在左下约 40°，而箭头横杠从 (3,10) 水平伸出 6px 直接穿进圆内——箭头根本不在缺口里，看着像「插进圆弧」。改为把缺口开到 1/4 圆（<code>(12,3)</code> 经小弧 + 直线引到 <code>(3,9)</code>），箭头 <code>M3 3v6h6</code> 嵌在缺口内，与弧端点相接且不再越界；时钟指针原样保留</div></div>
+
+  <div class="row"><div class="meta"><b>i-sparkles</b><span>AI 辅助决策</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-sparkles"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-sparkles"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-sparkles"/></svg></div>
+    <div class="note">双星夹角与尺寸比例重绘</div></div>
+</div>
+
+<h2 class="grp">AI+ 页</h2>
+<div class="tbl">
+  <div class="row head"><span>图标 / 用途</span><span>现状</span><span>重绘 24</span><span>16</span><span>32</span><span>备注</span></div>
+
+  <div class="row"><div class="meta"><b>i-shield-bot</b><span>智能体加固</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><rect x="8.5" y="10" width="7" height="5.5" rx="1.75"/><path d="M12 10V8.2"/><circle cx="12" cy="6.9" r="1"/><circle cx="10.6" cy="12.75" r="0.65" fill="currentColor" stroke="none"/><circle cx="13.4" cy="12.75" r="0.65" fill="currentColor" stroke="none"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-shield-bot"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-shield-bot"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-shield-bot"/></svg></div>
+    <div class="note"><b>v4 统一：盾回退原版 16×20</b>，终端图案整体下移 1px（y9~15）跟随新盾心居中</div></div>
+
+  <div class="row"><div class="meta"><b>i-chip</b><span>模型接入</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v3m6-3v3M9 19v3m6-3v3M2 9h3m-3 6h3m14-6h3m-3 6h3"/></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-chip"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-chip"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-chip"/></svg></div>
+    <div class="note"><b>v6 回退原版</b>：自绘把外框从 14×14 收到 12×12、中心方块改成圆点，比同组芯片类小一圈；恢复原版 14×14 外框 + 6×6 中心方块 + 长 3 引脚</div></div>
+
+  <div class="row"><div class="meta"><b>i-key</b><span>产品密钥</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-key"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-key"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-key"/></svg></div>
+    <div class="note">原版是扳手混轮子，语义混乱；重绘为钥匙</div></div>
+</div>
+
+<h2 class="grp">通用</h2>
+<div class="tbl">
+  <div class="row head"><span>图标 / 用途</span><span>现状</span><span>重绘 24</span><span>16</span><span>32</span><span>备注</span></div>
+
+  <div class="row"><div class="meta"><b>i-chevron-down</b><span>自定义下拉箭头</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-chevron-down"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-chevron-down"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-chevron-down"/></svg></div>
+    <div class="note">复审结论：与 chevron 族同角度；一并回退原版行程</div></div>
+
+  <div class="row"><div class="meta"><b>i-folder</b><span>右键菜单 · 打开文件位置</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-folder"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-folder"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-folder"/></svg></div>
+    <div class="note">闭合文件夹改开启态，呼应"打开位置"</div></div>
+
+  <div class="row"><div class="meta"><b>i-copy</b><span>右键菜单 · 复制单元格</span></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></div>
+    <div class="cell new"><svg class="ic"><use href="#i-copy"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-copy"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-copy"/></svg></div>
+    <div class="note">双层错位量修正</div></div>
+
+  <div class="row"><div class="meta"><b>i-spinner</b><span>启动加载动画</span></div>
+    <div class="cell cur"><svg class="spinner" viewBox="0 0 50 50"><circle class="path" cx="25" cy="25" r="20" fill="none"></circle></svg></div>
+    <div class="cell new"><svg class="ic" style="width:28px;height:28px"><use href="#i-spinner"/></svg></div><div class="cell new"></div><div class="cell new"></div>
+    <div class="note">改用 SMIL 自驱动画，不再依赖 .path 的 CSS 类名；实装时建议描边色改 var(--text-secondary)</div></div>
+</div>
+
+<p class="foot">
+  ★ 重绘稿位置：<code>Interface/static/img/icons-redrawn/sprite.svg</code>（52 个 symbol，未引用、未生效）。<br>
+  ★ 不在重绘范围：AI 品牌 logo 12 个（autoclaw/openai/deepseek/doubao/hermes/kimi/mimo/openclaw/qwen/trae/workbuddy/zcode）——涉及第三方商标，保持原样。<br>
+  ★ 若确认重绘稿，实装方式（任选）：① 逐个替换 index.html / main.js 里的内联 SVG；② 全站改用 &lt;use href="/static/img/icons-redrawn/sprite.svg#i-xxx"&gt; 引用。确认后小柚再动手。
+</p>
+
+<script>
+  document.querySelectorAll('[data-theme]').forEach(btn => btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-theme]').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    document.body.classList.toggle('dark', btn.dataset.theme === 'dark');
+  }));
+  document.querySelectorAll('[data-accent]').forEach(btn => btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-accent]').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    document.body.dataset.accent = btn.dataset.accent;
+  }));
+</script>
+</body>
+</html>

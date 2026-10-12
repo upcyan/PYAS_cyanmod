@@ -37,10 +37,96 @@
     </script>
 </head>
 <body>
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <!--
+    PYAS Cyanmod · 界面图标重绘稿（未实装）
+    网格 24x24 / 描边 2 / 圆帽圆角 / 2px 安全边距 / currentColor 自动跟随主题
+
+    【锐利度铁律】描边 2(偶数) 必须配整数坐标:
+      · 整数坐标 → 描边覆盖 [x-1, x+1],边缘正好压在像素边界上 → 目视锐利清晰
+      · x.5 坐标 → 描边覆盖 [x-0.5, x+1.5],正好骑在像素中点 → 抗锯齿发虚
+      · 因此本版直线/矩形/圆一律整数坐标;此前为消除"撑破边距"而加的 scale()
+        等比缩放会把整数坐标乘成小数(齿轮 61 处、垃圾桶 35 处…),已全部移除。
+    【视觉尺寸统一】除天然偏小的 close/chevron(14)、minimize(16)、grid(18) 外,
+      全部对齐到视觉框 20(几何最大维 18),与线上原版观感一致。
+      例外:盾族(i-shield / shield-check / shield-pulse / shield-bot / shield-wifi)
+      保持线上原版盾形 16x20(x4~20 / y2~22) —— 用户明确偏好原版盾,且族内必须同尺寸。
+    命名: i-<语义>; 同族共享词根(shield-*, monitor-*, chevron-*)
+  -->
+
+  <!-- 窗口控制 -->
+  <symbol id="i-minimize" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></symbol>
+  <symbol id="i-maximize" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/></symbol>
+  <symbol id="i-restore" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 0 1 2-2h10"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6 18 18M18 6 6 18"/></symbol>
+
+  <!-- 侧栏导航 -->
+  <symbol id="i-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11 12 3l9 8"/><path d="M5 10v11h14V10"/><path d="M9 21v-6h6v6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M17 17 21 21"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6 10 12 3 18"/><path d="M12 18h9"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M21 12 18 14.5 18.4 18.4 14.5 18 12 21 9.5 18 5.6 18.4 6 14.5 3 12 6 9.5 5.6 5.6 9.5 6 12 3 14.5 6 18.4 5.6 18 9.5Z"/></symbol>
+
+  <!-- 首页 -->
+  <symbol id="i-shield-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-scan-smart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M16 16 20 20"/><path d="m7 11 3 3 5-5"/></symbol>
+  <symbol id="i-archive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M12 12v5M9 14l3 3 3-3"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10a9 9 0 1 0-2 8M21 4v6h-6"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></symbol>
+  <symbol id="i-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></symbol>
+
+  <!-- 防护引擎 -->
+  <symbol id="i-shield-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M8 12h2l1-3 2 6 1-3h2"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M10 8v8M14 8v8"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="m12 4 9 4-9 4-9-4 9-4Z"/><path d="m3 12 9 4 9-4"/><path d="m3 16 9 4 9-4"/></symbol>
+  <symbol id="i-file-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="m8 14 3 3 5-6"/></symbol>
+  <symbol id="i-monitor-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/><path d="m8 10 3 3 5-5"/></symbol>
+  <symbol id="i-shield-wifi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M8 10a6 6 0 0 1 8 0"/><path d="M10 13a3 3 0 0 1 4 0"/><circle cx="12" cy="16" r="0.5"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/><path d="m8 12 3 3 5-6"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2Z"/><path d="M7 12h10M7 16h6"/></symbol>
+
+  <!-- 工具 -->
+  <symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="4"/><path d="M6 7h12v4a6 6 0 0 1-6 6 6 6 0 0 1-6-6V7zM12 17v4"/></symbol>
+  <symbol id="i-power" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M6 6a8 8 0 1 0 12 0"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18"/><path d="M9 7V4h6v3"/><path d="M5 7v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7"/><path d="M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-wrench" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M14 5a5 5 0 0 0-6 6l-5 5a2 2 0 0 0 3 3l5-5a5 5 0 0 0 6-6l-3 3-3-3 3-3Z"/></symbol>
+  <symbol id="i-window-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18m-12 3 6 6m0-6-6 6"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m7 15 3-4 3 3 5-7"/></symbol>
+  <symbol id="i-clipboard-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="17" rx="2"/><rect x="9" y="3" width="6" height="4" rx="2"/><path d="m8 13 3 3 5-5"/></symbol>
+
+  <!-- 设置 · 引擎 -->
+  <symbol id="i-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3 6 13h5l-1 8 8-11h-5l1-7Z"/></symbol>
+  <symbol id="i-plus-square" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 7v10M7 12h10"/></symbol>
+  <symbol id="i-cloud-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18H6a4 4 0 0 1-.8-7.9A7 7 0 0 1 18.7 8a5 5 0 0 1-.7 10h-1m-5 3V11m-4 4 4-4 4 4"/></symbol>
+  <symbol id="i-funnel" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h18l-7 8v7l-4 2v-9L3 4Z"/></symbol>
+
+  <!-- 设置 · 交互 -->
+  <symbol id="i-monitor-power" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="14" rx="2"/><path d="M8 21h8m-4-4v4M12 6v4m-2.5-2.5a3.5 3.5 0 1 0 5 0"/></symbol>
+  <symbol id="i-search-window" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 7h10M7 11h3"/><circle cx="13" cy="14" r="3"/><path d="m15.2 16.2 2.8 2.8"/></symbol>
+  <symbol id="i-copy-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="13" height="13" rx="2"/><path d="M5 7H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-1"/><path d="M11 8h6m-6 4h6m-6 4h3"/></symbol>
+  <symbol id="i-message-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-4 4v-4H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 8v6M9 11h6"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2.5"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></symbol>
+  <symbol id="i-palette" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 0 0 0 18h1a2 2 0 0 0 1.5-3.3 1.5 1.5 0 0 1 1.1-2.7h2.4a3 3 0 0 0 3-3A9 9 0 0 0 12 3Z"/><circle cx="8" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="11" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="9" r="1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 4 9 15 15 0 0 1-4 9 15 15 0 0 1-4-9 15 15 0 0 1 4-9Z"/></symbol>
+  <symbol id="i-reset" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 6 6 0 0 0-6 3L3 9"/><path d="M3 3v6h6"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 11.5 8 16 9.5 11.5 11 10 16 8.5 11 4 9.5 8.5 8 10 3Z"/><path d="M17 14l1 2.5 2.5 1-2.5 1-1 2.5-1-2.5L13 17.5l2.5-1 1-2.5Z"/></symbol>
+
+  <!-- AI -->
+  <symbol id="i-shield-bot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M8 9 11 12 8 15"/><path d="M13 15h3"/></symbol>
+  <symbol id="i-chip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v3m6-3v3M9 19v3m6-3v3M2 9h3m-3 6h3m14-6h3m-3 6h3"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="12" r="5"/><path d="M13 12h8"/><path d="M17 12v3M20 12v3"/></symbol>
+
+  <!-- 通用 -->
+  <symbol id="i-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></symbol>
+  <symbol id="i-spinner" viewBox="0 0 50 50"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"><animate attributeName="stroke-dasharray" values="1,150;90,150;90,150" dur="1.5s" repeatCount="indefinite"/><animate attributeName="stroke-dashoffset" values="0;-35;-124" dur="1.5s" repeatCount="indefinite"/><animateTransform attributeName="transform" type="rotate" values="0 25 25;360 25 25" dur="2s" repeatCount="indefinite"/></circle></symbol>
+</svg>
+
     <div id="loading_overlay">
-        <svg class="spinner" viewBox="0 0 50 50">
-            <circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle>
-        </svg>
+        <svg class="spinner" aria-hidden="true" focusable="false"><use href="#i-spinner"/></svg>
     </div>
     <div class="app-container" style="opacity: 0; transition: opacity 0.5s ease;">
         <header class="navigate-window pywebview-drag-region">
@@ -53,14 +139,14 @@
                     <svg viewBox="0 0 24 24" class="theme-svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
                 </button>
                 <button class="ctrl-btn" id="minimize_button">
-                    <svg viewBox="0 0 24 24" class="theme-svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    <svg class="theme-svg"><use href="#i-minimize"/></svg>
                 </button>
                 <button class="ctrl-btn" id="maximize_button">
-                    <svg id="icon_maximize" class="theme-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"></rect></svg>
-                    <svg id="icon_restore" class="theme-svg hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"></rect><path d="M4 16V6a2 2 0 0 1 2-2h10"></path></svg>
+                    <svg id="icon_maximize" class="theme-svg"><use href="#i-maximize"/></svg>
+                    <svg id="icon_restore" class="theme-svg hidden"><use href="#i-restore"/></svg>
                 </button>
                 <button class="ctrl-btn" id="close_button">
-                    <svg viewBox="0 0 24 24" class="theme-svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    <svg class="theme-svg"><use href="#i-close"/></svg>
                 </button>
             </div>
         </header>
@@ -68,23 +154,23 @@
         <div class="main-layout">
             <aside class="options-window pywebview-drag-region">
                 <button class="nav-btn active" data-target="home_window">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+                    <svg><use href="#i-home"/></svg>
                 </button>
                 <button class="nav-btn" data-target="scan_window">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <svg><use href="#i-search"/></svg>
                 </button>
                 <button class="nav-btn" data-target="tool_window">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                    <svg><use href="#i-grid"/></svg>
                 </button>
                 <button class="nav-btn" data-target="protect_window">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                    <svg><use href="#i-shield"/></svg>
                 </button>
                 <button class="nav-btn" data-target="ai_window">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+                    <svg><use href="#i-terminal"/></svg>
                 </button>
                 <div class="spacer"></div>
                 <button class="nav-btn" data-target="setting_window">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    <svg><use href="#i-gear"/></svg>
                 </button>
             </aside>
 
@@ -92,7 +178,7 @@
                 <section id="home_window" class="page active">
                     <div class="home-status-widget">
                         <div class="status-brand">
-                            <svg class="state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>
+                            <svg class="state-icon"><use href="#i-shield-check"/></svg>
                             <h2 class="state-title" data-i18n="status_protected">此裝置已受到防護</h2>
                         </div>
                         <div class="protection-lights">
@@ -105,28 +191,24 @@
                     </div>
                     <div class="quick-actions-row">
                         <div class="quick-item" id="quick_scan_btn">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="6"/><path d="m14.5 14.5 5 5M8 10l1.5 1.5L12 8.5"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-scan-smart"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n="scan_smart">智能掃描</h2></div>
-                            <button class="icon-action-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+                            <button class="icon-action-btn"><svg><use href="#i-chevron-right"/></svg></button>
                         </div>
                         <div class="quick-item" data-target="quarantine_window">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18m-13 5h8m-4-4v8M8 5V3h8v2"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-archive"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n="list_quarantine">隔離區</h2></div>
-                            <button class="icon-action-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+                            <button class="icon-action-btn"><svg><use href="#i-chevron-right"/></svg></button>
                         </div>
                         <div class="quick-item" id="quick_update_btn">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 10a9 9 0 1 0-2 8M21 4v6h-6"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n="update_check">檢查更新</h2></div>
-                            <button class="icon-action-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+                            <button class="icon-action-btn"><svg><use href="#i-chevron-right"/></svg></button>
                         </div>
                     </div>
-                    <button id="pending_threats_btn" class="action-btn modern-btn hidden" type="button">
-                        <span data-i18n="pending_threats">待處理告警</span>
-                        <span id="pending_threats_count" aria-live="polite">0</span>
-                    </button>
                     <div class="log-widget">
                         <div class="log-toolbar">
                             <h2 class="log-title" data-i18n="log_realtime">實時日誌</h2>
@@ -136,6 +218,10 @@
                                 <button class="log-filter" data-filter="SCAN" data-i18n="SCAN">掃描</button>
                                 <button class="log-filter" data-filter="WARN" data-i18n="WARN">警告</button>
                                 <button class="log-filter" data-filter="INFO" data-i18n="INFO">資訊</button>
+                                <button class="log-filter pending-threats-btn hidden" id="pending_threats_btn" type="button" data-filter="pending">
+                                    <span data-i18n="pending_threats">待處理告警</span>
+                                    <span id="pending_threats_count" aria-live="polite">0</span>
+                                </button>
                             </div>
                             <div class="spacer"></div>
                             <button class="action-btn modern-btn" id="home_log_export" data-i18n="btn_export">導出項目</button>
@@ -171,60 +257,60 @@
                 <section id="protect_window" class="page">
                     <div class="list-widget">
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M8 12h2l1-3 2 6 1-3h2"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-shield-pulse"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>進程防護</h2><p data-i18n>此選項可以終止惡意進程運行</p>
                             </div>
                             <label class="toggle-switch"><input type="checkbox" checked data-config-key="process_switch"><span class="slider"></span></label>
                         </div>
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M9 8v8m6-8v8"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-pause"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>進程暫停</h2><p data-i18n>此選項可以暫停進程等待掃描</p>
                             </div>
                             <label class="toggle-switch"><input type="checkbox" checked data-config-key="suspend_switch"><span class="slider"></span></label>
                         </div>
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 3 9 5-9 5-9-5 9-5zM3 12l9 5 9-5M3 16l9 5 9-5"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-layers"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>加載防護</h2><p data-i18n>此選項可以攔截惡意進程加載</p>
                             </div>
                             <label class="toggle-switch"><input type="checkbox" checked data-config-key="load_switch"><span class="slider"></span></label>
                         </div>
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6m-12 7 3 3 5-5"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-file-check"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>檔案防護</h2><p data-i18n>此選項可以隔離惡意檔案建立</p>
                             </div>
                             <label class="toggle-switch"><input type="checkbox" checked data-config-key="document_switch"><span class="slider"></span></label>
                         </div>
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M8 21h8m-4-5v5M8 10l3 3 5-6"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-monitor-check"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>系統防護</h2><p data-i18n>此選項可以實時修復系統異常</p>
                             </div>
                             <label class="toggle-switch"><input type="checkbox" checked data-config-key="system_switch"><span class="slider"></span></label>
                         </div>
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM8 10a6 6 0 0 1 8 0m-6 3a3 3 0 0 1 4 0"/><circle cx="12" cy="16" r=".5"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-shield-wifi"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>網路防護</h2><p data-i18n>此選項可以攔截惡意網路連接</p>
                             </div>
                             <label class="toggle-switch"><input type="checkbox" checked data-config-key="network_switch"><span class="slider"></span></label>
                         </div>
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4m6-4v4M9 18v4m6-4v4M2 9h4m-4 6h4m12-6h4m-4 6h4"/><polyline points="9 12 11 14 15 10"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-cpu"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>驅動防護</h2><p data-i18n>此選項可以實時攔截惡意行為</p>
                             </div>
                             <label class="toggle-switch"><input type="checkbox" checked data-config-key="driver_switch"><span class="slider"></span></label>
                         </div>
                         <div class="list-item" style="cursor: pointer;" data-target="custom_protect_window">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 6h3m4 0h9M4 12h9m4 0h3M4 18h3m4 0h9"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="9" cy="18" r="2"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-sliders"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>自訂防護</h2><p data-i18n>此選項可以導入自訂防護規則</p>
                             </div>
-                            <button class="icon-action-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+                            <button class="icon-action-btn"><svg><use href="#i-chevron-right"/></svg></button>
                         </div>
                     </div>
                 </section>
@@ -236,56 +322,56 @@
                             <div class="item-info">
                                 <h2 data-i18n>進程管理</h2><p data-i18n>此選項可以實時查看系統進程</p>
                             </div>
-                            <button class="icon-action-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+                            <button class="icon-action-btn"><svg><use href="#i-chevron-right"/></svg></button>
                         </div>
                         <div class="list-item" style="cursor: pointer;" data-target="startup_window">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v9m-6.4-6.4a9 9 0 1 0 12.8 0"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-power"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>啟動項管理</h2><p data-i18n>此選項可以管理各應用啟動項</p>
                             </div>
-                            <button class="icon-action-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+                            <button class="icon-action-btn"><svg><use href="#i-chevron-right"/></svg></button>
                         </div>
                         <div class="list-item" style="cursor: pointer;" data-target="junk_window">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-trash"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>垃圾清理</h2><p data-i18n>此選項可以清理暫存垃圾檔案</p>
                             </div>
-                            <button class="icon-action-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+                            <button class="icon-action-btn"><svg><use href="#i-chevron-right"/></svg></button>
                         </div>
                         <div class="list-item" style="cursor: pointer;" data-target="repair_window">
-                            <svg class="item-icon item-icon-repair" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M14 6a5 5 0 0 0-6 6l-5 5a2.1 2.1 0 0 0 3 3l5-5a5 5 0 0 0 6-6l-3 3-3-3 3-3z"/></svg>
+                            <svg class="item-icon item-icon-repair" aria-hidden="true" focusable="false"><use href="#i-wrench"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>系統修復</h2><p data-i18n>此選項可以修復系統登錄檔項目</p>
                             </div>
-                            <button class="icon-action-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+                            <button class="icon-action-btn"><svg><use href="#i-chevron-right"/></svg></button>
                         </div>
                         <div class="list-item" style="cursor: pointer;" data-target="popup_window">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18m-12 3 6 6m0-6-6 6"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-window-x"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>彈窗攔截</h2><p data-i18n>此選項可以選擇指定窗口攔截</p>
                             </div>
-                            <button class="icon-action-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+                            <button class="icon-action-btn"><svg><use href="#i-chevron-right"/></svg></button>
                         </div>
                         <div class="list-item" style="cursor: pointer;" data-target="netmon_window">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 3v18h16M8 15l4-5 4 3 5-7"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-activity"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>流量監控</h2><p data-i18n>此選項可以實時監控網路流量</p>
                             </div>
-                            <button class="icon-action-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+                            <button class="icon-action-btn"><svg><use href="#i-chevron-right"/></svg></button>
                         </div>
                         <div class="list-item" style="cursor: pointer;" data-target="whitelist_window">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="m7 8 1 1 2-2m3 1h4m-10 7 2 2 3-4m2 2h3"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-clipboard-check"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>白名單</h2><p data-i18n>此選項可以查看並管理白名單</p>
                             </div>
-                            <button class="icon-action-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+                            <button class="icon-action-btn"><svg><use href="#i-chevron-right"/></svg></button>
                         </div>
                         <div class="list-item" style="cursor: pointer;" data-target="quarantine_window">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18m-13 5h8m-4-4v8M8 5V3h8v2"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-archive"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>隔離區</h2><p data-i18n>此選項可以查看並管理隔離區</p>
                             </div>
-                            <button class="icon-action-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+                            <button class="icon-action-btn"><svg><use href="#i-chevron-right"/></svg></button>
                         </div>
                     </div>
                 </section>
@@ -293,35 +379,35 @@
                 <section id="setting_window" class="page">
                     <div class="list-widget">
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m13 2-9 12h7l-1 8 10-12h-7l1-8z"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-zap"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>增強模式</h2><p data-i18n>此選項可以增強靜態掃描引擎</p>
                             </div>
                             <label class="toggle-switch"><input type="checkbox" data-config-key="sensitive_switch"><span class="slider"></span></label>
                         </div>
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 12h8m-4-4v8"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-plus-square"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>擴展引擎</h2><p data-i18n>此選項可以使用擴展規則引擎</p>
                             </div>
                             <label class="toggle-switch"><input type="checkbox" data-config-key="extension_switch"><span class="slider"></span></label>
                         </div>
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M7 18H6a4 4 0 0 1-.8-7.9A7 7 0 0 1 18.7 8a5 5 0 0 1-.7 10h-1m-5 3V11m-4 4 4-4 4 4"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-cloud-upload"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>雲端服務</h2><p data-i18n>此選項可以自動上報可疑檔案</p>
                             </div>
                             <label class="toggle-switch"><input type="checkbox" data-config-key="cloud_switch"><span class="slider"></span></label>
                         </div>
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 4h18l-7 8v7l-4 2v-9L3 4z"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-funnel"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>副檔名過濾</h2><p data-i18n>此選項僅掃描指定檔案副檔名</p>
                             </div>
                             <label class="toggle-switch"><input type="checkbox" checked data-config-key="suffix_switch"><span class="slider"></span></label>
                         </div>
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="14" rx="2"/><path d="M8 21h8m-4-4v4M12 6v4m-2.5-2.5a3.5 3.5 0 1 0 5 0"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-monitor-power"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>開機啟動</h2><p data-i18n>此選項可以設定開機自動執行</p>
                             </div>
@@ -329,7 +415,7 @@
                         </div>
                         <div class="settings-group">
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 7h10M7 11h3"/><circle cx="13" cy="14" r="3"/><path d="m15.2 16.2 2.8 2.8"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-search-window"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>選單掃描</h2><p data-i18n>此選項可以啟用右鍵掃描功能</p>
                                 <p id="context_menu_status" class="setting-status" aria-live="polite"></p>
@@ -337,7 +423,7 @@
                             <label class="toggle-switch"><input type="checkbox" data-config-key="context_switch"><span class="slider"></span></label>
                         </div>
                         <div class="list-item settings-child hidden" id="classic_menu_options" data-setting-parent="context_switch">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="8" y="3" width="13" height="13" rx="2"/><path d="M5 7H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-1"/><path d="M11 8h6m-6 4h6m-6 4h3"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-copy-list"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n="opt_classic_menu">經典右鍵選單</h2><p data-i18n="opt_classic_menu_desc">恢復 Win10 樣式右鍵選單以顯示掃描入口</p>
                             </div>
@@ -346,7 +432,7 @@
                         </div>
                         <div class="settings-group">
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/><path d="M9 11h6M12 8v6"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-message-plus"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n="opt_interactive">交互模式</h2><p data-i18n="opt_interactive_desc">此選項可以在攔截前彈窗詢問</p>
                             </div>
@@ -360,7 +446,7 @@
                             <label class="toggle-switch"><input type="checkbox" data-config-key="interactive_auto_block"><span class="slider"></span></label>
                         </div>
                         <div class="list-item settings-child hidden" data-setting-parent="interactive_switch">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n="opt_interactive_timeout">超時時間</h2><p data-i18n="opt_interactive_timeout_desc">交互模式超時未選擇將自動攔截（秒）</p>
                             </div>
@@ -372,14 +458,17 @@
                         </div>
                         </div>
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-bell"/></svg>
                             <div class="item-info">
-                                <h2 data-i18n="opt_notify_check">通知權限</h2><p data-i18n="opt_notify_check_desc">此選項可以檢測系統通知權限</p>
+                                <h2 data-i18n="opt_notify_channel">通知渠道</h2><p data-i18n="opt_notify_channel_desc">系统渠道走 Windows 标准通知；自建渠道使用程序内通知样式</p>
                             </div>
-                            <button class="action-btn modern-btn" data-i18n="btn_execute">執行</button>
+                            <select id="notify_channel_select" class="modern-select">
+                                <option value="system" data-i18n="notify_channel_system">系统渠道</option>
+                                <option value="custom" data-i18n="notify_channel_custom">自建渠道</option>
+                            </select>
                         </div>
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1.4-3.4 1.5 1.5 0 0 1 1.1-2.6H18a3 3 0 0 0 3-3 9 9 0 0 0-9-9z"/><circle cx="7.5" cy="10" r=".7"/><circle cx="11" cy="7" r=".7"/><circle cx="15.5" cy="8" r=".7"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-palette"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>顯色主題</h2><p data-i18n>此選項可以選擇主題顏色</p>
                             </div>
@@ -394,7 +483,7 @@
                             </select>
                         </div>
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 5h12M9 2v3m3 0c-1 6-4 9-9 12M5 8c1.5 4 4 6 8 8m0 5 4-10 4 10m-6.5-4h5"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-globe"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>顯示語言</h2><p data-i18n>此選項可以選擇顯示語言</p>
                             </div>
@@ -413,7 +502,7 @@
                             </select>
                         </div>
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6m3-3v5l3 2"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-reset"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>重置選項</h2><p data-i18n>此選項可以重置所有設定</p>
                             </div>
@@ -425,25 +514,52 @@
                 <section id="ai_window" class="page">
                     <div class="list-widget">
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="5" y="8" width="14" height="12" rx="2"/><path d="M12 8V5m0 0a2 2 0 1 0-2-2"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/><path d="M9.5 17h5"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-shield-bot"/></svg>
                             <div class="item-info">
-                                <h2 data-i18n>智能體加固</h2><p data-i18n>收錄主流智能體的進程監控、權限與行為審計</p>
-                                <div class="ai-chips">
-                                    <span class="ai-chip">WorkBuddy</span><span class="ai-chip">ZCode</span><span class="ai-chip">AutoBot</span><span class="ai-chip">ChatGPT</span><span class="ai-chip">Trae</span><span class="ai-chip">Kimi Code</span><span class="ai-chip">MimoCode</span>
-                                </div>
+                                <h2 data-i18n>智能體加固</h2><p data-i18n="ai_agent_desc">智能體的進程監控、權限與行為審計</p>
+                                <div class="ai-chips"><span class="ai-chip" title="AutoClaw"><img class="ai-chip-logo" src="/static/img/logos/autoclaw.png" alt="AutoClaw" data-letter="A" data-color="#2563EB"></span><span class="ai-chip" title="ChatGPT"><img class="ai-chip-logo" src="/static/img/logos/openai.svg" alt="ChatGPT" data-letter="C" data-color="#10A37F"></span><span class="ai-chip" title="DeepSeek"><img class="ai-chip-logo" src="/static/img/logos/deepseek.png" alt="DeepSeek" data-letter="D" data-color="#4D6BFE"></span><span class="ai-chip" title="豆包"><img class="ai-chip-logo" src="/static/img/logos/doubao.png" alt="豆包" data-letter="D" data-color="#325AB4"></span><span class="ai-chip" title="Hermes"><img class="ai-chip-logo" src="/static/img/logos/hermes.png" alt="Hermes" data-letter="H" data-color="#8B5CF6"></span><span class="ai-chip" title="Kimi Code"><img class="ai-chip-logo" src="/static/img/logos/kimi.png" alt="Kimi Code" data-letter="K" data-color="#1F2937"></span><span class="ai-chip" title="MimoCode"><img class="ai-chip-logo" src="/static/img/logos/mimo.png" alt="MimoCode" data-letter="M" data-color="#FF6900"></span><span class="ai-chip" title="OpenClaw"><img class="ai-chip-logo" src="/static/img/logos/openclaw.svg" alt="OpenClaw" data-letter="O" data-color="#EF4444"></span><span class="ai-chip" title="千问"><img class="ai-chip-logo" src="/static/img/logos/qwen.png" alt="千问" data-letter="Q" data-color="#FF6A00"></span><span class="ai-chip" title="Trae"><img class="ai-chip-logo" src="/static/img/logos/trae.png" alt="Trae" data-letter="T" data-color="#2563EB"></span><span class="ai-chip" title="WorkBuddy"><img class="ai-chip-logo" src="/static/img/logos/workbuddy.svg" alt="WorkBuddy" data-letter="W" data-color="#12B7F5"></span><span class="ai-chip" title="ZCode"><img class="ai-chip-logo" src="/static/img/logos/zcode.ico" alt="ZCode" data-letter="Z" data-color="#2563EB"></span><span class="ai-chip ai-chip-more" title="更多智能体">…</span></div>
                             </div>
                             <span class="ai-soon" data-i18n>即將上線</span>
                         </div>
+                        <div class="settings-group">
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-sparkles"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>AI 輔助決策</h2><p data-i18n>由 AI 分析攔截事件並給出建議，可選超時自動執行</p>
-                                <p class="ai-hint" data-i18n>開啟後，互動模式中的自動超時攔截將自動避讓並停用</p>
+                                <p class="ai-hint" data-i18n="ai_decision_hint">開啟AI輔助決策後，互動模式處超時處理機制將自動避讓並停用</p>
                             </div>
                             <label class="toggle-switch"><input type="checkbox" data-config-key="ai_assist_switch"><span class="slider"></span></label>
                         </div>
+                        <div class="list-item settings-child hidden" data-setting-parent="ai_assist_switch">
+                            <div class="item-info">
+                                <h2 data-i18n="opt_ai_delay">延遲啟動</h2><p data-i18n="opt_ai_delay_desc">彈窗先等待再分析；等待期間自行決策可完全跳過分析，節省 token</p>
+                            </div>
+                            <label class="toggle-switch"><input type="checkbox" data-config-key="ai_delay_switch"><span class="slider"></span></label>
+                        </div>
+                        <div class="list-item settings-child settings-child-2 hidden" data-setting-parent="ai_delay_switch">
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>
+                            <div class="item-info">
+                                <h2 data-i18n="opt_ai_delay_seconds">延遲時間</h2><p data-i18n="opt_ai_delay_seconds_desc">等待多久後才發起 AI 分析（秒）</p>
+                            </div>
+                            <input type="number" id="ai_delay_seconds_input" class="modern-input" min="1" max="30" step="1" value="3">
+                        </div>
+                        <div class="list-item settings-child hidden" data-setting-parent="ai_assist_switch">
+                            <div class="item-info">
+                                <h2 data-i18n="opt_ai_auto_execute">超时自动执行 AI 建议</h2><p data-i18n="opt_ai_auto_execute_desc">AI 未就緒或失敗時，將回退到使用者自主決策</p>
+                            </div>
+                            <label class="toggle-switch"><input type="checkbox" data-config-key="ai_auto_execute"><span class="slider"></span></label>
+                        </div>
+                        <div class="list-item settings-child settings-child-2 hidden" data-setting-parent="ai_auto_execute">
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>
+                            <div class="item-info">
+                                <h2 data-i18n="opt_ai_auto_execute_timeout">超时时间</h2><p data-i18n="opt_ai_auto_execute_timeout_desc">超时未选择时自动执行 AI 建议（秒）</p>
+                            </div>
+                            <input type="number" id="ai_auto_timeout_input" class="modern-input" min="5" max="600" step="1" value="60">
+                        </div>
+                                                </div>
+<div class="settings-group" id="ai_model_group">
                         <div class="list-item">
-                            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v3m6-3v3M9 19v3m6-3v3M2 9h3m-3 6h3m14-6h3m-3 6h3"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-chip"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>模型接入</h2><p data-i18n>可選雲端或本地模型，由使用者自訂</p>
                             </div>
@@ -452,53 +568,59 @@
                                 <option value="cloud" data-i18n>雲端模型</option>
                             </select>
                         </div>
-                    </div>
-                    <div class="settings-group">
-                        <div class="list-item">
+                        <div class="list-item settings-child">
                             <div class="item-info">
                                 <h2 data-i18n>服務地址</h2><p data-i18n>OpenAI 相容的 /v1 根地址</p>
                             </div>
                             <input type="text" id="ai_base_url_input" class="modern-input" placeholder="服務地址" data-i18n-placeholder="服務地址" spellcheck="false">
                         </div>
-                        <div class="list-item">
+                        <div class="list-item settings-child" id="ai_api_key_row">
                             <div class="item-info">
                                 <h2 data-i18n>API 金鑰</h2><p data-i18n>雲端必填，本地通常留空</p>
                             </div>
                             <input type="password" id="ai_api_key_input" class="modern-input" placeholder="API 金鑰" data-i18n-placeholder="API 金鑰" spellcheck="false" autocomplete="off">
                         </div>
-                        <div class="list-item">
+                        <div class="list-item settings-child">
                             <div class="item-info">
                                 <h2 data-i18n>模型名稱</h2><p data-i18n>例如 qwen2.5:7b 或 gpt-4o-mini</p>
                             </div>
                             <input type="text" id="ai_model_input" class="modern-input" placeholder="模型名稱" data-i18n-placeholder="模型名稱" spellcheck="false">
                         </div>
-                        <div class="list-item">
+                        <div class="list-item settings-child" id="ai_token_row">
+                            <div class="item-info">
+                                <h2 data-i18n="ai_token_usage">Token 消耗</h2>
+                                <p class="setting-status" id="ai_token_summary">—</p>
+                            </div>
+                            <button class="modern-btn" id="ai_token_reset" type="button" data-i18n="ai_token_reset">重置計數</button>
+                        </div>
+                        <div class="list-item settings-child">
                             <div class="item-info">
                                 <h2 data-i18n>連接狀態</h2><p id="ai_test_status" class="ai-hint"></p>
                             </div>
                             <button class="modern-btn" id="ai_test_button" data-i18n>測試連接</button>
                         </div>
                     </div>
+                    </div>
                 </section>
 
                 <section id="about_window" class="page">
                     <div class="list-widget">
                         <div class="list-item">
-                            <svg class="item-icon item-icon-compact" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path></svg>
+                            <svg class="item-icon item-icon-compact" aria-hidden="true" focusable="false"><use href="#i-key"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>產品金鑰</h2><p data-i18n>此選項可以啟用產品金鑰</p>
                             </div>
-                            <button class="icon-action-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+                            <button class="icon-action-btn"><svg><use href="#i-chevron-right"/></svg></button>
                         </div>
                         <div class="list-item">
-                            <svg class="item-icon item-icon-compact" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                            <svg class="item-icon item-icon-compact" aria-hidden="true" focusable="false"><use href="#i-globe"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>官方網站</h2><p data-i18n>此選項可以前往官方網站</p>
                             </div>
-                            <button class="icon-action-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+                            <button class="icon-action-btn"><svg><use href="#i-chevron-right"/></svg></button>
                         </div>
                         <div class="list-item">
-                            <svg class="item-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10a9 9 0 1 0-2 8M21 4v6h-6"/></svg>
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg>
                             <div class="item-info">
                                 <div class="update-title-row">
                                     <h2 data-i18n>檢查更新</h2>
@@ -506,7 +628,7 @@
                                 </div>
                                 <p data-i18n>此選項可以檢查可用更新</p>
                             </div>
-                            <button class="icon-action-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+                            <button class="icon-action-btn"><svg><use href="#i-chevron-right"/></svg></button>
                         </div>
                         <div class="changelog-widget">
                             <div class="changelog-header">
@@ -524,11 +646,11 @@
 
                 <section id="taskmgr_window" class="page sub-page">
                     <div class="sub-header-toolbar">
-                        <button class="icon-btn" data-target="tool_window"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+                        <button class="icon-btn" data-target="tool_window"><svg><use href="#i-chevron-left"/></svg></button>
                         <h2 data-i18n>進程管理</h2>
                         <div class="spacer"></div>
                         <div class="search-box">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                            <svg><use href="#i-search"/></svg>
                             <input type="text" data-i18n-placeholder="搜尋進程..." placeholder="搜尋進程...">
                         </div>
                         <div class="action-group modern-action-group">
@@ -546,11 +668,11 @@
 
                 <section id="startup_window" class="page sub-page">
                     <div class="sub-header-toolbar">
-                        <button class="icon-btn" data-target="tool_window"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+                        <button class="icon-btn" data-target="tool_window"><svg><use href="#i-chevron-left"/></svg></button>
                         <h2 data-i18n>啟動項管理</h2>
                         <div class="spacer"></div>
                         <div class="search-box">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                            <svg><use href="#i-search"/></svg>
                             <input type="text" data-i18n-placeholder="搜尋項目..." placeholder="搜尋項目...">
                         </div>
                         <div class="action-group modern-action-group">
@@ -567,11 +689,11 @@
 
                 <section id="whitelist_window" class="page sub-page">
                     <div class="sub-header-toolbar">
-                        <button class="icon-btn" data-target="tool_window"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+                        <button class="icon-btn" data-target="tool_window"><svg><use href="#i-chevron-left"/></svg></button>
                         <h2 data-i18n>白名單管理</h2>
                         <div class="spacer"></div>
                         <div class="search-box">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                            <svg><use href="#i-search"/></svg>
                             <input type="text" data-i18n-placeholder="搜尋檔案..." placeholder="搜尋檔案...">
                         </div>
                         <div class="action-group modern-action-group">
@@ -590,11 +712,11 @@
 
                 <section id="quarantine_window" class="page sub-page">
                     <div class="sub-header-toolbar">
-                        <button class="icon-btn" data-target="tool_window"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+                        <button class="icon-btn" data-target="tool_window"><svg><use href="#i-chevron-left"/></svg></button>
                         <h2 data-i18n>隔離區管理</h2>
                         <div class="spacer"></div>
                         <div class="search-box">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                            <svg><use href="#i-search"/></svg>
                             <input type="text" data-i18n-placeholder="搜尋檔案..." placeholder="搜尋檔案...">
                         </div>
                         <div class="action-group modern-action-group">
@@ -613,11 +735,11 @@
 
                 <section id="junk_window" class="page sub-page">
                     <div class="sub-header-toolbar">
-                        <button class="icon-btn" data-target="tool_window"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+                        <button class="icon-btn" data-target="tool_window"><svg><use href="#i-chevron-left"/></svg></button>
                         <h2 data-i18n>垃圾清理</h2>
                         <div class="spacer"></div>
                         <div class="search-box">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                            <svg><use href="#i-search"/></svg>
                             <input type="text" data-i18n-placeholder="搜尋檔案..." placeholder="搜尋檔案...">
                         </div>
                         <div class="action-group modern-action-group">
@@ -633,7 +755,7 @@
 
                 <section id="repair_window" class="page sub-page">
                     <div class="sub-header-toolbar">
-                        <button class="icon-btn" data-target="tool_window"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+                        <button class="icon-btn" data-target="tool_window"><svg><use href="#i-chevron-left"/></svg></button>
                         <h2 data-i18n>系統修復</h2>
                         <div class="spacer"></div>
                         <div class="action-group modern-action-group">
@@ -648,11 +770,11 @@
 
                 <section id="popup_window" class="page sub-page">
                     <div class="sub-header-toolbar">
-                        <button class="icon-btn" data-target="tool_window"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+                        <button class="icon-btn" data-target="tool_window"><svg><use href="#i-chevron-left"/></svg></button>
                         <h2 data-i18n>彈窗攔截</h2>
                         <div class="spacer"></div>
                         <div class="search-box">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                            <svg><use href="#i-search"/></svg>
                             <input type="text" data-i18n-placeholder="搜尋窗口..." placeholder="搜尋窗口...">
                         </div>
                         <div class="action-group modern-action-group">
@@ -668,11 +790,11 @@
                 
                 <section id="netmon_window" class="page sub-page">
                     <div class="sub-header-toolbar">
-                        <button class="icon-btn" data-target="tool_window"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+                        <button class="icon-btn" data-target="tool_window"><svg><use href="#i-chevron-left"/></svg></button>
                         <h2 data-i18n>流量監控</h2>
                         <div class="spacer"></div>
                         <div class="search-box">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                            <svg><use href="#i-search"/></svg>
                             <input type="text" data-i18n-placeholder="搜尋進程..." placeholder="搜尋進程...">
                         </div>
                         <div class="action-group modern-action-group">
@@ -688,11 +810,11 @@
 
                 <section id="custom_protect_window" class="page sub-page">
                     <div class="sub-header-toolbar">
-                        <button class="icon-btn" data-target="protect_window"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+                        <button class="icon-btn" data-target="protect_window"><svg><use href="#i-chevron-left"/></svg></button>
                         <h2 data-i18n>自訂防護</h2>
                         <div class="spacer"></div>
                         <div class="search-box">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                            <svg><use href="#i-search"/></svg>
                             <input type="text" data-i18n-placeholder="搜尋規則..." placeholder="搜尋規則...">
                         </div>
                         <div class="action-group modern-action-group">
@@ -708,11 +830,11 @@
                 
                 <section id="log_export_window" class="page sub-page">
                     <div class="sub-header-toolbar">
-                        <button class="icon-btn" data-target="home_window"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+                        <button class="icon-btn" data-target="home_window"><svg><use href="#i-chevron-left"/></svg></button>
                         <h2 data-i18n>日誌導出</h2>
                         <div class="spacer"></div>
                         <div class="search-box">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                            <svg><use href="#i-search"/></svg>
                             <input type="text" data-i18n-placeholder="搜尋日誌..." placeholder="搜尋日誌...">
                         </div>
                         <div class="action-group modern-action-group">
@@ -733,6 +855,7 @@
                 <h2 id="update_modal_title" data-i18n="msg_new_version">發現新版本</h2>
                 <p id="update_modal_version" class="modal-version"></p>
                 <p id="update_modal_asset" class="modal-asset hidden"></p>
+                <div id="update_modal_changelog" class="modal-changelog hidden"></div>
                 <div id="update_modal_progress" class="modal-progress hidden">
                     <div class="modal-progress-bar"><div class="modal-progress-fill" id="update_progress_fill"></div></div>
                     <span class="modal-progress-text" id="update_progress_text">0%</span>

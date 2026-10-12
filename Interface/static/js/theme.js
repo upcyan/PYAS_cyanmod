@@ -11,6 +11,8 @@ const themes = {
 const apply = (theme) => {
  const actual = theme === 'system_switch' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'black_switch' : 'white_switch') : theme;
  const vars = themes[actual] || themes.white_switch;
+ // 主题钩子:把解析后的主题落到 DOM 上,供 CSS 做主题级覆盖(如暗色阴影、通知窗配色)
+ document.documentElement.dataset.theme = actual;
  for (const [key, value] of Object.entries(vars)) document.documentElement.style.setProperty(key, value.startsWith('rgba') ? value : `rgb(${value})`);
 };
 window.PyasTheme = { themes, apply };

@@ -100,16 +100,22 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     let openCustomSelect = null;
+    let customSelectSeq = 0;
 
-    const closeCustomSelect = () => {
+    const closeCustomSelect = (restoreFocus = false) => {
         if (!openCustomSelect) return;
-        const { wrapper, menu } = openCustomSelect;
+        const { wrapper, trigger, menu } = openCustomSelect;
         wrapper.classList.remove('open');
         menu.classList.remove('open');
         menu.removeAttribute('style');
+        // 同步 ARIA:关闭后收起状态、清掉高亮项
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.removeAttribute('aria-activedescendant');
+        menu.querySelectorAll('.custom-select-option.active').forEach(el => el.classList.remove('active'));
         if (wrapper.isConnected) wrapper.appendChild(menu);
         else menu.remove();
         openCustomSelect = null;
+        if (restoreFocus && trigger.isConnected) trigger.focus({ preventScroll: true });
     };
 
     const positionCustomSelect = () => {
@@ -144,7 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
         menu.style.top = `${opensUp ? rect.top - 8 - menu.offsetHeight : rect.bottom + 8}px`;
     };
 
-    document.addEventListener('click', closeCustomSelect);
+    document.addEventListener('click', () => closeCustomSelect());
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') closeCustomSelect();
     });
@@ -156,6 +162,9 @@ document.addEventListener('DOMContentLoaded', () => {
     window.visualViewport?.addEventListener('scroll', positionCustomSelect);
 
     const getMsg = (key) => (dict[appState.lang] || dict["english_switch"])[key] || key;
+
+    // 图标按钮的可访问名在下方初始化,这里先占位,保证切语言时能安全调用
+    let refreshIconButtonLabels = () => {};
 
     let startupOverlayClosed = false;
     const closeStartupOverlay = () => {
@@ -201,8 +210,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
     };
 
-    const themes = window.PyasTheme.themes;
-
     const cols = {
         log: [{key: 'time_str', label: 'col_date', flex: 1.5, defaultDesc: true}, {key: 'level', label: 'col_type', flex: 0.8, isI18n: true}, {key: 'action', label: 'col_func', flex: 1.2, isI18n: true}, {key: 'source', label: 'col_path', flex: 3}],
         process: [{key: 'name', label: 'col_name', flex: 1.5}, {key: 'pid', label: 'col_pid', flex: 0.5}, {key: 'path', label: 'col_path', flex: 3}],
@@ -220,6 +227,8 @@ document.addEventListener('DOMContentLoaded', () => {
         select.style.display = 'none';
         const wrapper = document.createElement('div');
         wrapper.className = 'custom-select-wrapper';
+        // 每个下拉有唯一 id,供 aria-controls / aria-activedescendant 关联
+        const menuId = `custom-select-menu-${++customSelectSeq}`;
         
         const selectedOpt = select.options[select.selectedIndex];
         const triggerKey = selectedOpt ? selectedOpt.getAttribute('data-i18n') : '';
@@ -228,7 +237,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const triggerHTML = `
             <div class="custom-select-trigger">
                 <span class="custom-select-text" ${triggerKey ? `data-i18n="${triggerKey}"` : ''}>${triggerTextContent}</span>
-                <div class="custom-select-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
+                <div class="custom-select-icon"><svg aria-hidden="true" focusable="false"><use href="#i-chevron-down"/></svg></div>
             </div>`;
         wrapper.innerHTML = triggerHTML;
         
@@ -248,6 +257,9 @@ document.addEventListener('DOMContentLoaded', () => {
             li.className = `custom-select-option ${option.selected ? 'selected' : ''}`;
             li.textContent = optText;
             li.dataset.value = option.value;
+            li.id = `${menuId}-opt-${optionsContainer.children.length}`;
+            li.setAttribute('role', 'option');
+            li.setAttribute('aria-selected', option.selected ? 'true' : 'false');
             if (optKey) li.setAttribute('data-i18n', optKey);
             
             li.addEventListener('click', (e) => {
@@ -258,8 +270,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (optKey) triggerText.setAttribute('data-i18n', optKey);
                 
                 closeCustomSelect();
-                optionsContainer.querySelectorAll('.custom-select-option').forEach(el => el.classList.remove('selected'));
+                optionsContainer.querySelectorAll('.custom-select-option').forEach(el => {
+                    el.classList.remove('selected');
+                    el.setAttribute('aria-selected', 'false');
+                });
                 li.classList.add('selected');
+                li.setAttribute('aria-selected', 'true');
                 select.dispatchEvent(new Event('change'));
             });
             optionsContainer.appendChild(li);
@@ -275,16 +291,94 @@ document.addEventListener('DOMContentLoaded', () => {
         select.parentNode.insertBefore(wrapper, select.nextSibling);
         
         const trigger = wrapper.querySelector('.custom-select-trigger');
+        // 组合框语义:可聚焦 + 完整 ARIA;可访问名优先取所在行的标题(值由选项本身传达)
+        const rowLabel = select.closest('.list-item')?.querySelector('.item-info h2')?.textContent?.trim();
+        trigger.tabIndex = 0;
+        trigger.setAttribute('role', 'combobox');
+        trigger.setAttribute('aria-haspopup', 'listbox');
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.setAttribute('aria-controls', menuId);
+        trigger.setAttribute('aria-label', rowLabel || triggerTextContent || 'Select');
+        optionsContainer.id = menuId;
+        optionsContainer.setAttribute('role', 'listbox');
+        optionsContainer.setAttribute('tabindex', '-1');
+
+        const optionItems = () => [...optionsContainer.querySelectorAll('.custom-select-option')];
+        const activeIndex = () => {
+            const items = optionItems();
+            const current = items.findIndex(el => el.classList.contains('active'));
+            if (current >= 0) return current;
+            const selected = items.findIndex(el => el.classList.contains('selected'));
+            return selected >= 0 ? selected : 0;
+        };
+        const setActive = (index) => {
+            const items = optionItems();
+            if (!items.length) return;
+            const bounded = Math.max(0, Math.min(items.length - 1, index));
+            items.forEach((el, i) => el.classList.toggle('active', i === bounded));
+            trigger.setAttribute('aria-activedescendant', items[bounded].id);
+            items[bounded].scrollIntoView({ block: 'nearest' });
+        };
+        const openMenu = () => {
+            if (select.disabled || wrapper.classList.contains('open')) return;
+            wrapper.classList.add('open');
+            document.body.appendChild(optionsContainer);
+            optionsContainer.classList.add('open');
+            openCustomSelect = { wrapper, trigger, menu: optionsContainer };
+            trigger.setAttribute('aria-expanded', 'true');
+            positionCustomSelect();
+        };
         trigger.addEventListener('click', (e) => {
             e.stopPropagation();
             const isOpen = wrapper.classList.contains('open');
             closeCustomSelect();
-            if (!isOpen && !select.disabled) {
-                wrapper.classList.add('open');
-                document.body.appendChild(optionsContainer);
-                optionsContainer.classList.add('open');
-                openCustomSelect = { wrapper, trigger, menu: optionsContainer };
-                positionCustomSelect();
+            if (!isOpen) openMenu();
+        });
+        trigger.addEventListener('keydown', (event) => {
+            const isOpen = wrapper.classList.contains('open');
+            const items = optionItems();
+            switch (event.key) {
+                case 'ArrowDown':
+                case 'ArrowUp':
+                    event.preventDefault();
+                    if (!isOpen) { openMenu(); setActive(event.key === 'ArrowDown' ? 0 : items.length - 1); }
+                    else setActive(activeIndex() + (event.key === 'ArrowDown' ? 1 : -1));
+                    break;
+                case 'Home':
+                case 'End':
+                    if (!isOpen) return;
+                    event.preventDefault();
+                    setActive(event.key === 'Home' ? 0 : items.length - 1);
+                    break;
+                case 'Enter':
+                case ' ':
+                    event.preventDefault();
+                    if (isOpen) items[activeIndex()]?.click();
+                    else openMenu();
+                    break;
+                case 'Escape':
+                    if (!isOpen) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeCustomSelect(true);
+                    break;
+                case 'Tab':
+                    if (isOpen) closeCustomSelect();
+                    break;
+                default:
+                    // 首字母跳转:从当前高亮项之后开始,循环查找
+                    if (isOpen && event.key.length === 1) {
+                        const key = event.key.toLowerCase();
+                        const start = activeIndex();
+                        for (let step = 1; step <= items.length; step += 1) {
+                            const idx = (start + step) % items.length;
+                            if ((items[idx].textContent || '').trim().toLowerCase().startsWith(key)) {
+                                event.preventDefault();
+                                setActive(idx);
+                                break;
+                            }
+                        }
+                    }
             }
         });
     };
@@ -337,20 +431,14 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (e) {}
         }
         renderMenuStatus();
+        refreshAiTokenUsage();
+        refreshIconButtonLabels();
     };
 
     const applyTheme = (theme) => {
+        // 单一入口:主题解析/变量注入统一交给 PyasTheme,避免与 theme.js 双份维护
         appState.theme = theme;
-        const actualTheme = theme === "system_switch" 
-            ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? "black_switch" : "white_switch") 
-            : theme;
-
-        const themeVars = themes[actualTheme];
-        if (themeVars) {
-            for (const [key, value] of Object.entries(themeVars)) {
-                document.documentElement.style.setProperty(key, value.startsWith("rgba") ? value : `rgb(${value})`);
-            }
-        }
+        window.PyasTheme.apply(theme);
     };
 
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
@@ -798,7 +886,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (['whitelist_window', 'quarantine_window', 'popup_window', 'custom_protect_window'].includes(targetId)) refreshConfigLists();
 
         if (targetId === 'about_window') loadChangelogs();
-        if (targetId === 'home_window' && homeLogDirty) renderHomeLogs();
+        if (targetId === 'ai_window') refreshAiTokenUsage();
+        if (targetId === 'home_window') {
+            if (homeLogFilter === 'pending') fetchPendingThreatQueue();
+            if (homeLogDirty) renderHomeLogs();
+        }
 
         if (targetId === 'log_export_window' && window.pywebview) {
             window.pywebview.api.get_logs().then(logs => {
@@ -869,13 +961,49 @@ document.addEventListener('DOMContentLoaded', () => {
     let homeLogSortDesc = true;
     let homeLogBackfillInFlight = false;
 
+    // 待处理告警筛选:展示当前弹窗队列(与日志流无关),由 get_pending_threat_queue 提供
+    let pendingThreatEvents = [];
+
+    const renderPendingThreatList = (listUl) => {
+        if (!pendingThreatEvents.length) {
+            listUl.innerHTML = '<li class="home-log-empty">' + escapeHtml(getMsg('pending_threats_empty')) + '</li>';
+            return;
+        }
+        listUl.innerHTML = pendingThreatEvents.map(e => {
+            const title = String(e.title || '');
+            const count = Number(e.count) || 1;
+            const active = !!e.active;
+            const meta = '×' + count + (active ? ' · ' + getMsg('pending_threats_active') : '');
+            return '<li class="home-log-item lv-PENDING' + (active ? ' is-active' : '') + '" title="' + escapeHtml(title) + '">'
+                + '<span class="hl-level">' + escapeHtml(getMsg('pending_threats')) + '</span>'
+                + '<span class="hl-action">' + escapeHtml(title) + '</span>'
+                + '<span class="hl-source">' + escapeHtml(meta) + '</span>'
+                + '</li>';
+        }).join('');
+    };
+
+    const applyPendingThreatQueue = (queue) => {
+        pendingThreatEvents = Array.isArray(queue?.events) ? queue.events : [];
+        if (homeLogFilter === 'pending') renderHomeLogs();
+    };
+
+    const fetchPendingThreatQueue = async () => {
+        if (!window.pywebview?.api?.get_pending_threat_queue) return;
+        try {
+            applyPendingThreatQueue(await window.pywebview.api.get_pending_threat_queue());
+        } catch (error) { console.error('Pending threats queue failed', error); }
+    };
+    window.fetchPendingThreatQueue = fetchPendingThreatQueue;
+
     const backfillHomeLogs = () => {
         if (!window.pywebview || homeLogBackfillInFlight) return;
         homeLogBackfillInFlight = true;
         window.pywebview.api.get_logs().then(logs => {
             homeLogBackfillInFlight = false;
             window.pywebview.api.report_ui_error('home-log-backfill', 'received ' + (logs ? logs.length : 'null') + ' entries');
-            if (!logs || !logs.length) { renderHomeLogs(); return; }
+            // 无历史日志时直接返回:绝不再回调 renderHomeLogs——
+            // 空列表会再次触发 backfill,形成互递归把主线程微任务饿死(新装首启零日志即假死)
+            if (!logs || !logs.length) { return; }
             const merged = [...logs];
             homeLogs.forEach(l => { if (!merged.some(m => m.id === l.id)) merged.push(l); });
             homeLogs.length = 0;
@@ -883,8 +1011,8 @@ document.addEventListener('DOMContentLoaded', () => {
             renderHomeLogs();
         }).catch(err => {
             homeLogBackfillInFlight = false;
+            // 失败同样不回调渲染:理由同上,避免 backfill<->render 互递归
             window.pywebview.api.report_ui_error('home-log-backfill', 'failed: ' + String(err && err.message || err));
-            renderHomeLogs();
         });
     };
 
@@ -894,6 +1022,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!listUl) return;
         if (!document.getElementById('home_window')?.classList.contains('active')) {
             homeLogDirty = true;
+            return;
+        }
+
+        if (homeLogFilter === 'pending') {
+            renderPendingThreatList(listUl);
             return;
         }
 
@@ -1003,6 +1136,98 @@ document.addEventListener('DOMContentLoaded', () => {
     window.revertSwitch = () => {}; 
 
     document.querySelectorAll('[data-target]').forEach(btn => btn.addEventListener('click', (e) => switchPage(e.currentTarget.getAttribute('data-target'))));
+
+    // --- 无障碍:卡片入口可聚焦 + 纯图标控件补可访问名 ---
+    const navLabelKeys = {
+        home_window: 'nav_home', scan_window: 'nav_scan', tool_window: 'nav_tool',
+        protect_window: 'nav_protect', ai_window: 'nav_ai', setting_window: 'nav_settings',
+    };
+    const ctrlLabelKeys = {
+        about_button: 'btn_about', minimize_button: 'btn_minimize',
+        maximize_button: 'btn_maximize', close_button: 'btn_close',
+    };
+
+    const applyIconButtonLabels = () => {
+        // 侧栏导航与窗口控制都是纯图标按钮:补 aria-label + title(悬停提示)
+        Object.entries(navLabelKeys).forEach(([target, key]) => {
+            const button = document.querySelector(`.nav-btn[data-target="${target}"]`);
+            if (!button) return;
+            button.setAttribute('aria-label', getMsg(key));
+            button.title = getMsg(key);
+        });
+        Object.entries(ctrlLabelKeys).forEach(([id, key]) => {
+            const button = document.getElementById(id);
+            if (!button) return;
+            button.setAttribute('aria-label', getMsg(key));
+            button.title = getMsg(key);
+        });
+        // 最大化/还原是同一个按钮的两种状态,标签要跟着当前图标走
+        const maximize = document.getElementById('maximize_button');
+        if (maximize) {
+            const maximized = document.getElementById('icon_restore')?.classList.contains('hidden') === false;
+            maximize.setAttribute('aria-label', getMsg(maximized ? 'btn_restore' : 'btn_maximize'));
+            maximize.title = getMsg(maximized ? 'btn_restore' : 'btn_maximize');
+        }
+        // 搜索框清空按钮(需随语言切换更新)
+        document.querySelectorAll('.search-clear').forEach(button => {
+            button.setAttribute('aria-label', getMsg('btn_clear_input'));
+            button.title = getMsg('btn_clear_input');
+        });
+    };
+    refreshIconButtonLabels = applyIconButtonLabels;
+
+    // 输入框右侧「圆形 + 叉号」清空按钮:统一注入,避免在每处 HTML 里重复写
+    const initSearchClearButtons = () => {
+        document.querySelectorAll('.search-box').forEach(box => {
+            const input = box.querySelector('input');
+            if (!input || box.querySelector('.search-clear')) return;
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'search-clear';
+            button.innerHTML = '<svg aria-hidden="true" focusable="false"><use href="#i-close"/></svg>';
+            button.addEventListener('click', () => {
+                input.value = '';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                input.focus();
+            });
+            box.appendChild(button);
+            const sync = () => box.classList.toggle('has-value', input.value.length > 0);
+            input.addEventListener('input', sync);
+            input.addEventListener('change', sync);
+            sync();
+        });
+    };
+
+    const makeCardEntriesAccessible = () => {
+        document.querySelectorAll('[data-target]').forEach(element => {
+            if (element.tagName === 'BUTTON' || element.tagName === 'A') return;
+            element.tabIndex = 0;
+            element.setAttribute('role', 'button');
+            if (!element.hasAttribute('aria-label')) {
+                const title = element.querySelector('.item-info h2, h2, .title')?.textContent?.trim();
+                if (title) element.setAttribute('aria-label', title);
+            }
+            // 卡片内的箭头按钮只是视觉修饰:移出焦点序列,避免重复焦点与嵌套交互元素
+            element.querySelectorAll('.icon-action-btn').forEach(icon => {
+                icon.tabIndex = -1;
+                icon.setAttribute('aria-hidden', 'true');
+            });
+        });
+    };
+    makeCardEntriesAccessible();
+    initSearchClearButtons();
+    applyIconButtonLabels();
+
+    // 卡片入口支持回车/空格激活(与原生 button 一致)
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        const card = event.target?.closest?.('[data-target]');
+        if (!card || card.tagName === 'BUTTON' || card.tagName === 'A') return;
+        if (event.target !== card && event.target.closest('button, input, select, textarea, a')) return;
+        event.preventDefault();
+        card.click();
+    });
     document.getElementById('quick_scan_btn')?.addEventListener('click', () => { if (!appState.scanning) { switchPage('scan_window'); triggerScan('smart'); }});
     document.getElementById('quick_update_btn')?.addEventListener('click', () => {
         if (!window.pywebview) return;
@@ -1028,7 +1253,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const syncInteractiveTimeoutState = () => {
         document.querySelectorAll('[data-setting-parent]').forEach(row => {
             const parent = document.querySelector(`[data-config-key="${row.dataset.settingParent}"]`);
-            const visible = !appState.firstLaunch && !!parent?.checked;
+            // 递归可见性:父开关所在行自身被隐藏(如三级行依赖二级行)时同样隐藏
+            const parentRow = parent?.closest('.list-item');
+            const parentVisible = !parentRow || !parentRow.classList.contains('hidden');
+            const visible = !appState.firstLaunch && !!parent?.checked && parentVisible;
             row.classList.toggle('hidden', !visible);
             row.querySelectorAll('input, button').forEach(control => {
                 control.disabled = !visible || parent.disabled || control.dataset.pending === '1';
@@ -1039,18 +1267,44 @@ document.addEventListener('DOMContentLoaded', () => {
         const timeoutInput = document.getElementById('interactive_timeout_input');
         // AI 輔助決策與超時自動攔截互斥:AI 開啟時自動攔截置灰,懸浮提示避讓原因
         const aiAssist = document.querySelector('[data-config-key="ai_assist_switch"]');
+        const aiAutoExec = document.querySelector('[data-config-key="ai_auto_execute"]');
         const aiActive = !!aiAssist?.checked;
-        const aiMutexHint = aiActive ? getMsg('ai_decision_hint') : '';
+        // AI 辅助决策开启即避让:交互模式的超时处理(自动拦截/超时输入)整体停用;
+        // 超时执行 AI 建议由二级开关另行接管(见 get_interactive_timeout)
+        const aiMutex = aiActive;
+        const aiMutexHint = aiMutex ? getMsg('ai_decision_hint') : '';
         if (automatic) {
-            automatic.disabled = appState.firstLaunch || !interactive?.checked || interactive.disabled || aiActive || automatic.dataset.pending === '1';
+            automatic.disabled = appState.firstLaunch || !interactive?.checked || interactive.disabled || aiMutex || automatic.dataset.pending === '1';
             automatic.title = aiMutexHint;
             automatic.closest('.list-item')?.setAttribute('title', aiMutexHint);
+        }
+        if (aiAutoExec && aiAssist && !aiActive) {
+            aiAutoExec.checked = false;
         }
         if (timeoutInput) {
             timeoutInput.disabled = appState.firstLaunch || !interactive?.checked || interactive.disabled || aiActive || !automatic?.checked || automatic.disabled;
             timeoutInput.closest('.list-item')?.classList.toggle('hidden', appState.firstLaunch || !interactive?.checked || !automatic?.checked);
         }
     };
+
+    document.getElementById('ai_auto_timeout_input')?.addEventListener('change', (e) => {
+        if (!window.pywebview) return;
+        let value = parseInt(e.target.value, 10);
+        if (!Number.isFinite(value)) value = 60;
+        value = Math.min(Math.max(value, 5), 600);
+        e.target.value = value;
+        window.pywebview.api.update_config('ai_auto_execute_timeout', value);
+    });
+
+    // 延迟启动秒数:与后端 AI_DELAY_MIN/MAX 保持一致(1–30 秒)
+    document.getElementById('ai_delay_seconds_input')?.addEventListener('change', (e) => {
+        if (!window.pywebview) return;
+        let value = parseInt(e.target.value, 10);
+        if (!Number.isFinite(value)) value = 3;
+        value = Math.min(Math.max(value, 1), 30);
+        e.target.value = value;
+        window.pywebview.api.update_config('ai_delay_seconds', value);
+    });
 
     document.getElementById('interactive_timeout_input')?.addEventListener('change', (e) => {
         if (!window.pywebview) return;
@@ -1061,18 +1315,68 @@ document.addEventListener('DOMContentLoaded', () => {
         window.pywebview.api.update_config('interactive_timeout', value);
     });
 
-    // AI+ 页:模型接入配置(P1 只有连接测试;P2 的决策辅助复用同一套配置)
-    document.getElementById('ai_mode_select')?.addEventListener('change', (e) => {
-        window.pywebview?.api.update_config('ai_provider_mode', e.target.value);
-    });
-    const bindAiField = (id, key) => {
-        document.getElementById(id)?.addEventListener('change', (e) => {
-            window.pywebview?.api.update_config(key, e.target.value.trim());
-        });
+    // AI+ 页:本地/云端分流程(切换只改界面,字段统一由保存按钮提交)
+    const AI_PLACEHOLDERS = {
+        local: { url: 'http://127.0.0.1:11434/v1', model: 'qwen2.5:7b' },
+        cloud: { url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
     };
-    bindAiField('ai_base_url_input', 'ai_base_url');
-    bindAiField('ai_api_key_input', 'ai_api_key');
-    bindAiField('ai_model_input', 'ai_model');
+
+    const applyAiModeUI = (mode) => {
+        const isLocal = mode !== 'cloud';
+        const keyRow = document.getElementById('ai_api_key_row');
+        if (keyRow) keyRow.classList.toggle('hidden', isLocal);
+        const urlInput = document.getElementById('ai_base_url_input');
+        const modelInput = document.getElementById('ai_model_input');
+        if (urlInput) urlInput.placeholder = (AI_PLACEHOLDERS[isLocal ? 'local' : 'cloud']).url;
+        if (modelInput) modelInput.placeholder = (AI_PLACEHOLDERS[isLocal ? 'local' : 'cloud']).model;
+        const hint = document.getElementById('ai_save_status');
+        if (hint) hint.textContent = '';
+    };
+    window.applyAiModeUI = applyAiModeUI;
+
+    document.getElementById('ai_mode_select')?.addEventListener('change', (e) => {
+        applyAiModeUI(e.target.value);
+    });
+
+    // 实时保存:字段失焦即提交(与全应用一致);URL 格式校验失败不落盘并提示
+    const commitAiConfig = async (validateUrl = false) => {
+        const status = document.getElementById('ai_test_status');
+        try {
+            const mode = document.getElementById('ai_mode_select')?.value || 'local';
+            const baseUrl = document.getElementById('ai_base_url_input')?.value.trim() || '';
+            const model = document.getElementById('ai_model_input')?.value.trim() || '';
+            const apiKey = mode === 'cloud'
+                ? (document.getElementById('ai_api_key_input')?.value.trim() || '')
+                : null;
+
+            if (validateUrl && baseUrl && !/^https?:\/\//i.test(baseUrl)) {
+                if (status) {
+                    status.textContent = getMsg('msg_ai_invalid_url');
+                    status.style.color = '#ff3b30';
+                }
+                return;
+            }
+
+            if (status) status.style.color = '';
+            const res = await window.pywebview.api.save_ai_config(baseUrl, model, mode, apiKey);
+            if (res && !res.ok && status) {
+                status.textContent = `${getMsg('msg_ai_save_fail')} (${res.error || '?'})`;
+                status.style.color = '#ff3b30';
+            }
+            // 模型/地址已变:累计计数按新模型分账重新展示
+            refreshAiTokenUsage();
+        } catch (error) {
+            console.error('AI config commit failed', error);
+        }
+    };
+
+    document.getElementById('ai_mode_select')?.addEventListener('change', (e) => {
+        applyAiModeUI(e.target.value);
+        commitAiConfig();
+    });
+    document.getElementById('ai_base_url_input')?.addEventListener('change', () => commitAiConfig(true));
+    document.getElementById('ai_model_input')?.addEventListener('change', () => commitAiConfig());
+    document.getElementById('ai_api_key_input')?.addEventListener('change', () => commitAiConfig());
     document.getElementById('ai_test_button')?.addEventListener('click', async () => {
         const status = document.getElementById('ai_test_status');
         const button = document.getElementById('ai_test_button');
@@ -1088,7 +1392,177 @@ document.addEventListener('DOMContentLoaded', () => {
         } finally {
             button.disabled = false;
         }
+        // 连接测试同样计费:刷新累计展示
+        refreshAiTokenUsage();
     });
+
+    // ---- 模型接入引导:开启 AI 辅助决策后模型尚未就绪时,把注意力聚到「模型接入」 ----
+    const AI_GUIDE_ID = 'ai_model_guide';
+    let aiGuideReposition = null;
+
+    const isAiModelConfigured = () => {
+        const mode = document.getElementById('ai_mode_select')?.value || 'local';
+        const url = (document.getElementById('ai_base_url_input')?.value || '').trim();
+        const model = (document.getElementById('ai_model_input')?.value || '').trim();
+        const apiKey = (document.getElementById('ai_api_key_input')?.value || '').trim();
+        if (!url || !model) return false;
+        return mode !== 'cloud' || Boolean(apiKey);
+    };
+
+    const closeAiModelGuide = () => {
+        document.getElementById(AI_GUIDE_ID)?.remove();
+        if (aiGuideReposition) {
+            window.removeEventListener('resize', aiGuideReposition);
+            document.removeEventListener('scroll', aiGuideReposition, true);
+            aiGuideReposition = null;
+        }
+    };
+
+    // 整窗只留「模型接入」一块透明:四块 dim 围出洞口,目标区块不被任何遮罩覆盖
+    const openAiModelGuide = () => {
+        const target = document.getElementById('ai_model_group');
+        if (!target) return;
+        closeAiModelGuide();
+
+        const layer = document.createElement('div');
+        layer.id = AI_GUIDE_ID;
+        layer.className = 'ai-guide-layer';
+        layer.setAttribute('role', 'dialog');
+        layer.setAttribute('aria-modal', 'true');
+        layer.setAttribute('aria-labelledby', 'ai_guide_title');
+        layer.innerHTML = [
+            '<div class="ai-guide-dim" data-part="top"></div>',
+            '<div class="ai-guide-dim" data-part="bottom"></div>',
+            '<div class="ai-guide-dim" data-part="left"></div>',
+            '<div class="ai-guide-dim" data-part="right"></div>',
+            '<div class="ai-guide-ring"></div>',
+            '<div class="ai-guide-tip"><h3 id="ai_guide_title"></h3><p id="ai_guide_desc"></p></div>',
+            `<button type="button" class="ai-guide-close" aria-label="${getMsg('btn_close')}">`,
+            '<svg aria-hidden="true" focusable="false"><use href="#i-close"/></svg>',
+            '</button>',
+        ].join('');
+        document.body.appendChild(layer);
+        layer.querySelector('#ai_guide_title').textContent = getMsg('ai_guide_title');
+        layer.querySelector('#ai_guide_desc').textContent = getMsg('ai_guide_desc');
+        layer.querySelector('.ai-guide-close').addEventListener('click', closeAiModelGuide);
+
+        const PAD = 8;
+        const dims = ['top', 'bottom', 'left', 'right'].reduce((acc, part) => {
+            acc[part] = layer.querySelector(`[data-part="${part}"]`);
+            return acc;
+        }, {});
+        const ring = layer.querySelector('.ai-guide-ring');
+        const tip = layer.querySelector('.ai-guide-tip');
+
+        aiGuideReposition = () => {
+            const rect = target.getBoundingClientRect();
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            const x1 = Math.max(0, rect.left - PAD);
+            const y1 = Math.max(0, rect.top - PAD);
+            const x2 = Math.min(vw, rect.right + PAD);
+            const y2 = Math.min(vh, rect.bottom + PAD);
+            const place = (el, left, top, width, height) => {
+                el.style.left = `${left}px`;
+                el.style.top = `${top}px`;
+                el.style.width = `${Math.max(0, width)}px`;
+                el.style.height = `${Math.max(0, height)}px`;
+            };
+            place(dims.top, 0, 0, vw, y1);
+            place(dims.bottom, 0, y2, vw, vh - y2);
+            place(dims.left, 0, y1, x1, y2 - y1);
+            place(dims.right, x2, y1, vw - x2, y2 - y1);
+            place(ring, x1, y1, x2 - x1, y2 - y1);
+
+            // 引导文字贴在洞口上方;上方空间不够就落到下方,始终不出窗口
+            const tipWidth = Math.min(380, vw - 40);
+            const tipLeft = Math.min(Math.max(16, x1), Math.max(16, vw - tipWidth - 16));
+            const above = y1 > 170;
+            tip.style.width = `${tipWidth}px`;
+            tip.style.left = `${tipLeft}px`;
+            tip.style.top = `${above ? y1 - 12 : y2 + 12}px`;
+            tip.style.transform = above ? 'translateY(-100%)' : 'none';
+        };
+        aiGuideReposition();
+        window.addEventListener('resize', aiGuideReposition);
+        document.addEventListener('scroll', aiGuideReposition, true);
+
+        // 焦点真正落到模型接入:滚动到可见 + 定位到首处待填字段
+        target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        const firstEmpty = ['ai_base_url_input', 'ai_model_input', 'ai_api_key_input']
+            .map((id) => document.getElementById(id))
+            .find((el) => el && !el.value.trim() && !el.closest('.hidden'));
+        (firstEmpty || document.getElementById('ai_mode_select'))?.focus({ preventScroll: true });
+        setTimeout(aiGuideReposition, 340); // 等平滑滚动结束再重算洞口
+    };
+    window.openAiModelGuide = openAiModelGuide;
+    window.closeAiModelGuide = closeAiModelGuide;
+
+    // ---- token 累计消耗:按模型分账,切换模型各计各的 ----
+    const renderAiTokenUsage = (data) => {
+        const summary = document.getElementById('ai_token_summary');
+        if (!summary) return;
+        const model = String(data?.model || '').trim();
+        const usage = (data && data.usage) || {};
+        const entry = model ? usage[model] : null;
+        const hasEntry = !!entry && (Number(entry.tokens) > 0 || Number(entry.requests) > 0);
+
+        if (!model) summary.textContent = getMsg('ai_token_no_model');
+        else if (!hasEntry) summary.textContent = getMsg('ai_token_empty');
+        else {
+            let text = formatMsg('ai_token_summary',
+                Number(entry.tokens || 0).toLocaleString(), Number(entry.requests || 0));
+            // 用过多个模型时附一行总计,便于估算整体开销
+            if (Object.keys(usage).length > 1 && Number(data.total?.tokens) > 0) {
+                text += ' · ' + formatMsg('ai_token_total', Number(data.total.tokens).toLocaleString());
+            }
+            summary.textContent = text;
+        }
+
+        summary.dataset.model = model;
+        summary.title = Object.keys(usage).length
+            ? Object.entries(usage).map(([name, item]) =>
+                `${name}: ${Number(item.tokens || 0).toLocaleString()} tokens / ${item.requests || 0}`).join('\n')
+            : '';
+        const resetBtn = document.getElementById('ai_token_reset');
+        if (resetBtn) resetBtn.disabled = !hasEntry;
+    };
+
+    const refreshAiTokenUsage = async () => {
+        if (!window.pywebview?.api?.get_ai_token_usage) return;
+        try {
+            renderAiTokenUsage(await window.pywebview.api.get_ai_token_usage());
+        } catch (error) { console.error('AI token usage refresh failed', error); }
+    };
+    window.refreshAiTokenUsage = refreshAiTokenUsage;
+
+    document.getElementById('ai_token_reset')?.addEventListener('click', async () => {
+        if (!window.pywebview?.api?.reset_ai_token_usage) return;
+        const model = (document.getElementById('ai_token_summary')?.dataset.model || '').trim();
+        const scope = model || getMsg('ai_token_no_model');
+        const ok = await window.pywebview.api.show_confirm(getMsg('title_prompt'),
+            formatMsg('ai_token_reset_confirm', scope));
+        if (!ok) return;
+        try {
+            const result = await window.pywebview.api.reset_ai_token_usage(model);
+            if (result && result.ok === false) return;
+            renderAiTokenUsage(result);
+            window.pywebview.api.show_alert(getMsg('title_prompt'), getMsg('ai_token_reset_done'), 'info');
+        } catch (error) { console.error('AI token reset failed', error); }
+    });
+
+    // AI 页可见时每 5s 轻量轮询:拦截弹窗在后台分析也会产生消耗
+    let aiTokenTimer = null;
+    const scheduleAiTokenRefresh = () => {
+        clearTimeout(aiTokenTimer);
+        aiTokenTimer = setTimeout(async () => {
+            if (document.getElementById('ai_window')?.classList.contains('active') && !document.hidden) {
+                await refreshAiTokenUsage();
+            }
+            scheduleAiTokenRefresh();
+        }, 5000);
+    };
+    scheduleAiTokenRefresh();
     
     document.getElementById('scan_method_select')?.addEventListener('change', (e) => {
         const val = e.target.value;
@@ -1130,6 +1604,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const key = toggle.dataset.configKey;
             if (!window.pywebview || !key) return;
+
+            if (key === 'ai_assist_switch') {
+                if (!e.target.checked) { applyToggle(key, false, toggle); return; }
+                window.pywebview.api.show_confirm(getMsg("title_prompt"), getMsg("msg_ai_assist_risk")).then(ok => {
+                    if (!ok) { toggle.checked = false; return; }
+                    applyToggle(key, true, toggle);
+                    // 已确认开启,但模型还没接上:把注意力导到「模型接入」,否则开了也分析不了
+                    if (!isAiModelConfigured()) openAiModelGuide();
+                });
+                return;
+            }
 
             if (key === 'classic_menu_switch') {
                 if (!e.target.checked) { applyToggle(key, false, toggle); return; }
@@ -1355,6 +1840,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const syncMaximizeIcon = (maximized) => {
         document.getElementById('icon_maximize')?.classList.toggle('hidden', !!maximized);
         document.getElementById('icon_restore')?.classList.toggle('hidden', !maximized);
+        refreshIconButtonLabels();
     };
     window.syncMaximizeIcon = syncMaximizeIcon;
 
@@ -1362,6 +1848,23 @@ document.addEventListener('DOMContentLoaded', () => {
         window.pywebview?.api.toggle_maximize().then(state => syncMaximizeIcon(!!state)).catch(() => {});
     });
     document.getElementById('close_button')?.addEventListener('click', () => window.pywebview?.api.hide_window());
+
+    const bindChipLogoFallbacks = () => {
+        document.querySelectorAll('.ai-chip-logo[data-letter]').forEach(img => {
+            const fallback = () => {
+                if (img.dataset.failed) return;
+                img.dataset.failed = '1';
+                const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                svg.setAttribute('class', 'ai-chip-logo ai-chip-badge');
+                svg.setAttribute('viewBox', '0 0 16 16');
+                svg.innerHTML = `<rect width="16" height="16" rx="4" fill="${img.dataset.color || '#888'}"/><text x="8" y="11.5" text-anchor="middle" font-size="9" font-weight="700" fill="#fff" font-family="inherit">${img.dataset.letter || '?'}</text>`;
+                img.replaceWith(svg);
+            };
+            img.addEventListener('error', fallback);
+            if (img.complete && img.naturalWidth === 0) fallback();
+        });
+    };
+    bindChipLogoFallbacks();
 
     const updateProtectionLights = (cfg) => {
         const map = { process: 'light_process', document: 'light_document', system: 'light_system', network: 'light_network', driver: 'light_driver' };
@@ -1371,10 +1874,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
+    // 待处理告警 chip 现在是筛选器(同其他日志筛选):点击展示当前弹窗队列;
+    // 打开告警窗改由队列条目点击触发(见 home_log_list 点击处理)
     const pendingThreatButton = document.getElementById('pending_threats_btn');
-    pendingThreatButton?.addEventListener('click', () => {
-        window.pywebview?.api.show_pending_threats().catch(error => reportStartupError('pending-threats', error));
-    });
     const refreshPendingThreats = async () => {
         if (window.pywebview?.api && !document.hidden) {
             try {
@@ -1382,6 +1884,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 pendingThreatButton?.classList.toggle('hidden', count === 0);
                 const label = document.getElementById('pending_threats_count');
                 if (label && label.textContent !== String(count)) label.textContent = String(count);
+                if (homeLogFilter === 'pending') {
+                    if (count > 0) {
+                        await fetchPendingThreatQueue();
+                    } else {
+                        // 队列已清空:回退到「全部」,不把用户停在空筛选上
+                        pendingThreatEvents = [];
+                        homeLogFilter = 'all';
+                        document.querySelectorAll('.log-filter').forEach(b => b.classList.toggle('active', b.dataset.filter === 'all'));
+                        renderHomeLogs();
+                    }
+                }
             } catch (error) { console.error('Pending threats refresh failed', error); }
         }
         window.setTimeout(refreshPendingThreats, 1500);
@@ -1394,6 +1907,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.classList.add('active');
             homeLogFilter = btn.dataset.filter;
             renderHomeLogs();
+            if (homeLogFilter === 'pending') fetchPendingThreatQueue();
         });
     });
 
@@ -1404,6 +1918,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('home_log_list')?.addEventListener('click', (e) => {
+        // 待处理队列条目:点击打开告警窗进行处理
+        if (e.target.closest('.home-log-item.lv-PENDING')) {
+            window.pywebview?.api.show_pending_threats?.().catch(error => reportStartupError('pending-threats', error));
+            return;
+        }
         const li = e.target.closest('.home-log-item');
         if (!li || !li.classList.contains('lv-BLOCK')) return;
 
@@ -1435,8 +1954,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const contextMenu = document.createElement('div');
     contextMenu.className = 'custom-context-menu';
     contextMenu.innerHTML = `
-        <div class="custom-context-menu-item" id="ctx_open_location"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg><span data-i18n="ctx_open_loc"></span></div>
-        <div class="custom-context-menu-item" id="ctx_copy_cell"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><span data-i18n="ctx_copy_cell"></span></div>`;
+        <div class="custom-context-menu-item" id="ctx_open_location"><svg aria-hidden="true" focusable="false"><use href="#i-folder"/></svg><span data-i18n="ctx_open_loc"></span></div>
+        <div class="custom-context-menu-item" id="ctx_copy_cell"><svg aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span data-i18n="ctx_copy_cell"></span></div>`;
     const copyRowItem = contextMenu.querySelector('#ctx_copy_cell').cloneNode(true);
     copyRowItem.id = 'ctx_copy_row';
     copyRowItem.querySelector('span').setAttribute('data-i18n', 'ctx_copy_row');
@@ -1587,7 +2106,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const setModalElement = (id, show) => document.getElementById(id)?.classList.toggle('hidden', !show);
 
-    const openUpdateModal = (res) => {
+    const applyDownloadState = (state) => {
+        if (!state) return;
+        if (state.downloading) {
+            updateModalState.downloading = true;
+            setModalElement('update_modal_progress', true);
+            setModalElement('update_modal_status', false);
+            setModalElement('update_download_btn', true);
+            const downloadBtn = document.getElementById('update_download_btn');
+            if (downloadBtn) downloadBtn.disabled = true;
+            window.updateDownloadProgress(state);
+        } else if (state.result) {
+            window.updateDownloadFinished(state.result);
+        }
+    };
+
+    const openUpdateModal = async (res) => {
         updateModalState.result = res;
         updateModalState.downloading = false;
         const version = document.getElementById('update_modal_version');
@@ -1613,13 +2147,36 @@ document.addEventListener('DOMContentLoaded', () => {
         if (fill) fill.style.width = '0%';
         const progressText = document.getElementById('update_progress_text');
         if (progressText) progressText.textContent = '0%';
+
+        const changelog = document.getElementById('update_modal_changelog');
+        if (changelog) {
+            const body = (res.body || '').trim();
+            if (body) {
+                const meta = res.published_at
+                    ? `<span class="changelog-meta">${escapeHtml(res.latest)} · ${escapeHtml(res.published_at)}</span>`
+                    : `<span class="changelog-meta">${escapeHtml(res.latest)}</span>`;
+                changelog.innerHTML = meta + escapeHtml(body);
+                changelog.classList.remove('hidden');
+            } else {
+                changelog.innerHTML = '';
+                changelog.classList.add('hidden');
+            }
+        }
+
         document.getElementById('update_modal')?.classList.remove('hidden');
+
+        // 之前已开始的下载:直接恢复进度,不再提示重复下载
+        try {
+            const state = await window.pywebview.api.get_update_download_state();
+            applyDownloadState(state);
+        } catch (error) { /* 无状态则保持初始态 */ }
     };
 
     const closeUpdateModal = () => document.getElementById('update_modal')?.classList.add('hidden');
 
     window.updateDownloadProgress = (payload) => {
         if (!payload) return;
+        updateModalState.lastProgress = payload;
         const fill = document.getElementById('update_progress_fill');
         const text = document.getElementById('update_progress_text');
         if (payload.percent >= 0) {
@@ -1670,6 +2227,9 @@ document.addEventListener('DOMContentLoaded', () => {
         window.pywebview.api.download_update(asset.url, asset.name).then(res => {
             if (!res || !res.success) {
                 window.updateDownloadFinished(res || { success: false, error: 'failed to start' });
+            } else {
+                setModalElement('update_modal_status', false);
+                setModalElement('update_modal_progress', true);
             }
         }).catch(() => window.updateDownloadFinished({ success: false, error: 'bridge error' }));
     });
@@ -1698,18 +2258,25 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    bindSettingAction('opt_notify_check', () => {
-        if (!window.pywebview) return;
+    const checkSystemNotifyPermission = () => {
         window.pywebview.api.check_notification_permission().then(res => {
             if (!res || !res.supported) {
                 window.pywebview.api.show_alert(getMsg("title_prompt"), getMsg("msg_notify_unsupported"), "info");
-            } else if (res.enabled) {
-                window.pywebview.api.show_alert(getMsg("title_prompt"), getMsg("msg_notify_ok"), "info");
-            } else {
+            } else if (!res.enabled) {
+                /* 权限正常保持静默,仅异常才提示并引导 */
                 window.pywebview.api.show_confirm(getMsg("title_prompt"), getMsg("msg_notify_disabled")).then(ok => {
                     if (ok) window.pywebview.api.open_notification_settings();
                 });
             }
+        });
+    };
+
+    document.getElementById('notify_channel_select')?.addEventListener('change', (e) => {
+        if (!window.pywebview) return;
+        const channel = e.target.value;
+        window.pywebview.api.update_config('notify_channel', channel).then(saved => {
+            // 选择系统渠道时立即检查通知权限
+            if ((saved ?? channel) === 'system') checkSystemNotifyPermission();
         });
     });
 
@@ -1935,6 +2502,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (versionChip) versionChip.textContent = 'v' + (cfg.version || '');
                 const titleVersion = document.getElementById('title_version');
                 if (titleVersion) titleVersion.textContent = 'v' + (cfg.version || '');
+                const notifySelect = document.getElementById('notify_channel_select');
+                if (notifySelect) {
+                    const channel = cfg.notify_channel === 'custom' ? 'custom' : 'system';
+                    notifySelect.value = channel;
+                    updateCustomSelectUI('notify_channel_select', channel);
+                }
                 appState.upstreamTracked = cfg.upstream_tracked || '3.7.0';
                 appState.configCache = cfg;
                 await window.refreshContextMenuStatus();
@@ -1955,6 +2528,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (baseUrl) baseUrl.value = cfg.ai_base_url || '';
                     if (apiKey) apiKey.value = cfg.ai_api_key || '';
                     if (aiModel) aiModel.value = cfg.ai_model || '';
+                    applyAiModeUI(aiMode);
+                    refreshAiTokenUsage();
                 }
 
                 document.querySelectorAll('.toggle-switch input').forEach((toggle, index) => {
@@ -1965,6 +2540,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         toggle.checked = !!cfg[toggle.dataset.configKey];
                     }
                 });
+                const fillTimeout = (id, key, fallback, min, max) => {
+                    const input = document.getElementById(id);
+                    if (!input) return;
+                    let value = parseInt(cfg[key], 10);
+                    if (!Number.isFinite(value)) value = fallback;
+                    input.value = Math.min(Math.max(value, min), max);
+                };
+                fillTimeout('interactive_timeout_input', 'interactive_timeout', 30, 5, 300);
+                fillTimeout('ai_auto_timeout_input', 'ai_auto_execute_timeout', 60, 5, 600);
+                fillTimeout('ai_delay_seconds_input', 'ai_delay_seconds', 3, 1, 30);
                 syncInteractiveTimeoutState();
                 stage = 'init_ui_ready';
                 await window.pywebview.api.init_ui_ready();
