@@ -62,10 +62,10 @@ class StarterTests(unittest.TestCase):
         app = ConfigApp(ai_assist_switch=True)
         queue = _ThreatPromptQueue()
         ready = _DecisionRequest('english_switch', 't', 'm', None)
-        with patch('PYAS_Dialog.request_ai_verdict',
+        with patch('PYAS_Dialog.request_ai_verdict_cached',
                    return_value={'verdict': 'allow', 'reason': 'legit updater'}) as mocked:
             app._ai_suggestion_worker(queue, ready, 'http://ai.local/v1', 'test-model', '')
-            detail = mocked.call_args[0][5]
+            detail = mocked.call_args[0][6]
         self.assertIn('Message:', detail)
         self.assertEqual(ready.ai, {'state': 'ready', 'verdict': 'allow', 'reason': 'legit updater'})
         # LLM 成功也绝不代替用户裁决:请求保持未决、默认拦截
@@ -73,7 +73,7 @@ class StarterTests(unittest.TestCase):
         self.assertEqual(ready.choice, 'block')
 
         failed = _DecisionRequest('english_switch', 't', 'm', None)
-        with patch('PYAS_Dialog.request_ai_verdict', return_value=None):
+        with patch('PYAS_Dialog.request_ai_verdict_cached', return_value=None):
             app._ai_suggestion_worker(queue, failed, 'http://ai.local/v1', 'test-model', '')
         self.assertEqual(failed.ai['state'], 'failed')
         self.assertFalse(failed.done.is_set())
@@ -85,7 +85,7 @@ class StarterTests(unittest.TestCase):
         queue = _ThreatPromptQueue()
         request = _DecisionRequest('english_switch', 't', 'm', None)
         request.done.set()
-        with patch('PYAS_Dialog.request_ai_verdict') as mocked:
+        with patch('PYAS_Dialog.request_ai_verdict_cached') as mocked:
             app._ai_suggestion_worker(queue, request, 'http://ai.local/v1', 'test-model', '')
         mocked.assert_not_called()
         self.assertIsNone(request.ai)
@@ -126,22 +126,26 @@ class DeadlineChoiceTests(unittest.TestCase):
         request.ai = {'state': 'ready', 'verdict': 'block', 'reason': 'bad'}
         self.assertEqual(ai_deadline_choice(request), 'block')
 
-    def test_failure_never_defaults_to_allow(self):
+    def test_no_verdict_defers_to_user_never_allows(self):
+        """AI 无结论时返回 None(交回用户自主决策):既不默认放行也不擅自拦截。"""
         for state in (None, {}, {'state': 'failed', 'verdict': '', 'reason': ''},
                       {'state': 'analyzing', 'verdict': '', 'reason': ''},
                       {'state': 'ready', 'verdict': 'maybe', 'reason': ''}):
             request = _DecisionRequest('english_switch', 't', 'm', None)
             request.ai = state
-            self.assertEqual(ai_deadline_choice(request), 'block', state)
+            self.assertIsNone(ai_deadline_choice(request), state)
 
 
 class TimeoutTests(unittest.TestCase):
-    def test_ai_mode_takes_over_countdown(self):
+    def test_ai_mode_avoids_countdown_without_auto_execute(self):
+        # 现行设计:AI 辅助开启即避让超时处理;仅「超时自动执行」二级开关才接管倒计时
         app = ConfigApp(ai_assist_switch=True)
-        self.assertEqual(app.get_interactive_timeout(), 30)
-        app.pyas_config['interactive_timeout'] = 999
-        self.assertEqual(app.get_interactive_timeout(), 300)
-        app.pyas_config['interactive_timeout'] = 1
+        self.assertIsNone(app.get_interactive_timeout())
+        app.pyas_config['ai_auto_execute'] = True
+        self.assertEqual(app.get_interactive_timeout(), 60)
+        app.pyas_config['ai_auto_execute_timeout'] = 999
+        self.assertEqual(app.get_interactive_timeout(), 600)
+        app.pyas_config['ai_auto_execute_timeout'] = 1
         self.assertEqual(app.get_interactive_timeout(), 5)
 
     def test_classic_mode_still_opt_in(self):
@@ -149,6 +153,10 @@ class TimeoutTests(unittest.TestCase):
         self.assertIsNone(app.get_interactive_timeout())
         app.pyas_config['interactive_auto_block'] = True
         self.assertEqual(app.get_interactive_timeout(), 30)
+        app.pyas_config['interactive_timeout'] = 999
+        self.assertEqual(app.get_interactive_timeout(), 300)
+        app.pyas_config['interactive_timeout'] = 1
+        self.assertEqual(app.get_interactive_timeout(), 5)
 
 
 class SnapshotTests(unittest.TestCase):

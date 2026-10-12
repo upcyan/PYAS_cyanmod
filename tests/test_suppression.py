@@ -14,6 +14,10 @@ class Owner(AlertPolicyMixin):
         self.pyas_config = {}
         self.save_config = Mock(return_value=True)
 
+    def _ai_auto_execute_enabled(self):
+        # 快照 countdown 文案分支用;本测试不涉及 AI 自动执行
+        return False
+
 
 from unittest.mock import Mock  # noqa: E402  (Owner 上方需要,保持导入分组紧凑)
 
@@ -144,7 +148,7 @@ class SuppressionTests(unittest.TestCase):
         queue.take_next()
         queue.worker = object()
         snapshot = session.api.snapshot()
-        self.assertEqual(snapshot['fp']['button'], 'Report false positive')
+        self.assertEqual(snapshot['fp']['button'], 'If you think this block is a false positive, click to dismiss')
         self.assertEqual([key for key, _ in snapshot['fp']['reasons']],
                          ['dev_tool', 'installer', 'enterprise', 'game_patch', 'other'])
 

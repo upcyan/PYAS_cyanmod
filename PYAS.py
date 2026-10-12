@@ -35,7 +35,7 @@ from PIL import Image
 from socketserver import ThreadingTCPServer
 from webview.dom import DOMEventHandler
 from PYAS_Engine import sign_scanner, rule_scanner, pe_scanner, cloud_scanner
-from PYAS_Dialog import MINMAXINFO
+from PYAS_Dialog import MINMAXINFO, window_background_for
 from PYAS_Protect import ProtectMixin
 from PYAS_Scanner import ScannerMixin
 from PYAS_Tools import (
@@ -918,6 +918,21 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin, AIMixin):
         }
         return self._loc(titles.get(action, {}))
 
+    def dispatch_notification(self, title, message):
+        """通知渠道分流:system=Windows 标准通知(托盘),custom=程序内通知窗。"""
+        with self.lock_config:
+            channel = self.pyas_config.get("notify_channel", "system")
+
+        if channel == "custom":
+            if self.show_custom_notification(title, message):
+                return
+
+        try:
+            if self.tray_icon:
+                self.tray_icon.notify(message, title)
+        except Exception:
+            log_exception("PYAS._MainMixin.dispatch_notification")
+
     def trigger_block_notification(self, action, source, target, code):
         if action not in [
             "Process Block",
@@ -945,21 +960,10 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin, AIMixin):
 
         title = self.get_block_action_title(action)
         message = self._loc(messages)
-
-        try:
-            self.tray_icon.notify(message, title)
-        except Exception:
-            log_exception("PYAS._MainMixin.trigger_block_notification:483")
-            pass
+        self.dispatch_notification(title, message)
 
     def show_notification(self, title, message):
-        try:
-            if self.tray_icon:
-                self.tray_icon.notify(message, title)
-
-        except Exception as e:
-            log_exception("PYAS._MainMixin.show_notification:491")
-            self.write_log("WARN", "show_notification", detail=str(e), success=False)
+        self.dispatch_notification(title, message)
 
     def show_alert(self, title, message, style="info"):
         flags = 0x00000000 | (
@@ -1633,6 +1637,10 @@ def start_ui():
         pos_x = (user32.GetSystemMetrics(0) - init_width) // 2
         pos_y = (user32.GetSystemMetrics(1) - init_height) // 2
         startup_url = f"http://127.0.0.1:{port_container[0]}/"
+        # 原生窗口底色跟随已保存主题,消除深色主题启动时的闪白
+        window_background = window_background_for(
+            getattr(js_api, "pyas_config", {}).get("theme", "system_switch")
+        )
         window = webview.create_window(
             title=PYAS_WINDOW_TITLE,
             url=startup_url,
@@ -1643,7 +1651,7 @@ def start_ui():
             frameless=True,
             easy_drag=False,
             js_api=js_api,
-            background_color="#e0e0e0",
+            background_color=window_background,
             hidden=hide_on_start,
         )
 

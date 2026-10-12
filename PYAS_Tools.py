@@ -506,6 +506,8 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
             j = latest_release
             latest = str(j.get("tag_name") or j.get("name") or "").strip()
             page = j.get("html_url") or "https://github.com/upcyan/PYAS_cyanmod/releases"
+            body = str(j.get("body") or "").strip()[:4000]
+            published_at = str(j.get("published_at") or "")[:10]
             asset = None
 
             for item in j.get("assets") or []:
@@ -535,6 +537,8 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
                         "current": current,
                         "url": page,
                         "asset": asset,
+                        "body": body,
+                        "published_at": published_at,
                     }
 
                 return {
@@ -543,6 +547,8 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
                     "current": current,
                     "url": page,
                     "asset": asset,
+                    "body": body,
+                    "published_at": published_at,
                 }
 
         except requests.RequestException as error:
@@ -557,7 +563,8 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
     def download_update(self, url, file_name=None):
         with self.lock_update:
             if getattr(self, "_update_downloading", False):
-                return {"success": False, "error": "download already in progress"}
+                # 重新发起视为继续:前端据此直接恢复进度显示
+                return {"success": True, "already": True}
 
             if not isinstance(url, str) or not url.lower().startswith("https://github.com/"):
                 return {"success": False, "error": "invalid download url"}
@@ -566,6 +573,9 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
                 return {'success': False, 'error': 'Check for updates again before downloading'}
 
             self._update_downloading = True
+            self._update_download_state = {
+                "downloading": True, "received": 0, "total": 0, "percent": -1,
+            }
 
         threading.Thread(
             target=self._download_update_worker, args=(url, file_name), daemon=True
@@ -631,6 +641,7 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
 
         finally:
             self._update_downloading = False
+            self._update_download_state = {"downloading": False, "result": result}
 
             if temp_path:
                 try:
@@ -649,6 +660,9 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
         else:
             percent = -1
 
+        self._update_download_state = {
+            "downloading": True, "received": received, "total": total, "percent": percent,
+        }
         payload = json.dumps({"received": received, "total": total, "percent": percent})
         self._emit_ui_js(
             f"if(window.updateDownloadProgress) window.updateDownloadProgress({payload});"
@@ -661,6 +675,18 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
         except Exception:
             log_exception("PYAS_Tools.ToolsMixin._emit_ui_js")
             pass
+
+    def get_update_download_state(self):
+        """供更新弹窗重开时恢复进度/终态。"""
+        state = getattr(self, "_update_download_state", None)
+
+        if state is None:
+            with self.lock_update:
+                if getattr(self, "_update_downloading", False):
+                    return {"downloading": True, "received": 0, "total": 0, "percent": -1}
+            return {"downloading": False}
+
+        return dict(state)
 
     def run_update_installer(self, file_path):
         try:

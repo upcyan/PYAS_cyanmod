@@ -15,6 +15,10 @@ class Owner(AlertPolicyMixin):
         self.pyas_config = {}
         self.save_config = Mock(return_value=True)
 
+    def _ai_auto_execute_enabled(self):
+        # 快照 countdown 文案分支用;本测试不涉及 AI 自动执行
+        return False
+
 class AlertPolicyTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
