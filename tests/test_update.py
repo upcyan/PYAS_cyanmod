@@ -5,16 +5,27 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 import requests
-from PYAS_Version import VERSION
+import PYAS_Channel
+from PYAS_Version import VERSION, UPSTREAM_REPO, UPSTREAM_TRACKED
 
 tree = ast.parse((Path(__file__).resolve().parents[1] / 'PYAS_Tools.py').read_text(encoding='utf-8'))
 main = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'ToolsMixin')
-names = {'check_update', 'compare_versions'}
-scope = {'requests': requests, 're': re, 'VERSION': VERSION, 'log_exception': Mock()}
+names = {'check_update', '_check_self_update', '_is_dev_channel', '_check_upstream_update', 'compare_versions'}
+scope = {'requests': requests, 're': re, 'VERSION': VERSION, 'UPSTREAM_REPO': UPSTREAM_REPO,
+    'UPSTREAM_TRACKED': UPSTREAM_TRACKED, 'log_exception': Mock()}
 exec(compile(ast.Module(body=[n for n in main.body if isinstance(n, ast.FunctionDef) and n.name in names], type_ignores=[]), 'PYAS_Tools.py', 'exec'), scope)
 UpdateAPI = type('UpdateAPI', (), {name: scope[name] for name in names})
 
 class UpdateTests(unittest.TestCase):
+    def setUp(self):
+        # 本文件只测自身仓库的检查逻辑:强制普通模式,免得构建机上的
+        # PYAS_Build.py(开发者模式)让用例多出一次上游请求
+        self._saved = PYAS_Channel.IS_DEV
+        PYAS_Channel.IS_DEV = False
+
+    def tearDown(self):
+        PYAS_Channel.IS_DEV = self._saved
+
     def api(self, status, payload):
         api = UpdateAPI()
         response = Mock(status_code=status)

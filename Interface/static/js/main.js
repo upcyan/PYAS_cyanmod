@@ -1233,7 +1233,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!window.pywebview) return;
         window.pywebview.api.check_update().then(res => {
             if (res.error) window.pywebview.api.show_alert(getMsg("title_error"), updateErrorMessage(res), "error");
-            else if (res.has_update) openUpdateModal(res);
+            else if (res.has_update || res.upstream?.has_update) openUpdateModal(res);
             else window.pywebview.api.show_alert(getMsg("title_prompt"), `${getMsg("msg_latest_version")} ${res.current}`, "info");
         });
     });
@@ -2086,7 +2086,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     bindSettingAction('web_official', () => window.pywebview?.api.open_website());
 
-    const updateModalState = { result: null, downloading: false };
+    const updateModalState = { result: null, downloading: false, pageUrl: '' };
     const updateErrorMessage = res => {
         const messages = {
             repository_unavailable: '更新仓库不可访问（HTTP 404），请确认仓库已公开且地址正确。',
@@ -2124,8 +2124,43 @@ document.addEventListener('DOMContentLoaded', () => {
     const openUpdateModal = async (res) => {
         updateModalState.result = res;
         updateModalState.downloading = false;
+        // 本仓库发布页按钮只在自身有更新时出现;上游单独提示时只给上游发布页,
+        // 免得两个「发布页」按钮指向不同项目
+        updateModalState.pageUrl = res.has_update ? (res.url || '') : '';
+        // 上游跟进提示(开发者模式专有):没带 upstream 字段就是普通模式,整块不出现
+        const upstream = res.upstream && res.upstream.has_update ? res.upstream : null;
+        const upstreamBox = document.getElementById('update_modal_upstream');
+        if (upstreamBox) {
+            if (upstream) {
+                upstreamBox.textContent = `${getMsg('msg_upstream_new').replace('{0}', upstream.latest).replace('{1}', upstream.tracked)}\n${getMsg('msg_upstream_follow')}`;
+                upstreamBox.classList.remove('hidden');
+            } else {
+                upstreamBox.textContent = '';
+                upstreamBox.classList.add('hidden');
+            }
+        }
+        const upstreamBtn = document.getElementById('update_upstream_btn');
+        if (upstreamBtn) {
+            upstreamBtn.classList.toggle('hidden', !upstream);
+            upstreamBtn.dataset.url = upstream ? upstream.url : '';
+        }
+        const title = document.getElementById('update_modal_title');
+        if (title) {
+            const titleKey = res.has_update ? 'msg_new_version' : 'msg_new_version_upstream';
+            title.textContent = getMsg(titleKey);
+            title.dataset.i18n = titleKey;
+        }
+        setModalElement('update_page_btn', !!updateModalState.pageUrl);
         const version = document.getElementById('update_modal_version');
-        if (version) version.textContent = `${res.current} -> ${res.latest}`;
+        if (version) {
+            if (res.has_update) {
+                version.textContent = `${res.current} -> ${res.latest}`;
+                version.classList.remove('hidden');
+            } else {
+                version.textContent = '';
+                version.classList.add('hidden');
+            }
+        }
         const asset = document.getElementById('update_modal_asset');
         if (asset) {
             if (res.asset && res.asset.name) {
@@ -2243,8 +2278,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    document.getElementById('update_upstream_btn')?.addEventListener('click', (event) => {
+        const url = event.currentTarget?.dataset?.url;
+        if (url) window.pywebview?.api.open_url(url);
+    });
+
     document.getElementById('update_page_btn')?.addEventListener('click', () => {
-        const url = updateModalState.result?.url;
+        const url = updateModalState.pageUrl || updateModalState.result?.url;
         if (url) window.pywebview?.api.open_url(url);
     });
 
@@ -2253,7 +2293,7 @@ document.addEventListener('DOMContentLoaded', () => {
     bindSettingAction('update_check', () => {
         window.pywebview?.api.check_update().then(res => {
             if (res.error) window.pywebview.api.show_alert(getMsg("title_error"), updateErrorMessage(res), "error");
-            else if (res.has_update) openUpdateModal(res);
+            else if (res.has_update || res.upstream?.has_update) openUpdateModal(res);
             else window.pywebview.api.show_alert(getMsg("title_prompt"), `${getMsg("msg_latest_version")} ${res.current}`, "info");
         });
     });

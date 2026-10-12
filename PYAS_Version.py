@@ -6,6 +6,8 @@ VERSION = "3.7.0-24"
 # 数值形态（- 替换为 .）：Inno Setup / PE 版本资源只接受纯数字段
 NUMERIC_VERSION = VERSION.replace("-", ".")
 FILE_VERSION = NUMERIC_VERSION
+# 上游项目：版本号跟随它，开发者模式的「检查更新」会比对它的最新发布
+UPSTREAM_REPO = "87owo/PYAS"
 # 本项目当前跟进的上游版本：上游更新日志只展示到该版本为止
 UPSTREAM_TRACKED = "3.7.0"
 

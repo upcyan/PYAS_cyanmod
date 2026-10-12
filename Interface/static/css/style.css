@@ -1164,6 +1164,17 @@ body.resizing-active * {
     color: var(--accent-color);
 }
 
+/* 上游跟进提示:开发者模式(本地构建)专有,普通模式不会出现 */
+.modal-box .modal-upstream {
+    font-size: var(--text-sm);
+    line-height: 1.65;
+    color: var(--text-secondary);
+    border-left: 3px solid var(--accent-color);
+    padding-left: var(--space-2);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .modal-box .modal-asset,
 .modal-box .modal-status {
     font-size: var(--text-sm);

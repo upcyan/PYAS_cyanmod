@@ -15,7 +15,7 @@ import requests
 import subprocess
 import ctypes
 import ctypes.wintypes
-from PYAS_Version import VERSION
+from PYAS_Version import VERSION, UPSTREAM_REPO, UPSTREAM_TRACKED
 from concurrent.futures import ThreadPoolExecutor
 from PYAS_WinAPI import (
     COPYDATASTRUCT,
@@ -476,7 +476,86 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
 
         return requests.get(url, **kwargs)
 
+    def _is_dev_channel(self):
+        """当前安装包是不是开发者模式（本地构建）。
+
+        渠道在打包时写入生成模块 PYAS_Build.py；读不到就按普通模式，
+        也就是发布包的行为。
+        """
+        try:
+            import PYAS_Channel
+
+            return bool(PYAS_Channel.IS_DEV)
+
+        except Exception:
+            return False
+
+    def _check_upstream_update(self):
+        """开发者模式专有：上游 87owo/PYAS 有没有比本项目跟进版本更新的发布。
+
+        只比对版本号并给出上游发布页，不下载上游安装包（那是另一个产品）。
+        任何失败都降级成 error 字段，绝不影响本仓库自身的更新检查结果。
+        """
+        repository = UPSTREAM_REPO
+        tracked = UPSTREAM_TRACKED
+        releases_url = f'https://github.com/{repository}/releases'
+
+        try:
+            response = self._github_get(f'https://api.github.com/repos/{repository}/releases?per_page=100')
+
+            try:
+                if response.status_code == 404:
+                    return {'supported': True, 'error': True, 'error_code': 'repository_unavailable', 'detail': repository}
+                if response.status_code in (403, 429):
+                    return {'supported': True, 'error': True, 'error_code': 'rate_limited', 'detail': f'HTTP {response.status_code}'}
+                response.raise_for_status()
+                releases = response.json()
+
+            finally:
+                response.close()
+
+            if not isinstance(releases, list):
+                return {'supported': True, 'error': True, 'error_code': 'invalid_response'}
+
+            candidates = [r for r in releases if isinstance(r, dict) and not r.get('draft') and not r.get('prerelease')
+                and re.fullmatch(r'[vV]?\d+(?:\.\d+){1,3}', str(r.get('tag_name') or ''))]
+            latest_release = max(candidates, key=lambda r: tuple(int(n) for n in re.findall(r'\d+', r['tag_name'])) +
+                (0,) * (5 - len(re.findall(r'\d+', r['tag_name']))), default=None)
+
+            if latest_release is None:
+                return {'supported': True, 'repository': repository, 'tracked': tracked, 'latest': tracked,
+                    'has_update': False, 'url': releases_url}
+
+            latest = str(latest_release.get('tag_name') or latest_release.get('name') or '').strip()
+
+            return {
+                'supported': True,
+                'repository': repository,
+                'tracked': tracked,
+                'latest': latest,
+                'has_update': bool(latest) and tracked != latest and not self.compare_versions(tracked, latest),
+                'url': releases_url,
+                'body': str(latest_release.get('body') or '').strip()[:2000],
+                'published_at': str(latest_release.get('published_at') or '')[:10],
+            }
+
+        except requests.RequestException as error:
+            log_exception('PYAS_Tools.ToolsMixin._check_upstream_update.network')
+            return {'supported': True, 'error': True, 'error_code': 'network_error', 'detail': type(error).__name__}
+        except Exception:
+            log_exception('PYAS_Tools.ToolsMixin._check_upstream_update')
+            return {'supported': True, 'error': True, 'error_code': 'invalid_response'}
+
     def check_update(self):
+        """检查更新：自身仓库必查；开发者模式另附上游跟进比对。"""
+        result = self._check_self_update()
+
+        if isinstance(result, dict) and self._is_dev_channel():
+            result['upstream'] = self._check_upstream_update()
+
+        return result
+
+    def _check_self_update(self):
         repository = 'upcyan/PYAS_cyanmod'
         try:
             current = VERSION

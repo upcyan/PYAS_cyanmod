@@ -3,10 +3,14 @@
 
 用法:
     python build.py            # 交互菜单
-    python build.py local      # 路径二:仅本地构建(产出 Output\\PYAS_Setup_v版本.exe)
-    python build.py release    # 路径一:完整发布(本地构建 + 上传 GitHub Release)
+    python build.py local      # 路径二:仅本地构建 = 开发者模式(产出 Output\\PYAS_Setup_v版本.exe)
+    python build.py release    # 路径一:完整发布 = 普通模式(本地构建 + 上传 GitHub Release)
     python build.py check      # 仅检查构建环境
     python build.py release --skip-build   # 跳过构建,直接上传已有安装包
+
+渠道(--channel)决定安装包带哪些能力:开发者模式的「检查更新」会附带上游
+87owo/PYAS 的版本比对并提示跟进,普通模式不含。默认 local=dev、release=normal,
+CI 构建请显式写 --channel normal。
 """
 
 import argparse
@@ -37,6 +41,16 @@ SETUP_RES_DIR = ROOT / "SetupResources"
 OUTPUT_DIR = ROOT / "Output"
 DIST_DIR = ROOT / "dist"
 ICON_FILE = ROOT / "Interface" / "static" / "img" / "icon.ico"
+# 构建渠道：本地构建 = 开发者模式（多查上游、提示跟进），发布构建 = 普通模式。
+# 渠道写入生成模块 PYAS_Build.py，由 PYAS_Channel.py 读取；该文件不进版本库，
+# 缺失时程序按普通模式运行。
+CHANNEL_FILE = ROOT / "PYAS_Build.py"
+CHANNELS = {
+    "dev": ("开发者模式", "本地构建：检查更新会附带上游跟进比对"),
+    "normal": ("普通模式", "发布构建：不含上游跟进等开发用能力"),
+}
+# 各构建模式的默认渠道：本地构建给开发者模式,发布构建给普通模式
+MODE_CHANNEL = {"local": "dev", "release": "normal"}
 
 GITHUB_REPO = "upcyan/PYAS_cyanmod"
 VC_REDIST_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
@@ -104,6 +118,54 @@ def die(message, hint=None):
 def run(command, **kwargs):
     print(f"  $ {' '.join(str(part) for part in command)}")
     return subprocess.run(command, cwd=str(ROOT), **kwargs)
+
+
+def write_build_channel(channel):
+    """把构建渠道写进生成模块 PYAS_Build.py(打包时被收进 PYAS.exe)。"""
+    if channel not in CHANNELS:
+        die(f"未知构建渠道: {channel}", "可用: " + ", ".join(CHANNELS))
+
+    label, note = CHANNELS[channel]
+    CHANNEL_FILE.write_text(
+        '# 本文件由 build.py 生成,不要手改,也不要提交到版本库。\n'
+        f'CHANNEL = "{channel}"  # {label}·{note}\n',
+        encoding="utf-8",
+    )
+    log("渠道", f"{label}（{note}）")
+
+    return channel
+
+
+def read_build_channel():
+    """读当前 PYAS_Build.py 里的渠道(生成文件缺失按 normal)。"""
+    try:
+        match = re.search(r'^CHANNEL\s*=\s*"([^"]+)"', CHANNEL_FILE.read_text(encoding="utf-8"), re.M)
+    except OSError:
+        return "normal"
+
+    channel = match.group(1) if match else "normal"
+
+    return channel if channel in CHANNELS else "normal"
+
+
+def assert_publish_channel(interactive):
+    """发布包必须是普通模式:挡住「本地构建成开发者模式后直接发布」这条错路。"""
+    channel = read_build_channel()
+
+    if channel == "normal":
+        return
+
+    label = CHANNELS[channel][0]
+    hint = f"当前 Output 里的安装包是{label};发布前请先 python build.py local --channel normal 重新构建"
+
+    if interactive:
+        print(f"\n[警告] {hint}")
+        if input("仍要发布? 输入 yes 继续: ").strip().lower() != "yes":
+            sys.exit(0)
+
+        return
+
+    die(hint, "发布包不应带开发者模式的上游跟进能力")
 
 
 def read_version():
@@ -582,8 +644,9 @@ def create_release_api(asset, version):
     log("发布", f"Release {tag} 创建成功")
 
 
-def publish(asset, version):
+def publish(asset, version, interactive=False):
     log("发布", f"准备发布 {asset.name} → {GITHUB_REPO}")
+    assert_publish_channel(interactive)
 
     if shutil.which("gh"):
         create_release_gh(asset, version)
@@ -660,10 +723,11 @@ def lint_i18n():
 
     log("i18n", f"简中文案检查通过({len(zh)} 键)")
 
-def do_build(interactive):
+def do_build(interactive, channel="dev"):
     lint_i18n()
     version = read_version()
     log("版本", f"当前版本 {version}")
+    write_build_channel(channel)
     sync_iss_version(version)
     check_python_packages(interactive)
     iscc_path = find_iscc()
@@ -728,18 +792,18 @@ def menu():
     print("=" * 52)
     print("   PYAS Security Cyanmod 一键构建")
     print("=" * 52)
-    print("  [1] 完整发布 —— 构建 + 上传 GitHub Release")
-    print("  [2] 仅本地构建 —— 只生成安装包")
+    print("  [1] 完整发布 —— 普通模式 + 上传 GitHub Release")
+    print("  [2] 仅本地构建 —— 开发者模式,只生成安装包")
     print("  [3] 环境自检")
     print("  [0] 退出")
 
     choice = input("\n请选择: ").strip()
 
     if choice == "1":
-        do_build(interactive=True)
-        publish(OUTPUT_DIR / f"PYAS_Setup_v{read_version()}.exe", read_version())
+        do_build(interactive=True, channel="normal")
+        publish(OUTPUT_DIR / f"PYAS_Setup_v{read_version()}.exe", read_version(), interactive=True)
     elif choice == "2":
-        do_build(interactive=True)
+        do_build(interactive=True, channel="dev")
     elif choice == "3":
         do_check()
     else:
@@ -752,6 +816,8 @@ def main():
     parser = argparse.ArgumentParser(description="PYAS Security Cyanmod 一键构建")
     parser.add_argument("mode", nargs="?", choices=["local", "release", "check"], help="构建模式")
     parser.add_argument("--skip-build", action="store_true", help="release 时跳过构建直接上传")
+    parser.add_argument("--channel", choices=["dev", "normal"],
+        help="构建渠道:dev=开发者模式(本地构建默认),normal=普通模式(发布默认)")
     args = parser.parse_args()
 
     if args.mode is None:
@@ -765,15 +831,17 @@ def main():
     version = read_version()
     asset = OUTPUT_DIR / f"PYAS_Setup_v{version}.exe"
 
+    channel = args.channel or MODE_CHANNEL[args.mode]
+
     if args.mode == "local":
-        do_build(interactive=False)
+        do_build(interactive=False, channel=channel)
         return
 
     if args.skip_build:
         if not asset.is_file():
             die(f"未找到已有安装包: {asset}", "先运行 python build.py local")
     else:
-        asset = do_build(interactive=False)
+        asset = do_build(interactive=False, channel=channel)
 
     publish(asset, version)
 
