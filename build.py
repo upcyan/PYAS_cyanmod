@@ -593,7 +593,75 @@ def publish(asset, version):
     print(f"\n[完成] 发布地址: https://github.com/{GITHUB_REPO}/releases/tag/v{version}")
 
 
+
+
+def lint_i18n():
+    """构建前强制检查:简中界面出现繁体文案/缺失键时阻断构建。
+
+    该类问题历史上反复出现(无键文本反查失配、新键漏入简中块),构建期拦截根治。
+    """
+    html_path = ROOT / "Interface" / "templates" / "index.html"
+    js_path = ROOT / "Interface" / "static" / "js" / "i18n.js"
+
+    if not html_path.is_file() or not js_path.is_file():
+        return
+
+    html = html_path.read_text(encoding="utf-8")
+    js = js_path.read_text(encoding="utf-8")
+
+    def block(lang):
+        m = re.search(r'"' + lang + r'": \{\n(.*?)\n        \},', js, re.S)
+        if not m:
+            return {}
+        return dict(re.findall(r'"((?:[^"]|\\.)+)": "((?:[^"]|\\.)*)"', m.group(1)))
+
+    zh = block("simplified_switch")
+    trad = block("traditional_switch")
+    trad_vals = set(trad.values())
+
+    # 高置信「简体不使用」的繁简差异字
+    real_trad = set("這開關設選擇應後時會對認為訊檔監聽務線圖報載與將無還進變讀寫標準確過閉說異權訪執發網絡連據隻兒們軍階級溫禮義試詢構轉換觸擊擴縮體驗鎖鏈佈")
+    problems = []
+
+    for key, value in zh.items():
+        if any(ch in real_trad for ch in value):
+            problems.append(f"简中块值含繁体字: {key} = {value[:50]}")
+
+    texts = set(re.findall(
+        r'<(?:h2|p|span|button|div|option)[^>]*data-i18n(?:="([^"]*)")?[^>]*>([^<]{1,80})</',
+        html,
+    ))
+
+    for key_attr, text in texts:
+        t = text.strip()
+
+        if not t or key_attr:
+            continue
+
+        if t not in trad_vals:
+            if any(ch in real_trad for ch in t):
+                problems.append(f"HTML 无键文本反查失败且为繁体(将原样显示): {t[:60]}")
+        else:
+            rk = next((k for k, v in trad.items() if v == t), None)
+
+            if rk and rk not in zh:
+                problems.append(f"反查键缺简中值: {rk}")
+
+    for key_attr in set(re.findall(r'data-i18n="([^"$]+)"', html)):
+        if key_attr not in zh and not key_attr.startswith("$"):
+            problems.append(f"HTML 有键但简中字典缺失: {key_attr}")
+
+    if problems:
+        die(
+            "i18n lint 未通过(简中界面会出现繁体/缺键)",
+            "\n       " + "\n       ".join(problems[:12])
+            + (f"\n       ...共 {len(problems)} 项" if len(problems) > 12 else ""),
+        )
+
+    log("i18n", f"简中文案检查通过({len(zh)} 键)")
+
 def do_build(interactive):
+    lint_i18n()
     version = read_version()
     log("版本", f"当前版本 {version}")
     sync_iss_version(version)

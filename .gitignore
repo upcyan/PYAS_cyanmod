@@ -16,3 +16,7 @@ _release_notes.md
 _patch*.py
 _*.py
 MenuPackage/
+
+# 本地工作数据(含临时产物,体积大)与安装包归档目录
+.workbuddy/
+Release/
