@@ -4,34 +4,86 @@ document.addEventListener('DOMContentLoaded', () => {
     const allow = byId('threat_allow');
     const block = byId('threat_block');
     const permanent = byId('threat_permanent');
-    const aiButton = byId('threat_ai');
+    const glow = byId('ai_window_glow');
     const fpButton = byId('threat_fp');
     const fpPanel = byId('threat_fp_panel');
     const repeat = byId('threat_repeat');
-    const allButtons = [allow, block, permanent, aiButton, fpButton];
-    const disable = () => allButtons.forEach(button => { button.disabled = true; });
+    const allButtons = [allow, block, permanent, fpButton];
+    const disable = () => {
+        allButtons.forEach(button => { button.disabled = true; });
+        repeat.disabled = true;
+        glow.classList.remove('is-analyzing');
+    };
     let confirmationId = null;
-    let aiVerdict = '';
     let fpTexts = null;
     const hideFpPanel = () => fpPanel.classList.add('hidden');
-    // AI 分析结果面板:仅分析结束后(就绪/失败)展示结论与建议动作;
-    // 分析中由按钮流光承担,延迟启动期间也只显示按钮上的倒计时
-    const renderAiResult = (ai, lang) => {
+    const message = (lang, key) => window.AppI18n.dict[lang]?.[key]
+        || window.AppI18n.dict.english_switch[key] || key;
+    // AI is advice, not a second detector. Only actual in-flight analysis lights the window.
+    const renderAiResult = (ai, lang, resolving = false) => {
         const panel = byId('ai_result');
-        if (!panel) return;
-        if (!ai || !ai.label || ai.state === 'analyzing' || ai.state === 'delay') { panel.classList.add('hidden'); return; }
-        const messages = window.AppI18n.dict[lang] || window.AppI18n.dict.english_switch;
-        const ready = ai.state === 'ready';
-        byId('ai_result_title').textContent = ready
-            ? (messages.ai_result_title || 'AI 分析结果')
-            : (messages.ai_result_failed || 'AI 分析不可用');
-        const verdict = byId('ai_result_verdict');
-        verdict.textContent = ai.label;
-        verdict.className = 'ai-result-verdict ' + (ready ? (ai.verdict === 'block' ? 'verdict-block' : 'verdict-allow') : 'verdict-failed');
-        const reason = byId('ai_result_reason');
-        reason.textContent = ai.hint || '';
-        reason.classList.toggle('hidden', !ai.hint);
-        panel.classList.remove('hidden');
+        const visible = !!ai?.label;
+        glow.classList.toggle('is-analyzing', visible && ai.state === 'analyzing' && !busy && !resolving);
+        panel.classList.toggle('hidden', !visible);
+        if (!visible) {
+            setText('ai_result_verdict', '');
+            setText('ai_result_reason', '');
+            return;
+        }
+        const ready = ai.state === 'ready' && ['allow', 'block'].includes(ai.verdict);
+        setText('ai_result_title', message(lang, 'evidence_ai_title'));
+        setText('ai_result_verdict', ai.label);
+        byId('ai_result_verdict').className = 'ai-result-verdict ' + (ready
+            ? (ai.verdict === 'block' ? 'verdict-block' : 'verdict-allow') : 'verdict-failed');
+        setText('ai_result_reason', ai.hint || '');
+        byId('ai_result_reason').classList.toggle('hidden', !ai.hint);
+        setText('ai_result_note', message(lang, 'evidence_ai_note'));
+    };
+    const renderEvidence = (data, lang) => {
+        const e = data?.evidence || {};
+        const unknown = message(lang, 'evidence_unknown');
+        const labels = { evidence_heading: 'evidence_title', evidence_score_label: 'evidence_score',
+            evidence_category_label: 'evidence_category', evidence_engine_label: 'evidence_engine',
+            evidence_platform_label: 'evidence_platform', evidence_family_label: 'evidence_family',
+            evidence_raw_label: 'evidence_raw', evidence_rules_label: 'evidence_rules',
+            evidence_file_label: 'evidence_file', evidence_hash_label: 'evidence_hash',
+            evidence_event_label: 'evidence_event' };
+        for (const [id, key] of Object.entries(labels)) setText(id, message(lang, key));
+        const scored = typeof e.score === 'number' && Number.isFinite(e.score) && e.score >= 0 && e.score <= 100
+            && ((e.engine === 'ml' && e.score_kind === 'model_probability')
+                || (e.engine === 'cl' && e.score_kind === 'cloud_score'));
+        const ruleMatch = ['yr', 'ym'].includes(e.engine) && e.score_kind === 'rule_match';
+        setText('threat_score', scored ? String(e.score) : message(lang, ruleMatch ? 'evidence_rule_match' : 'evidence_not_scored'));
+        byId('threat_score_scale').hidden = !scored;
+        byId('threat_score').parentElement.classList.toggle('is-unscored', !scored);
+        const track = byId('threat_score_track');
+        track.hidden = !scored;
+        track.setAttribute('aria-label', message(lang, 'evidence_score'));
+        if (scored) track.setAttribute('aria-valuenow', String(e.score));
+        else track.removeAttribute('aria-valuenow');
+        byId('threat_score_fill').style.width = scored ? String(e.score) + '%' : '0%';
+        const engineKeys = { ml: 'evidence_ml', yr: 'evidence_yara', ym: 'evidence_yara_memory',
+            cl: 'evidence_cloud', network: 'evidence_network' };
+        setText('threat_engine', engineKeys[e.engine] ? message(lang, engineKeys[e.engine]) : unknown);
+        const categoryKey = e.category ? 'evidence_category_' + e.category : '';
+        const category = window.AppI18n.dict[lang]?.[categoryKey] || window.AppI18n.dict.english_switch[categoryKey];
+        setText('threat_category', category || e.category || unknown);
+        setText('threat_platform', e.platform || unknown);
+        setText('threat_family', e.generic ? message(lang, 'evidence_generic') : (e.family || unknown));
+        setText('threat_raw_label', e.raw_label || unknown);
+        const rules = Array.isArray(e.rules) ? e.rules : [];
+        byId('threat_rules_row').hidden = !rules.length;
+        setText('threat_rules', rules.join(' · '));
+        byId('threat_rule_description').hidden = !e.description;
+        setText('threat_rule_description', e.description || '');
+        setText('threat_score_note', message(lang, ruleMatch ? 'evidence_rule_note'
+            : scored ? (e.engine === 'ml' ? 'evidence_ml_note' : 'evidence_cloud_note') : 'evidence_unknown_note'));
+        const file = data?.file || {};
+        byId('threat_file').classList.toggle('hidden', !file.path);
+        setText('threat_file_name', file.name || '');
+        setText('threat_file_path', file.path || '');
+        setText('threat_file_hash', file.sha256 || unknown);
+        setText('threat_context', data?.summary || '');
     };
     const openFpPanel = () => {
         if (!fpTexts || !currentId) return;
@@ -80,33 +132,43 @@ document.addEventListener('DOMContentLoaded', () => {
     let latestTheme = 'system_switch';
     let nextTimer;
     let revision = 0;
+    let disposed = false;
+    let latestLanguage = 'english_switch';
     let latestIdentity = '';
 
     const setText = (id, text) => {
         const element = byId(id);
-        if (element.textContent !== text) element.textContent = text;
+        const value = String(text ?? '');
+        if (element.textContent !== value) element.textContent = value;
+    };
+    const clearActive = (failed = false) => {
+        currentId = null; latestIdentity = ''; confirmationId = null; fpTexts = null; queueKey = '';
+        disable(); hideFpPanel(); renderAiResult(null, latestLanguage); renderEvidence(null, latestLanguage);
+        repeat.checked = false;
+        byId('threat_confirmation').classList.add('hidden');
+        fpButton.hidden = true;
+        byId('threat_process').classList.add('hidden');
+        byId('threat_repeat_hint').classList.add('hidden');
+        byId('threat_event_details').open = false;
+        byId('threat_queue_list').replaceChildren();
+        setText('queue_count', '0'); setText('threat_title', message(latestLanguage, failed ? 'evidence_unavailable' : 'evidence_idle'));
+        setText('threat_status', message(latestLanguage, failed ? 'evidence_unavailable' : 'evidence_idle'));
+        setText('threat_message', ''); setText('threat_process', '');
     };
     const refresh = async () => {
+        if (disposed) return;
         clearTimeout(nextTimer);
         const requestRevision = ++revision;
         try {
             const api = window.pywebview?.api;
-            if (!api) return;
+            if (!api) { clearActive(true); return; }
             const data = await api.snapshot();
             if (requestRevision !== revision) return;
-            if (!data) {
-                // 告警已消失/被接管:立即停掉流光动效,避免残留「分析中」假象
-                disable();
-                aiButton.classList.remove('is-analyzing');
-                aiButton.hidden = true;
-                aiVerdict = '';
-                byId('ai_result')?.classList.add('hidden');
-                byId('threat_confirmation').classList.add('hidden');
-                return;
-            }
+            if (!data) { clearActive(); return; }
             const changed = currentId !== data.id;
             currentId = data.id;
             latestTheme = data.theme;
+            latestLanguage = data.language;
             if (document.body.dataset.appliedTheme !== latestTheme) {
                 window.PyasTheme.apply(latestTheme);
                 document.body.dataset.appliedTheme = latestTheme;
@@ -157,24 +219,8 @@ document.addEventListener('DOMContentLoaded', () => {
             permanent.disabled = repeat.disabled = busy || !!data.resolving || !data.can_remember;
             permanent.title = data.can_remember ? localized[2] : localized[6];
             if (!data.can_remember) repeat.checked = false;
-            // AI 建议第四按钮:分析中/失败置灰,仅就绪建议可点击;未启用则隐藏
-            const ai = data.ai;
-            const aiAnalyzing = !!ai && ai.state === 'analyzing';
-            aiButton.classList.toggle('is-analyzing', aiAnalyzing);
-            if (ai && ai.label) {
-                aiButton.hidden = false;
-                setText('threat_ai_label', ai.label);
-                aiButton.title = ai.hint || '';
-                aiVerdict = ai.state === 'ready' ? ai.verdict : '';
-                aiButton.disabled = busy || !!data.resolving || !aiVerdict;
-            } else {
-                aiButton.hidden = true;
-                aiButton.classList.remove('is-analyzing');
-                aiVerdict = '';
-                aiButton.disabled = true;
-            }
-            renderAiResult(ai, data.language);
-            // 误报入口:仅文件类告警(有内容身份)显示
+            renderEvidence(data, data.language);
+            renderAiResult(data.ai, data.language, !!data.resolving);
             const fp = data.fp;
             if (fp && fp.button) {
                 fpButton.hidden = false;
@@ -203,15 +249,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 confirmationId = null;
                 byId('threat_confirmation').classList.add('hidden');
                 hideFpPanel();
+                byId('threat_event_details').open = false;
+                document.querySelector('.threat-detail').scrollTop = 0;
                 byId('threat_message').scrollTop = 0;
                 block.focus({ preventScroll: true });
             }
             if (!initialized) { await api.ready(); initialized = true; }
         } catch (error) {
+            if (disposed || requestRevision !== revision) return;
             console.error('Threat UI refresh failed', error);
-            disable();
+            clearActive(true);
         } finally {
-            if (requestRevision === revision) nextTimer = setTimeout(refresh, 400);
+            if (!disposed && requestRevision === revision) nextTimer = setTimeout(refresh, 400);
         }
     };
     const decide = async choice => {
@@ -227,10 +276,6 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     allow.addEventListener('click', () => decide('allow'));
     block.addEventListener('click', () => decide('block'));
-    aiButton.addEventListener('click', () => {
-        // 只执行就绪的 AI 建议;失败/分析中点击无效,绝不隐式放行
-        if (aiVerdict) decide(aiVerdict);
-    });
     fpButton.addEventListener('click', openFpPanel);
     byId('threat_fp_cancel').addEventListener('click', hideFpPanel);
     byId('threat_fp_submit').addEventListener('click', async () => {
@@ -268,13 +313,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const reportFocus = (state) => {
         const api = window.pywebview?.api;
         if (!api?.set_focus) return;
-        try { api.set_focus(state); } catch (error) { /* 上报失败不影响弹窗 */ }
+        try { Promise.resolve(api.set_focus(state)).catch(() => {}); } catch (error) { /* 上报失败不影响弹窗 */ }
     };
     window.addEventListener('focus', () => reportFocus(true));
     window.addEventListener('blur', () => reportFocus(false));
     document.addEventListener('visibilitychange', () => reportFocus(!document.hidden));
     reportFocus(document.hasFocus());
 
+    window.addEventListener('pagehide', () => {
+        disposed = true; revision += 1; clearTimeout(nextTimer); clearActive();
+    });
+    window.addEventListener('pageshow', () => {
+        if (disposed) { disposed = false; refresh(); }
+    });
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => window.PyasTheme.apply(latestTheme));
     refresh();
 });

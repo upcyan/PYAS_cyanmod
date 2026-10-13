@@ -168,11 +168,12 @@ class RealtimeMixin:
                     break
 
             if not virus_found and load_switch:
-                hidden_virus_path = self.scan_process_memory(pid, h)
+                hidden_virus = self.scan_process_memory(pid, h, include_result=True)
 
-                if hidden_virus_path:
+                if hidden_virus:
+                    hidden_virus_path, hidden_detection = hidden_virus
                     if self.request_block_decision(
-                        "Process DLL Block", source=hidden_virus_path, pid=pid
+                        "Process DLL Block", source=hidden_virus_path, pid=pid, detection=hidden_detection
                     ):
                         self._terminate_process_handle(h, pid=pid)
                         self.write_log(
@@ -204,7 +205,7 @@ class RealtimeMixin:
                 log_exception("PYAS_Realtime.RealtimeMixin.handle_new_process:129")
                 pass
 
-    def scan_process_memory(self, pid, h_process):
+    def scan_process_memory(self, pid, h_process, include_result=False):
         scanned_paths = set()
         address = 0
         mbi = MEMORY_BASIC_INFORMATION()
@@ -248,8 +249,9 @@ class RealtimeMixin:
                                 ext = os.path.splitext(file_path_lower)[-1]
 
                                 if ext != ".exe" and (not ext_filter or ext in suffix):
-                                    if self.safe_scan_engine(file_path):
-                                        return file_path
+                                    result = self.safe_scan_engine(file_path)
+                                    if result:
+                                        return (file_path, result) if include_result else file_path
 
                                     self.cloud_check(file_path)
 

@@ -110,6 +110,7 @@
   <symbol id="i-spinner" viewBox="0 0 50 50"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"><animate attributeName="stroke-dasharray" values="1,150;90,150;90,150" dur="1.5s" repeatCount="indefinite"/><animate attributeName="stroke-dashoffset" values="0;-35;-124" dur="1.5s" repeatCount="indefinite"/><animateTransform attributeName="transform" type="rotate" values="0 25 25;360 25 25" dur="2s" repeatCount="indefinite"/></circle></symbol>
 </svg>
 
+    <div id="ai_window_glow" class="ai-window-glow" aria-hidden="true"></div>
     <div class="app-container">
         <header class="navigate-window pywebview-drag-region">
             <div class="navigate-title">PYAS Security Cyanmod</div>
@@ -121,9 +122,31 @@
             </aside>
             <section class="threat-detail" aria-labelledby="threat_title">
                 <div class="threat-summary">
-                    <svg class="theme-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v5m0 3h.01"/></svg>
-                    <h1 id="threat_title">Loading…</h1>
+                    <svg class="theme-svg" aria-hidden="true" focusable="false"><use href="#i-shield-pulse"/></svg>
+                    <div><h1 id="threat_title">Loading…</h1><p id="threat_context" class="threat-context"></p></div>
                 </div>
+                <section id="threat_evidence" class="detection-card" aria-labelledby="evidence_heading">
+                    <div class="detection-head">
+                        <h2 id="evidence_heading">Detection evidence</h2>
+                        <div class="detection-score"><span id="evidence_score_label">Threat score</span><strong id="threat_score">—</strong><span id="threat_score_scale" hidden>/100</span></div>
+                    </div>
+                    <div id="threat_score_track" class="score-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden><div id="threat_score_fill"></div></div>
+                    <dl class="detection-grid">
+                        <div><dt id="evidence_category_label">Category</dt><dd id="threat_category">—</dd></div>
+                        <div><dt id="evidence_engine_label">Detection engine</dt><dd id="threat_engine">—</dd></div>
+                        <div><dt id="evidence_platform_label">Platform</dt><dd id="threat_platform">—</dd></div>
+                        <div><dt id="evidence_family_label">Family</dt><dd id="threat_family">—</dd></div>
+                    </dl>
+                    <div class="detection-raw"><span id="evidence_raw_label">Raw finding</span><code id="threat_raw_label" dir="ltr">—</code></div>
+                    <div id="threat_rules_row" class="detection-rules" hidden><span id="evidence_rules_label">Matched rules</span><code id="threat_rules" dir="ltr"></code></div>
+                    <p id="threat_rule_description" class="evidence-note" hidden></p>
+                    <p id="threat_score_note" class="evidence-note"></p>
+                </section>
+                <section id="threat_file" class="threat-file hidden" aria-labelledby="evidence_file_label">
+                    <div class="file-heading"><span id="evidence_file_label">File</span><strong id="threat_file_name"></strong></div>
+                    <p id="threat_file_path" class="file-path" dir="ltr"></p>
+                </section>
+                <p id="threat_process" class="threat-process hidden"></p>
                 <div id="ai_result" class="ai-result hidden" role="status" aria-live="polite">
                     <div class="ai-result-head">
                         <svg aria-hidden="true" focusable="false"><use href="#i-sparkles"/></svg>
@@ -131,15 +154,18 @@
                         <span class="ai-result-verdict" id="ai_result_verdict"></span>
                     </div>
                     <p class="ai-result-reason" id="ai_result_reason"></p>
+                    <p id="ai_result_note" class="evidence-note"></p>
                 </div>
-                <div id="threat_message" class="threat-message" tabindex="0"></div>
-                <p id="threat_process" class="threat-process hidden"></p>
+                <details id="threat_event_details" class="event-details">
+                    <summary id="evidence_event_label">Event and file identity</summary>
+                    <div class="file-hash"><span id="evidence_hash_label">SHA-256</span><code id="threat_file_hash" dir="ltr">—</code></div>
+                    <div id="threat_message" class="threat-message" tabindex="0"></div>
+                </details>
                 <p id="threat_repeat_hint" class="threat-repeat-hint hidden" role="note"></p>
-                <p id="threat_status" class="threat-status" role="status"></p>
-                <p id="threat_ai_reason" class="ai-reason hidden" role="status"></p>
             </section>
         </main>
         <footer class="threat-footer">
+            <p id="threat_status" class="threat-status" role="status"></p>
             <div id="threat_confirmation" class="hidden" role="group" aria-labelledby="threat_confirmation_text">
                 <p id="threat_confirmation_text"></p>
                 <button id="threat_confirm" class="action-btn modern-btn" type="button">Confirm</button>
@@ -169,7 +195,6 @@
             </div>
             <div class="threat-actions">
                 <button id="threat_permanent" class="action-btn modern-btn" type="button" disabled>Always allow</button>
-                <button id="threat_ai" class="action-btn modern-btn ai-btn" type="button" hidden><span class="btn-label" id="threat_ai_label"></span></button>
                 <button id="threat_allow" class="action-btn modern-btn" type="button" disabled>Allow this time</button>
                 <button id="threat_block" class="action-btn modern-btn primary-btn" type="button" disabled>Block</button>
             </div>

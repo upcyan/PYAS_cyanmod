@@ -2,6 +2,7 @@ from PYAS_Diagnostics import log_exception
 import os
 import threading
 import yara
+from PYAS_Detection import detection_result
 
 
 class RuleScanner:
@@ -64,6 +65,7 @@ class RuleScanner:
             pass
 
     def yara_scan(self, file_path):
+        self._meta_local.description = ""
         try:
             if not self.rules:
                 return False, False
@@ -79,10 +81,13 @@ class RuleScanner:
                     platform = rule_name.split("_")[1]
                     family = rule_name.split("_")[2]
 
-                    return f"{label}:{platform}/{family}.{len(matches)}!yr", 100
+                    finding = f"{label}:{platform}/{family}.{len(matches)}!yr"
+                    return detection_result(finding, "yr",
+                        description=self._meta_local.description, rules=tuple(map(str, matches))), 100
                 except Exception:
                     log_exception("PYAS_Rules.RuleScanner.yara_scan:70")
-                    return rule_name, 100
+                    return detection_result(rule_name, "yr",
+                        description=self._meta_local.description, rules=tuple(map(str, matches))), 100
 
             return False, False
         except Exception:
@@ -90,6 +95,7 @@ class RuleScanner:
             return False, False
 
     def yara_mem_scan(self, pid):
+        self._meta_local.description = ""
         try:
             if not self.rules:
                 return False, False
@@ -105,10 +111,13 @@ class RuleScanner:
                     platform = rule_name.split("_")[1]
                     family = rule_name.split("_")[2]
 
-                    return f"{label}:{platform}/{family}.{len(matches)}!ym", 100
+                    finding = f"{label}:{platform}/{family}.{len(matches)}!ym"
+                    return detection_result(finding, "ym",
+                        description=self._meta_local.description, rules=tuple(map(str, matches))), 100
                 except Exception:
                     log_exception("PYAS_Rules.RuleScanner.yara_mem_scan:91")
-                    return rule_name, 100
+                    return detection_result(rule_name, "ym",
+                        description=self._meta_local.description, rules=tuple(map(str, matches))), 100
 
             return False, False
         except Exception:
