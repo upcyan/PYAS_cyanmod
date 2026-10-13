@@ -66,7 +66,7 @@
   margin-right: auto;
   background-color: var(--color-success-btn);
   border-color: var(--color-success-btn);
-  color: var(--text-on-accent);
+  color: #fff;
   font-weight: 600;
 }
 #threat_permanent:hover:not(:disabled) { background-color: var(--color-success-btn-hover); border-color: var(--color-success-btn-hover); }
@@ -181,10 +181,8 @@
 .threat-status { padding: 9px 0; border-top: 1px solid var(--border-color); font-weight: 500; }
 .threat-meta { margin-bottom: 10px; }
 .threat-actions { align-items: center; }
-/* Persistent allow stays a secondary, confirmed action; primary controls are immediate. */
-#threat_permanent { margin-right: 0; margin-inline-end: auto; background: transparent; border-color: var(--border-color); color: var(--text-secondary); font-weight: 500; font-size: var(--text-sm); }
-#threat_permanent:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--accent-color); color: var(--text-primary); }
-#threat_permanent:active:not(:disabled) { background: var(--bg-hover); border-color: var(--accent-color); }
+/* Layout only: preserve the green fill and hover/active colours defined above. */
+#threat_permanent { margin-right: 0; margin-inline-end: auto; font-size: var(--text-sm); }
 .threat-window [hidden] { display: none !important; }
 
 /* The mask combines four continuous inward alpha fades. No opaque inner cutout. */

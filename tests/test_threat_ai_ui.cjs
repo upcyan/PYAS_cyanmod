@@ -78,6 +78,49 @@ const assert = require('node:assert/strict');
         const patch = async data => page.evaluate(data => Object.assign(window.fixture.data, data), data);
         const waitStopped = () => page.waitForFunction(() => !document.getElementById('ai_window_glow').classList.contains('is-analyzing'));
 
+        const verifyPermanentStyle = async () => {
+            const button = page.locator('#threat_permanent');
+            const before = await page.evaluate(() => window.fixture.decisions.length);
+            const expected = await page.evaluate(() => {
+                const probe = document.createElement('span');
+                document.body.appendChild(probe);
+                const colors = ['--color-success-btn', '--color-success-btn-hover', '--color-success-btn-active'].map(token => {
+                    probe.style.backgroundColor = 'var(' + token + ')';
+                    return getComputedStyle(probe).backgroundColor;
+                });
+                probe.remove();
+                return colors;
+            });
+            const assertColor = async color => {
+                await page.waitForFunction(color => {
+                    const style = getComputedStyle(document.getElementById('threat_permanent'));
+                    return style.backgroundColor === color && style.borderTopColor === color;
+                }, color);
+                const state = await button.evaluate(el => {
+                    const style = getComputedStyle(el);
+                    return { color: style.color, border: style.borderTopColor, weight: style.fontWeight };
+                });
+                assert.equal(state.color, 'rgb(255, 255, 255)');
+                assert.equal(state.border, color);
+                assert.equal(state.weight, '600');
+            };
+            await page.mouse.move(450, 20);
+            await assertColor(expected[0]);
+            await button.hover();
+            await assertColor(expected[1]);
+            await page.mouse.down();
+            try { await assertColor(expected[2]); } finally { await page.mouse.up(); }
+            await page.locator('#threat_cancel').waitFor({ state: 'visible' });
+            assert.equal(await page.evaluate(() => window.fixture.decisions.length), before, 'green allow button must still require confirmation');
+            await page.locator('#threat_cancel').click();
+            await patch({ can_remember: false });
+            await page.waitForFunction(() => document.getElementById('threat_permanent').disabled);
+            await assertColor(expected[0]);
+            await patch({ can_remember: true });
+            await page.waitForFunction(() => !document.getElementById('threat_permanent').disabled);
+            await assertColor(expected[0]);
+        };
+        await check('light theme permanent allow retains green, white text and confirmation', verifyPermanentStyle);
         await check('AI action button removed; model facts are visible', async () => {
             assert.equal(await page.locator('#threat_ai').count(), 0);
             assert.equal(await page.locator('#threat_engine').textContent(), '本地 PE 机器学习');
@@ -180,6 +223,7 @@ const assert = require('node:assert/strict');
                 && getComputedStyle(document.querySelector('.navigate-window')).backgroundColor === 'rgb(28, 28, 30)'
                 && Number(getComputedStyle(document.getElementById('ai_window_glow')).opacity) >= .65
                 && document.getElementById('ai_window_glow').classList.contains('is-analyzing'));
+            await verifyPermanentStyle();
             if (output) await page.screenshot({ path: path.join(output, 'threat-evidence-dark.png') });
         });
         await check('resolving request cannot keep analysis glow alive', async () => {
