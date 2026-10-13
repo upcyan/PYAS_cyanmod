@@ -178,7 +178,7 @@ const assert = require('node:assert/strict');
         const classic = main.locator('#classic_menu_options');
         const clearDecisions = main.locator('#clear_alert_rules');
         assert.equal(await classic.isVisible(), false);
-        assert.equal(await main.locator('.settings-group').count(), 2);
+        assert.equal(await main.locator('.settings-group').count(), 4);
         assert.equal(await main.evaluate(() => document.querySelector('[data-config-key="context_switch"]').closest('.settings-group') === document.querySelector('[data-config-key="interactive_switch"]').closest('.settings-group')), false, 'each parent must have a separate group');
         assert.equal(await automatic.isVisible(), false);
         assert.equal(await clearDecisions.isVisible(), false);

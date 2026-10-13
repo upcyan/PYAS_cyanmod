@@ -16,3 +16,10 @@ _release_notes.md
 _patch*.py
 _*.py
 MenuPackage/
+
+# 本地工作数据(含临时产物,体积大)与安装包归档目录
+.workbuddy/
+Release/
+
+# 构建渠道生成文件(build.py 每次打包前写入)
+PYAS_Build.py

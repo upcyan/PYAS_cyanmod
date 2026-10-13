@@ -488,18 +488,23 @@ class RealtimeMixin:
                         self.lock_file(file_path, True, quiet=True)
 
                     if self.request_block_decision("File Block", source=file_path, detection=result):
-                        if (
-                            self.manage_named_list(
+                        quarantined = 0
+                        try:
+                            quarantined = self.manage_named_list(
                                 "quarantine", [file_path], action="add", lock_func=self.lock_file
                             )
-                            > 0
-                        ):
-                            self.write_log(
-                                "BLOCK",
-                                "File Block",
-                                source=file_path,
-                                file_hash=self.calc_file_hash(file_path),
-                            )
+                        except Exception:
+                            log_exception("PYAS_Realtime.handle_new_file.quarantine")
+
+                        # 拦截必须留痕:隔离区条目已存在或锁定失败时 manage_named_list 返回 0,
+                        # 若把写日志绑在它的返回值上,用户会看到弹窗却查不到任何记录。
+                        self.write_log(
+                            "BLOCK",
+                            "File Block",
+                            detail=None if quarantined >= 1 else "隔离区未新增(条目已存在或锁定失败)",
+                            source=file_path,
+                            file_hash=self.calc_file_hash(file_path),
+                        )
                     else:
                         if interactive_mode:
                             self.lock_file(file_path, False, quiet=True)

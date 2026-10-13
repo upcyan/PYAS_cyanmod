@@ -1,4 +1,5 @@
 from PYAS_Diagnostics import log_exception
+from PYAS_AI import mask_ai_key
 from PYAS_Version import UPSTREAM_TRACKED
 import os
 import copy
@@ -232,6 +233,19 @@ class ConfigMixin:
             cfg = self.pyas_config.copy()
             cfg["autostart_mode"] = self.autostart_mode
             cfg["upstream_tracked"] = UPSTREAM_TRACKED
+
+            # API Key 不出库:回传掩码,密文字段一并剔除
+            from PYAS_AI import unprotect_ai_key
+            encoded = str(cfg.get("ai_api_key_enc", "")).strip()
+            cfg.pop("ai_api_key_enc", None)
+
+            if encoded:
+                try:
+                    cfg["ai_api_key"] = mask_ai_key(unprotect_ai_key(encoded))
+                except Exception:
+                    cfg["ai_api_key"] = ""
+            else:
+                cfg["ai_api_key"] = mask_ai_key(str(cfg.get("ai_api_key", "")))
 
             rules = []
 

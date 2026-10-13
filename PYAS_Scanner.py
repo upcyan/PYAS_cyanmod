@@ -150,6 +150,31 @@ class ScannerMixin(CloudQueueMixin):
 
         return False
 
+    # 1920=ERROR_FILE_INVALID(0字节/重解析点等本质不可读,如 WindowsApps 应用执行别名)
+    # 2=ERROR_FILE_NOT_FOUND:这两类重试永远不会成功,直接放弃
+    PERMANENT_SCAN_ERRORS = frozenset({2, 1920})
+    DEFER_LOG_INTERVAL = 30.0
+    MAX_SCAN_RETRIES = 3
+
+    def _scan_retry_state(self):
+        if not hasattr(self, "_scan_retry_counts"):
+            self._scan_retry_counts = {}
+            self._defer_log_at = {}
+
+        return self._scan_retry_counts, self._defer_log_at
+
+    def _defer_log_throttled(self, norm_path, error):
+        """同一文件的 Scan Deferred 日志 30 秒限频,防止任何原因的刷屏。"""
+        _, log_at = self._scan_retry_state()
+        now = time.monotonic()
+        last = log_at.get(norm_path, -1e9)
+
+        if now - last < self.DEFER_LOG_INTERVAL:
+            return
+
+        log_at[norm_path] = now
+        self.write_log("WARN", "Scan Deferred", source=norm_path, code=error, success=False)
+
     def safe_scan_engine(self, file_path):
         norm_path = self.norm_path(file_path)
 
@@ -159,9 +184,20 @@ class ScannerMixin(CloudQueueMixin):
         gate, error = self._acquire_file_scan_gate(norm_path)
 
         if not gate:
-            self.write_log("WARN", "Scan Deferred", source=norm_path, code=error, success=False)
+            counts, _ = self._scan_retry_state()
+            self._defer_log_throttled(norm_path, error)
+
+            # 永久错误或重试次数用尽:放弃排 verify(切断 0.5s 无限自旋)
+            if error in self.PERMANENT_SCAN_ERRORS or counts.get(norm_path, 0) >= self.MAX_SCAN_RETRIES:
+                counts.pop(norm_path, None)
+                return self.scan_engine(norm_path)
+
+            counts[norm_path] = counts.get(norm_path, 0) + 1
             self._schedule_file_task("verify", norm_path, self._retry_verified_scan, 0.5)
             return self.scan_engine(norm_path)
+
+        # 成功拿到 gate:清空该文件的历史重试计数
+        self._scan_retry_state()[0].pop(norm_path, None)
 
         try:
             file_hash = self.calc_file_hash(norm_path)
@@ -233,9 +269,14 @@ class ScannerMixin(CloudQueueMixin):
         if result:
             if self.request_block_decision("Deferred Scan Block", source=file_path, detection=result,
                 finding_description=self.heuristic.last_description()):
-                self.manage_named_list(
-                    "quarantine", [file_path], action="add", lock_func=self.lock_file
-                )
+                try:
+                    self.manage_named_list(
+                        "quarantine", [file_path], action="add", lock_func=self.lock_file
+                    )
+                except Exception:
+                    log_exception("PYAS_Scanner._retry_verified_scan.quarantine")
+
+                # 与 File Block 同规:隔离区写入失败也必须留痕
                 self.write_log(
                     "BLOCK",
                     "Deferred Scan Block",

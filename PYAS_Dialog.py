@@ -9,7 +9,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from uuid import uuid4
 from urllib.parse import urljoin
-from PYAS_AI import request_ai_verdict
+from PYAS_AI import (request_ai_verdict_cached, make_verdict_cache_key, is_verdict_cache_hit,
+                     clamp_ai_delay_seconds, AI_DELAY_DEFAULT)
 from PYAS_Decisions import AlertPolicyMixin
 
 
@@ -184,6 +185,32 @@ DIALOG_TEXTS = {
 }
 
 DIALOG_TEXTS.update({
+    "repeat_trigger_hint": {
+        "simplified_switch": "该告警在 1 小时内已重复出现 {0} 次。若确认为误报，可用下方「误报抑制」排除该文件内容。",
+        "traditional_switch": "該告警在 1 小時內已重複出現 {0} 次。若確認為誤報，可用下方「誤報抑制」排除該檔案內容。",
+        "english_switch": "This alert has appeared {0} times within the last hour. If you believe it is a false positive, use the report option below to dismiss this file content.",
+        "japanese_switch": "このアラートは過去 1 時間に {0} 回発生しました。誤検知と思われる場合は、下の「誤検知を報告」でこのファイル内容を解除できます。",
+        "korean_switch": "이 알림은 최근 1시간 내 {0}회 발생했습니다. 오탐이라 판단되면 아래 '오탐 보고'로 이 파일 내용을 해제할 수 있습니다.",
+        "french_switch": "Cette alerte est apparue {0} fois au cours de la dernière heure. Si vous pensez qu'il s'agit d'un faux positif, utilisez l'option de signalement ci-dessous pour lever ce contenu de fichier.",
+        "spanish_switch": "Esta alerta ha aparecido {0} veces en la última hora. Si cree que es un falso positivo, use la opción de informe a continuación para anular este contenido del archivo.",
+        "hindi_switch": "यह अलर्ट पिछले घंटे में {0} बार आया है। यदि आपको लगता है कि यह गलत सकारात्मक है, तो नीचे दिए गए रिपोर्ट विकल्प से इस फ़ाइल सामग्री को हटाएँ।",
+        "arabic_switch": "ظهرت هذه التنبيه {0} مرة خلال الساعة الماضية. إذا كنت تعتقد أنها إنذار خاطئ، استخدم خيار الإبلاغ أدناه لإزالة محتوى هذا الملف.",
+        "russian_switch": "Это оповещение появилось {0} раз за последний час. Если считаете его ложным срабатыванием, используйте опцию сообщения ниже, чтобы снять это содержимое файла.",
+        "slovenian_switch": "To opozorilo se je v zadnji uri pojavilo {0}-krat. Če menite, da gre za lažni alarm, uporabite spodnjo možnost prijave in odstranite vsebino te datoteke.",
+    },
+    "countdown_ai_execute": {
+        "simplified_switch": "{0} 秒后自动执行 AI 建议",
+        "traditional_switch": "{0} 秒後自動執行 AI 建議",
+        "english_switch": "AI suggestion executes in {0}s",
+        "japanese_switch": "{0} 秒後に AI の提案を実行",
+        "korean_switch": "{0}초 후 AI 권한 자동 실행",
+        "french_switch": "Exécution de la suggestion IA dans {0} s",
+        "spanish_switch": "La sugerencia de IA se ejecuta en {0} s",
+        "hindi_switch": "{0} सेकंड में AI सुझाव स्वतः निष्पादित",
+        "arabic_switch": "تنفيذ اقتراح AI بعد {0} ثانية",
+        "russian_switch": "Рекомендация ИИ выполнится через {0} с",
+        "slovenian_switch": "AI predlog se izvede čez {0} s",
+    },
     "waiting_decision": {
         "simplified_switch": "等待您选择；关闭窗口仅收起，不执行操作。",
         "traditional_switch": "等待您選擇；關閉視窗僅收起，不執行操作。",
@@ -225,6 +252,27 @@ DIALOG_TEXTS.update({
         "arabic_switch": "جارٍ تحليل الذكاء الاصطناعي…", "russian_switch": "ИИ-анализ…",
         "slovenian_switch": "Analiza AI poteka …",
     },
+    "ai_delay_pending": {
+        "simplified_switch": "{0} 秒后启动 AI 决策", "traditional_switch": "{0} 秒後啟動 AI 決策",
+        "english_switch": "AI decision in {0}s", "japanese_switch": "{0} 秒後に AI 判断を開始",
+        "korean_switch": "{0}초 후 AI 판단 시작", "french_switch": "Décision IA dans {0} s",
+        "spanish_switch": "Decisión IA en {0} s", "hindi_switch": "{0} सेकंड में AI निर्णय",
+        "arabic_switch": "قرار الذكاء الاصطناعي خلال {0} ث", "russian_switch": "Решение ИИ через {0} с",
+        "slovenian_switch": "Odločitev AI čez {0} s",
+    },
+    "ai_delay_hint": {
+        "simplified_switch": "延迟启动中：现在自行决定即可完全跳过 AI 分析，不消耗 token。",
+        "traditional_switch": "延遲啟動中：現在自行決定即可完全跳過 AI 分析，不消耗 token。",
+        "english_switch": "Delayed start: decide now to skip the AI analysis entirely and spend no tokens.",
+        "japanese_switch": "遅延起動中：今すぐ決定すればAI分析を完全に省略でき、トークンを消費しません。",
+        "korean_switch": "지연 시작 중: 지금 직접 결정하면 AI 분석을 완전히 건너뛰어 토큰을 소모하지 않습니다.",
+        "french_switch": "Démarrage différé : décidez maintenant pour éviter toute analyse IA et ne consommer aucun jeton.",
+        "spanish_switch": "Inicio diferido: decida ahora para omitir el análisis de IA y no consumir tokens.",
+        "hindi_switch": "विलंबित प्रारंभ: अभी निर्णय लें तो AI विश्लेषण पूरी तरह छूट जाएगा और कोई टोकन खर्च नहीं होगा।",
+        "arabic_switch": "بدء مؤجل: قرر الآن لتخطي تحليل الذكاء الاصطناعي بالكامل دون استهلاك أي رموز.",
+        "russian_switch": "Отложенный запуск: решите сейчас — анализ ИИ не запустится, токены не потратятся.",
+        "slovenian_switch": "Zakasnjen zagon: odločite se zdaj in analiza AI bo v celoti izpuščena brez porabe žetonov.",
+    },
     "ai_unavailable": {
         "simplified_switch": "AI 建议不可用", "traditional_switch": "AI 建議不可用",
         "english_switch": "AI suggestion unavailable", "japanese_switch": "AIの提案は利用できません",
@@ -251,12 +299,17 @@ DIALOG_TEXTS.update({
 # 误报上报表单:抑制范围仅限内容锚定,永远不提供目录/进程名选项
 DIALOG_TEXTS.update({
     "fp_button": {
-        "simplified_switch": "报告误报", "traditional_switch": "報告誤報",
-        "english_switch": "Report false positive", "japanese_switch": "誤検知を報告",
-        "korean_switch": "오탐 보고", "french_switch": "Signaler un faux positif",
-        "spanish_switch": "Informar de falso positivo", "hindi_switch": "गलत सकारात्मक रिपोर्ट करें",
-        "arabic_switch": "الإبلاغ عن إنذار خاطئ", "russian_switch": "Сообщить о ложном срабатывании",
-        "slovenian_switch": "Prijavi lažni alarm",
+        "simplified_switch": "如果您认为此拦截为误报，点此解除",
+        "traditional_switch": "如果您認為此攔截為誤報，點此解除",
+        "english_switch": "If you think this block is a false positive, click to dismiss",
+        "japanese_switch": "このブロックが誤検知だと思えば、クリックして解除",
+        "korean_switch": "이 차단이 오탐이라고 생각되면 클릭하여 해제",
+        "french_switch": "Si vous pensez qu'il s'agit d'un faux positif, cliquez pour lever le blocage",
+        "spanish_switch": "Si cree que este bloqueo es un falso positivo, haga clic para anularlo",
+        "hindi_switch": "यह ब्लॉक गलत सकारात्मक लगे तो हटाने के लिए क्लिक करें",
+        "arabic_switch": "إذا كنت تعتقد أن هذا الحظر إنذار خاطئ، انقر لإزالته",
+        "russian_switch": "Если считаете блокировку ложным срабатыванием, нажмите, чтобы снять",
+        "slovenian_switch": "Če menite, da je ta blokada lažni alarm, kliknite za odpravo",
     },
     "fp_scope_this": {
         "simplified_switch": "仅此检测结果", "traditional_switch": "僅此檢測結果",
@@ -438,19 +491,151 @@ def loc_threat_description(lang, action):
 
 
 def ai_deadline_choice(request):
-    """倒计时到点时的裁决:AI 就绪执行其建议(含放行),否则一律拦截。
+    """倒计时到点时的裁决:AI 有结论就执行其建议(含放行),否则返回 None。
 
-    LLM 失败或未就绪绝不默认放行——放行只能来自就绪的 AI 建议或用户手动点击。
+    返回 None 表示 AI 未就绪/失败/尚无结论——此时不替用户做决定,而是撤销倒计时、
+    把决定权交回用户自主决策(避免把「AI 不可用」当成「自动拦截」的理由)。
+    放行只能来自就绪的 AI 建议或用户手动点击。
     """
     state = request.ai if isinstance(request.ai, dict) else {}
 
     if state.get("state") == "ready" and state.get("verdict") in ("allow", "block"):
         return state["verdict"]
 
-    return "block"
+    return None
 
 
 _queue_init_lock = threading.Lock()
+
+# ---- 重复触发计数(引导用户使用误报抑制) ----
+_TRIGGER_COUNTS = {}          # rule_key -> [次数, 窗口起点]
+_TRIGGER_WINDOW = 3600        # 1 小时统计窗口
+_TRIGGER_HINT_AT = 2          # 第 2 次起提示
+_TRIGGER_MAX_KEYS = 256
+
+
+def _record_trigger(rule_key):
+    """记录一次真实弹窗的告警触发;返回窗口内的累计次数。无身份返回 0。"""
+    if not rule_key:
+        return 0
+
+    now = time.time()
+
+    with _queue_init_lock:
+        entry = _TRIGGER_COUNTS.get(rule_key)
+
+        if entry is None:
+            if len(_TRIGGER_COUNTS) >= _TRIGGER_MAX_KEYS:
+                expired = [k for k, (n, t) in _TRIGGER_COUNTS.items() if now - t > _TRIGGER_WINDOW]
+                for k in expired:
+                    _TRIGGER_COUNTS.pop(k, None)
+
+                while len(_TRIGGER_COUNTS) >= _TRIGGER_MAX_KEYS:
+                    _TRIGGER_COUNTS.pop(next(iter(_TRIGGER_COUNTS)), None)
+
+            _TRIGGER_COUNTS[rule_key] = [1, now]
+            return 1
+
+        count, started = entry
+
+        if now - started > _TRIGGER_WINDOW:
+            _TRIGGER_COUNTS[rule_key] = [1, now]
+            return 1
+
+        count += 1
+        entry[0] = count
+        return count
+
+
+# ---- 文件占用进程反查(文件防护告警展示操作发起方) ----
+_RM_MAX_USERS = 16          # 单文件最多关注的占用进程数
+_RM_QUERY_TIMEOUT = 2.0     # RmGetList 看门狗:无响应进程不拖慢扫描线程
+
+
+class _RM_UNIQUE_PROCESS(ctypes.Structure):
+    _fields_ = [
+        ("dwProcessId", ctypes.wintypes.DWORD),
+        ("ProcessStartTime", ctypes.wintypes.FILETIME),
+    ]
+
+
+class _RM_PROCESS_INFO(ctypes.Structure):
+    _fields_ = [
+        ("Process", _RM_UNIQUE_PROCESS),
+        ("strAppName", ctypes.wintypes.WCHAR * 256),
+        ("strServiceShortName", ctypes.wintypes.WCHAR * 64),
+        ("ApplicationType", ctypes.c_int),
+        ("AppStatus", ctypes.c_int),
+        ("TSSessionId", ctypes.wintypes.DWORD),
+        ("bRestartable", ctypes.wintypes.BOOL),
+    ]
+
+
+def _query_file_users(path, timeout=_RM_QUERY_TIMEOUT):
+    """Restart Manager 反查当前正占用 path 的进程,返回 [(pid, app_name)](已排除自身)。
+
+    文件监听(ReadDirectoryChangesW)不携带发起方 PID;写后即关的文件此时已无机读占用,
+    返回空属正常降级(与没有该功能时一致),绝不影响拦截流程本身。
+    """
+    if not path:
+        return []
+
+    found = []
+
+    def worker():
+        try:
+            rm = ctypes.WinDLL("rstrtmgr", use_last_error=True)
+            session = ctypes.wintypes.DWORD()
+            key = ctypes.create_unicode_buffer(36)
+
+            if rm.RmStartSession(ctypes.byref(session), 0, key) != 0:
+                return
+
+            try:
+                files = (ctypes.c_wchar_p * 1)(path)
+
+                if rm.RmRegisterResources(session, 1, files, 0, None, 0, None) != 0:
+                    return
+
+                needed = ctypes.wintypes.UINT(0)
+                actual = ctypes.wintypes.UINT(0)
+                reasons = ctypes.wintypes.DWORD(0)
+
+                # 先以空缓冲查询数量(ERROR_MORE_DATA=234)
+                if rm.RmGetList(session, ctypes.byref(needed), ctypes.byref(actual),
+                    None, ctypes.byref(reasons)) not in (0, 234):
+                    return
+
+                count = min(needed.value, _RM_MAX_USERS)
+
+                if count <= 0:
+                    return
+
+                buffer = (_RM_PROCESS_INFO * count)()
+                actual = ctypes.wintypes.UINT(count)
+
+                if rm.RmGetList(session, ctypes.byref(needed), ctypes.byref(actual),
+                    buffer, ctypes.byref(reasons)) != 0:
+                    return
+
+                own_pid = os.getpid()
+
+                for index in range(actual.value):
+                    pid = buffer[index].Process.dwProcessId
+
+                    if pid and pid != own_pid:
+                        found.append((pid, buffer[index].strAppName))
+
+            finally:
+                rm.RmEndSession(session)
+
+        except Exception:
+            pass
+
+    watcher = threading.Thread(target=worker, daemon=True, name="PYAS.RmFileUsers")
+    watcher.start()
+    watcher.join(timeout)
+    return found
 
 
 @dataclass
@@ -466,15 +651,28 @@ class _DecisionRequest:
     category: str = ''
     rule: dict | None = None
     dedup_key: tuple | None = None
+    # 倒计时已到点且无法自动裁决时置位:禁止 snapshot 重新起表,交回用户自主决策
+    timeout_consumed: bool = False
+    # 裁决界面自身故障时用于回执通知(让用户知道"发生了什么被按什么处理")
+    action: str = ''
+    source: str | None = None
+    target: str | None = None
     followers: list = field(default_factory=list)
     resolving: bool = False
     ai: dict | None = None
+    # 用户已自主决策时置位:停止待发/在途的 AI 分析,避免浪费 token
+    ai_cancel: threading.Event = field(default_factory=threading.Event)
+    ai_abort: object = None
+    process_name: str = ''
+    process_path: str = ''
+    repeat_count: int = 0
 
 
 class _ThreatPromptQueue:
     """One UI worker per application; FIFO decisions never expire while queued."""
 
-    def __init__(self, session_factory=None, capacity=256, policy_lookup=None, ai_starter=None):
+    def __init__(self, session_factory=None, capacity=256, policy_lookup=None, ai_starter=None,
+                 failure_notify=None, popup_hold=None):
         self.condition = threading.Condition()
         self.pending = deque()
         self.active = None
@@ -485,6 +683,10 @@ class _ThreatPromptQueue:
         self.session_factory = session_factory or _ThreatDialogSession
         self.policy_lookup = policy_lookup
         self.ai_starter = ai_starter
+        self.popup_hold = popup_hold
+        # 裁决界面自身故障时的回执通道:队列会 fail-closed 判为拦截,
+        # 若不通知用户,正常文件就被"看不见地"隔离了(静默拦截)
+        self.failure_notify = failure_notify
 
     def set_ai_state(self, request, state):
         """AI 分析线程回写建议状态;用户已裁决的事件不再更新。"""
@@ -522,6 +724,19 @@ class _ThreatPromptQueue:
         with self.condition:
             return sum(1 + len(item.followers) for item in [self.active, *self.pending] if item)
 
+    def describe(self):
+        """队列分组摘要:按类别聚合(标题+数量+是否处理中),决策窗快照与主界面列表共用。"""
+        with self.condition:
+            groups = {}
+            for item in [self.active, *self.pending]:
+                if item is None:
+                    continue
+                category = item.category or item.title
+                group = groups.setdefault(category, {'id': category, 'title': item.title, 'count': 0, 'active': False})
+                group['count'] += 1 + len(item.followers)
+                group['active'] |= item is self.active
+            return list(groups.values())
+
     def take_next(self):
         with self.condition:
             if self.closed or not self.pending:
@@ -535,14 +750,42 @@ class _ThreatPromptQueue:
                     return self.active
             return None
 
+    def cancel_ai(self, request):
+        """用户已自主决策(或队列关闭)时,立刻叫停该请求待发/在途的 AI 分析。
+
+        延迟窗口内的请求尚未发起 → 只置位取消标记,连请求都不会发出(零消耗);
+        分析进行中的请求 → 置位并 best-effort 关闭在途连接,响应回来后作废不入缓存。
+        """
+        if request is None:
+            return
+
+        request.ai_cancel.set()
+        abort = request.ai_abort
+
+        if abort:
+            try:
+                abort()
+            except Exception:
+                log_exception("PYAS_Dialog._ThreatPromptQueue.cancel_ai")
+
     def complete(self, choice):
+        completed = []
+
         with self.condition:
             if self.active is not None:
-                for item in [self.active, *self.active.followers]:
+                completed = [self.active, *self.active.followers]
+
+                for item in completed:
                     item.choice = choice
                     item.done.set()
+
                 self.active = None
+
             self.condition.notify_all()
+
+        # 锁外叫停 AI:关闭在途连接可能阻塞,不能占着队列锁
+        for item in completed:
+            self.cancel_ai(item)
 
     def _run(self):
         while True:
@@ -572,6 +815,14 @@ class _ThreatPromptQueue:
                 session.run()
             except Exception:
                 log_exception("PYAS_Dialog._ThreatPromptQueue._run")
+                # 弹窗创建/运行失败时下面 finally 会 fail-closed 判为拦截:
+                # 必须让用户知道"有东西被拦了、原因是裁决界面不可用",
+                # 否则就是看不见的静默拦截。
+                try:
+                    if self.failure_notify:
+                        self.failure_notify(request.action, request.source, request.target, None)
+                except Exception:
+                    log_exception("PYAS_Dialog._ThreatPromptQueue._run.notify")
             finally:
                 # Window creation failures still resolve the current request.
                 self.complete("block")
@@ -585,21 +836,37 @@ class _ThreatPromptQueue:
         return False
 
     def close(self):
+        drained = []
+
         with self.condition:
             self.closed = True
+
             for request in self.pending:
                 request.done.set()
+                drained.append(request)
+
                 for follower in request.followers:
                     follower.done.set()
+
             self.pending.clear()
+
             if self.active:
                 self.active.done.set()
+                drained.append(self.active)
+
                 for follower in self.active.followers:
                     follower.done.set()
+
                 self.active = None
+
             if self.session and self.session.hwnd:
                 self.session.post_message(WM_CANCEL_PENDING)
+
             self.condition.notify_all()
+
+        # 队列关闭同样叫停 AI:不留下无人消费的在途请求
+        for request in drained:
+            self.cancel_ai(request)
 
 
 def ai_snapshot_view(request):
@@ -615,6 +882,15 @@ def ai_snapshot_view(request):
         verdict = state.get("verdict")
         label = loc_dialog_text(lang, "ai_suggest_block" if verdict == "block" else "ai_suggest_allow")
         return {"state": "ready", "verdict": verdict, "label": label, "hint": state.get("reason", "")}
+
+    if state.get("state") == "delay":
+        # 延迟窗口:展示剩余秒数(弹窗每 400ms 取一次快照,倒计时自然刷新),
+        # 用户先自主决策即可完全跳过分析
+        deadline = state.get("deadline")
+        remaining = max(1, int(math.ceil(deadline - time.monotonic()))) if deadline else 0
+        label = loc_dialog_text(lang, "ai_delay_pending").replace("{0}", str(remaining))
+        return {"state": "delay", "verdict": "", "label": label,
+                "hint": loc_dialog_text(lang, "ai_delay_hint")}
 
     if state.get("state") == "analyzing":
         label = loc_dialog_text(lang, "ai_analyzing")
@@ -659,35 +935,48 @@ class _WebDecisionAPI:
         self._session.ready.set()
         return True
 
+    def set_focus(self, focused):
+        """页面 focus/blur 上报:AI 结果只在用户没盯着弹窗时才另发通知。"""
+        self._session.focused = bool(focused)
+        return True
+
     def snapshot(self):
         session = self._session
         with session.queue.condition:
             request = session.queue.active
             if request is None:
                 return None
-            if session.ready.is_set() and request.timeout and request.deadline is None:
+            if (session.ready.is_set() and request.timeout and request.deadline is None
+                    and not request.timeout_consumed):
                 request.deadline = time.monotonic() + request.timeout
             remaining = max(0, math.ceil(request.deadline - time.monotonic())) if request.deadline else None
-            events = [request, *session.queue.pending]
-            groups = {}
-            for item in events:
-                category = item.category or item.title
-                group = groups.setdefault(category, {'id': category, 'title': item.title, 'count': 0, 'active': False})
-                group['count'] += 1 + len(item.followers)
-                group['active'] |= item is request
+            events = session.queue.describe()
             result = {
                 "id": request.id, "title": request.title, "message": request.message,
                 "remaining": remaining,
-                "events": list(groups.values()), "count": session.queue.count,
+                "events": events, "count": session.queue.count,
                 "can_remember": request.rule is not None,
                 "identity_summary": (f"{request.rule['source']}\nSHA-256: {request.rule['sha256']}\n{request.rule['target']}" if request.rule else ''),
+                "process": {"name": request.process_name, "path": request.process_path},
+                "repeat_hint": (
+                    loc_dialog_text(request.lang, "repeat_trigger_hint").replace("{0}", str(request.repeat_count))
+                    if request.repeat_count >= 2 else ""
+                ),
+                "process_label": loc_dialog_text(request.lang, 'label_pid'),
                 "duplicates": 1 + len(request.followers),
                 "resolving": request.resolving,
                 "decision_error": getattr(session, 'decision_error', False),
                 "waiting": loc_dialog_text(request.lang, "waiting_decision"),
                 "allow": loc_dialog_text(request.lang, "btn_allow"),
                 "block": loc_dialog_text(request.lang, "btn_block"),
-                "countdown": loc_dialog_text(request.lang, "countdown_auto_block").replace("{0}", str(remaining)),
+                "countdown": (
+                    loc_dialog_text(
+                        request.lang,
+                        "countdown_ai_execute" if session.owner._ai_auto_execute_enabled()
+                        else "countdown_auto_block",
+                    ).replace("{0}", str(remaining))
+                    if remaining is not None else ""
+                ),
                 "ai": ai_snapshot_view(request),
                 "fp": fp_snapshot_view(request,
                     signer_ok=bool(request.rule and session.owner._rule_signer(request.rule))),
@@ -705,8 +994,10 @@ class _WebDecisionAPI:
             request = session.queue.active
             if request is None or request.id != request_id or session.queue.closed or request.resolving:
                 return False
-            # Reject a stale click after an enabled timeout has already elapsed.
-            if request.deadline and request.deadline <= time.monotonic():
+            # 倒计时已到点且 AI 能自动裁决时,过期点击一律拒绝(那一票已由 AI 投出);
+            # AI 没结论时倒计时会被撤销、决定权交回用户,此时点击仍然有效。
+            if (request.deadline and request.deadline <= time.monotonic()
+                    and ai_deadline_choice(request) is not None):
                 choice = "block"
                 repeat = False
             request.resolving = True
@@ -726,20 +1017,6 @@ class _WebDecisionAPI:
             request.resolving = False
 
 
-    # 免打扰:开关开启且系统处于忙碌/全屏/演示状态时,弹窗静默排队
-    POPUP_BUSY_STATES = {2, 3, 4}
-
-    def _popup_suppressed(self):
-        try:
-            with self.lock_config:
-                if not self.pyas_config.get("dnd_switch", False):
-                    return False
-
-            return query_user_notification_state() in self.POPUP_BUSY_STATES
-        except Exception:
-            log_exception("PYAS_Dialog.DialogMixin._popup_suppressed")
-            return False
-
     def report_false_positive(self, request_id, reason, note, scope):
         """登记内容锚定抑制并放行本次;语义与 decide() 一致,失败置 decision_error。"""
         if not isinstance(reason, str) or not isinstance(note, str) or not isinstance(scope, str):
@@ -751,8 +1028,9 @@ class _WebDecisionAPI:
             request = session.queue.active
             if request is None or request.id != request_id or session.queue.closed or request.resolving:
                 return False
-            # 截止时间已过的过期点击一律拒绝,与 decide() 同规
-            if request.deadline and request.deadline <= time.monotonic():
+            # 截止时间已过且 AI 已自动裁决时,过期点击一律拒绝,与 decide() 同规
+            if (request.deadline and request.deadline <= time.monotonic()
+                    and ai_deadline_choice(request) is not None):
                 return False
             request.resolving = True
 
@@ -788,6 +1066,8 @@ class _WebThreatDialogSession:
         self.hwnd = None
         self.ready = threading.Event()
         self.destroying = False
+        # 弹窗是否在前台(由页面 focus/blur 上报):决定 AI 结果是否需要另行推送
+        self.focused = False
         self.api = _WebDecisionAPI(self)
 
     @staticmethod
@@ -809,12 +1089,20 @@ class _WebThreatDialogSession:
                     scale = (get_dpi() or 96) / 96.0
         except Exception:
             scale = 1.0
+        # 主题取自宿主应用;任何取色失败都不允许中断弹窗创建
+        # (本会话的 run() 一旦抛错,队列会 fail-closed 判定为拦截,用户将完全无感)
+        try:
+            theme = self.owner.pyas_config.get("theme", "system_switch")
+        except Exception:
+            log_exception("PYAS_Dialog._WebThreatDialogSession.run.theme")
+            theme = "system_switch"
         pos_x, pos_y = self._bottom_right_position(720, 520, scale)
         self.window = webview.create_window(
             "PYAS · Pending alerts", url=url, js_api=self.api,
             width=720, height=520, min_size=(560, 420),
             frameless=True, easy_drag=False, on_top=True, text_select=True,
-            background_color="#f5f5f7", x=pos_x, y=pos_y,
+            background_color=window_background_for(theme),
+            x=pos_x, y=pos_y,
         )
         self.hwnd = True  # Queue operations use post_message, not a native HWND.
         self.window.events.closing += self._on_closing
@@ -827,6 +1115,11 @@ class _WebThreatDialogSession:
                         break
                     if request.deadline and request.deadline <= time.monotonic():
                         verdict = ai_deadline_choice(request)
+                        if verdict is None:
+                            # AI 没给出结论:不代替用户决定,撤销倒计时交回用户自主决策
+                            request.timeout_consumed = True
+                            request.deadline = None
+                            continue
                         if verdict != "block":
                             try:
                                 self.owner.write_log(
@@ -1012,7 +1305,17 @@ class _ThreatDialogSession:
                 self.update_countdown()
 
                 if self.deadline and self.remaining <= 0:
-                    self._decide("block")
+                    request = self.queue.active if self.queue else None
+                    verdict = ai_deadline_choice(request) if request is not None else None
+                    if verdict is None:
+                        # AI 没给出结论:撤销倒计时,把决定权交回用户自主决策
+                        if request is not None:
+                            request.timeout_consumed = True
+                        self.deadline = None
+                        self.remaining = None
+                        self.update_countdown()
+                    else:
+                        self._decide(verdict)
 
             return 0
 
@@ -1286,8 +1589,143 @@ def query_user_notification_state():
         log_exception("PYAS_Dialog.query_user_notification_state")
         return -1
 
+# 主题 -> 原生窗口底色:必须与 theme.js 的 --bg-window 一致,
+# 否则 WebView2 首帧(HTML 尚未应用主题)会闪出与界面不符的底色
+THEME_WINDOW_BACKGROUND = {
+    "white_switch": "#f5f5f7",
+    "black_switch": "#000000",
+    "red_switch": "#fdf6f6",
+    "yellow_switch": "#fefbf3",
+    "green_switch": "#f6fdf8",
+    "blue_switch": "#f6f9fd",
+}
+
+
+def resolve_theme_name(theme):
+    """把配置里的主题名解析为具体主题;system 按系统「应用浅色主题」判定,失败降级浅色。"""
+    name = str(theme or "system_switch")
+
+    if name != "system_switch":
+        return name
+
+    dark = False
+
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+        ) as key:
+            dark = not bool(winreg.QueryValueEx(key, "AppsUseLightTheme")[0])
+    except Exception:
+        dark = False
+
+    return "black_switch" if dark else "white_switch"
+
+
+def window_background_for(theme):
+    """主题 -> 原生窗口底色(与界面 --bg-window 对齐,消除启动闪白)。"""
+    return THEME_WINDOW_BACKGROUND.get(resolve_theme_name(theme), "#f5f5f7")
+
 
 class DialogMixin(AlertPolicyMixin):
+    # 免打扰:开关开启且系统处于忙碌/全屏/演示状态时,弹窗静默排队
+    POPUP_BUSY_STATES = {2, 3, 4}
+
+    def _popup_suppressed(self):
+        try:
+            with self.lock_config:
+                if not self.pyas_config.get("dnd_switch", False):
+                    return False
+
+            return query_user_notification_state() in self.POPUP_BUSY_STATES
+        except Exception:
+            log_exception("PYAS_Dialog.DialogMixin._popup_suppressed")
+            return False
+
+    def show_custom_notification(self, title, message):
+        """自建通知渠道:程序内右上角通知窗(参照拦截弹窗视觉,仅文本+右上角关闭)。"""
+        try:
+            import webview
+            from urllib.parse import quote
+            from urllib.parse import urljoin
+
+            if getattr(self, "_window", None) is None:
+                return False
+
+            # 单例:新通知替换旧通知
+            old = getattr(self, "_notify_window", None)
+
+            if old is not None:
+                try:
+                    old.destroy()
+                except Exception:
+                    log_exception("PYAS_Dialog.show_custom_notification.destroy")
+
+                self._notify_window = None
+
+            message = str(message or "")
+            # 按文本行数估算高度(360 宽,约 26 字/行),夹在 110~340 之间
+            approx_lines = 0
+            for seg in message.split("\n"):
+                approx_lines += max(1, -(-len(seg) // 26))
+            height = max(110, min(340, 74 + approx_lines * 21))
+
+            # 工作区右上角
+            rect = ctypes.wintypes.RECT()
+            pos_x, pos_y = 16, 16
+
+            if ctypes.windll.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(rect), 0):
+                pos_x = rect.right - 360 - 16
+                pos_y = rect.top + 16
+
+            # 通知窗跟随主题与语言:主题解析/原生底色统一走共享函数
+            theme = resolve_theme_name(self.pyas_config.get("theme", "system_switch"))
+            lang = str(self.pyas_config.get("language", "english_switch") or "english_switch")
+            background = window_background_for(theme)
+
+            url = urljoin(
+                self._window.get_current_url(),
+                f"/templates/notify.html?title={quote(str(title or ''))}"
+                f"&body={quote(message)}&theme={quote(theme)}&lang={quote(lang)}",
+            )
+            session = self
+            window = webview.create_window(
+                "",
+                url=url,
+                width=360,
+                height=int(height),
+                x=pos_x,
+                y=pos_y,
+                frameless=True,
+                easy_drag=False,
+                on_top=True,
+                background_color=background,
+            )
+
+            class _NotifyApi:
+                @staticmethod
+                def dismiss():
+                    try:
+                        window.destroy()
+                    except Exception:
+                        log_exception("PYAS_Dialog.show_custom_notification.dismiss")
+
+                    if session._notify_window is window:
+                        session._notify_window = None
+
+                    return True
+
+            window.js_api = _NotifyApi()
+            self._notify_window = window
+            return True
+
+        except Exception:
+            log_exception("PYAS_Dialog.show_custom_notification")
+            return False
+
+
     def _get_threat_queue(self):
         with _queue_init_lock:
             if not hasattr(self, "_threat_queue"):
@@ -1298,12 +1736,21 @@ class DialogMixin(AlertPolicyMixin):
                     factory, policy_lookup=self._lookup_alert_decision,
                     ai_starter=self._start_ai_suggestion,
                     popup_hold=self._popup_suppressed,
+
+                    failure_notify=getattr(self, "trigger_block_notification", None),
                 )
             return self._threat_queue
 
     def get_pending_threat_count(self):
         queue = getattr(self, "_threat_queue", None)
         return queue.count if queue else 0
+
+    def get_pending_threat_queue(self):
+        """主界面待处理告警列表:分组摘要(标题/数量/是否处理中)+ 总数;无队列时返回空。"""
+        queue = getattr(self, "_threat_queue", None)
+        if not queue:
+            return {"count": 0, "events": []}
+        return {"count": queue.count, "events": queue.describe()}
 
     def show_pending_threats(self):
         queue = getattr(self, "_threat_queue", None)
@@ -1313,19 +1760,32 @@ class DialogMixin(AlertPolicyMixin):
         # Explicit application shutdown resolves outstanding protection calls.
         self._get_threat_queue().close()
 
+    def _ai_auto_execute_enabled(self):
+        with self.lock_config:
+            return bool(
+                self.pyas_config.get("ai_assist_switch", False)
+                and self.pyas_config.get("ai_auto_execute", False)
+            )
+
     def get_interactive_timeout(self):
         with self.lock_config:
-            if self.pyas_config.get("ai_assist_switch", False):
-                # AI 辅助接管倒计时:到点执行 AI 建议(未就绪/失败一律拦截),
-                # 经典"超时自动拦截"自动避让并停用(设置项置灰)
+            ai_assist = bool(self.pyas_config.get("ai_assist_switch", False))
+            auto_execute = bool(self.pyas_config.get("ai_auto_execute", False))
+
+            if ai_assist and auto_execute:
+                # 二级选项:超时自动执行 AI 建议(就绪执行,未就绪一律拦截)
                 try:
                     timeout = int(
-                        self.pyas_config.get("interactive_timeout", INTERACTIVE_TIMEOUT_DEFAULT)
+                        self.pyas_config.get("ai_auto_execute_timeout", 60)
                     )
                 except Exception:
-                    timeout = INTERACTIVE_TIMEOUT_DEFAULT
+                    timeout = 60
 
-                return max(INTERACTIVE_TIMEOUT_MIN, min(timeout, INTERACTIVE_TIMEOUT_MAX))
+                return max(INTERACTIVE_TIMEOUT_MIN, min(timeout, 600))
+
+            if ai_assist:
+                # 自动执行关闭:不设超时,等待用户手动裁决
+                return None
 
             if not self.pyas_config.get("interactive_auto_block", False):
                 return None
@@ -1339,7 +1799,11 @@ class DialogMixin(AlertPolicyMixin):
         return max(INTERACTIVE_TIMEOUT_MIN, min(timeout, INTERACTIVE_TIMEOUT_MAX))
 
     def _start_ai_suggestion(self, request):
-        """入队即异步发起 AI 分析;结果只写入 request.ai,绝不改变裁决流程。"""
+        """入队即安排 AI 分析;结果只写入 request.ai,绝不改变裁决流程。
+
+        开启「延迟启动」时先等若干秒:窗口内用户一旦自主决策,请求根本不会发出,
+        这是省 token 的主要手段(未发出的请求不会被计费)。
+        """
         queue = self._threat_queue
 
         with self.lock_config:
@@ -1347,9 +1811,46 @@ class DialogMixin(AlertPolicyMixin):
             base_url = str(self.pyas_config.get("ai_base_url", "")).strip().rstrip("/")
             model = str(self.pyas_config.get("ai_model", "")).strip()
             api_key = str(self.pyas_config.get("ai_api_key", "")).strip()
+            delay = bool(self.pyas_config.get("ai_delay_switch", True))
+            delay_seconds = clamp_ai_delay_seconds(
+                self.pyas_config.get("ai_delay_seconds", AI_DELAY_DEFAULT)
+            )
 
         if not enabled or not base_url or not model:
             queue.set_ai_state(request, {"state": "unavailable", "verdict": "", "reason": ""})
+            return
+
+        if delay and delay_seconds > 0:
+            queue.set_ai_state(
+                request,
+                {"state": "delay", "verdict": "", "deadline": time.monotonic() + delay_seconds},
+            )
+            threading.Thread(
+                target=self._ai_delay_then_start,
+                args=(queue, request, base_url, model, api_key, delay_seconds),
+                daemon=True,
+                name="PYAS.AIDelay",
+            ).start()
+            return
+
+        self._spawn_ai_worker(queue, request, base_url, model, api_key)
+
+    def _ai_delay_then_start(self, queue, request, base_url, model, api_key, delay_seconds):
+        """延迟窗口结束再决定是否分析;窗口内已裁决则彻底跳过(不发请求)。"""
+        if request.done.wait(timeout=delay_seconds):
+            if hasattr(self, "write_log"):
+                self.write_log(
+                    "INFO", "AI Suggestion",
+                    detail=f"model={model} skipped: decided within {delay_seconds}s delay window",
+                )
+
+            return
+
+        self._spawn_ai_worker(queue, request, base_url, model, api_key)
+
+    def _spawn_ai_worker(self, queue, request, base_url, model, api_key):
+        """真正发起分析:先把状态置为 analyzing,再起工作线程。"""
+        if request.done.is_set():
             return
 
         queue.set_ai_state(request, {"state": "analyzing", "verdict": "", "reason": ""})
@@ -1375,10 +1876,69 @@ class DialogMixin(AlertPolicyMixin):
         else:
             detail = f"Message: {request.message}"
 
-        suggestion = request_ai_verdict(
-            base_url, model, api_key, request.category or request.title,
-            request.title, detail, request.lang,
+        cache_key = make_verdict_cache_key(
+            rule, request.category or request.title, request.title, detail
         )
+
+        # 把在途 Session 暴露给队列:用户裁决时可由决策路径直接关闭连接
+        session_holder = []
+
+        def abort_session():
+            for session in list(session_holder):
+                try:
+                    session.close()
+                except Exception:
+                    pass
+
+        request.ai_abort = abort_session
+        started = time.monotonic()
+
+        try:
+            suggestion = request_ai_verdict_cached(
+                cache_key, base_url, model, api_key,
+                request.category or request.title, request.title, detail, request.lang,
+                # 用量回传:按当前模型分账入累计计数(缓存命中不走网络,不计)
+                usage_sink=lambda tokens: self.record_ai_token_usage(model, tokens),
+                cancel_event=request.ai_cancel, session_holder=session_holder,
+            )
+        finally:
+            request.ai_abort = None
+
+        elapsed = time.monotonic() - started
+
+        # 用户已自主决策:结论作废(不入缓存、不计用量),只留审计痕迹
+        if request.ai_cancel.is_set():
+            if hasattr(self, "write_log"):
+                self.write_log(
+                    "INFO", "AI Suggestion",
+                    source=rule.get("source") if rule else None,
+                    detail=f"model={model} cancelled after {elapsed:.2f}s (user decided)",
+                    file_hash=rule.get("sha256") if rule else None,
+                )
+
+            return
+
+        from_cache = is_verdict_cache_hit(cache_key)
+        rule_source = rule.get("source") if rule else None
+        rule_hash = rule.get("sha256") if rule else None
+
+        # AI 审计:每次建议请求(含缓存命中)都可追溯到日志/Report.json
+        if hasattr(self, "write_log"):
+            if suggestion is None:
+                self.write_log(
+                    "WARN", "AI Suggestion", source=rule_source,
+                    detail=f"model={model} state=failed from_cache={from_cache} elapsed={elapsed:.2f}s",
+                    file_hash=rule_hash, success=False,
+                )
+            else:
+                reason = str(suggestion.get("reason", ""))[:80]
+                verdict = suggestion.get("verdict", "")
+                self.write_log(
+                    "INFO", "AI Suggestion", source=rule_source,
+                    detail=(f"model={model} verdict={verdict} from_cache={from_cache} "
+                            f"elapsed={elapsed:.2f}s reason={reason}"),
+                    file_hash=rule_hash,
+                )
 
         if suggestion is None:
             queue.set_ai_state(request, {"state": "failed", "verdict": "", "reason": ""})
@@ -1388,6 +1948,36 @@ class DialogMixin(AlertPolicyMixin):
             request,
             {"state": "ready", "verdict": suggestion["verdict"], "reason": suggestion["reason"]},
         )
+        self._notify_ai_result(queue, request, suggestion)
+
+    def _notify_ai_result(self, queue, request, suggestion):
+        """AI 出结果后把结论推到用户面前。
+
+        仅在「用户还没裁决 + 当前没在看着弹窗」时才另发通知:弹窗本身就是置顶的,
+        用户正看着它时内联面板已经足够,再弹一次只会变成打扰。
+        """
+        if not suggestion or not hasattr(self, "dispatch_notification"):
+            return
+
+        with queue.condition:
+            if queue.active is not request or request.done.is_set():
+                return
+
+            focused = bool(getattr(queue.session, "focused", False))
+
+        if focused:
+            return
+
+        verdict = suggestion.get("verdict")
+        lang = request.lang
+        label = loc_dialog_text(lang, "ai_suggest_block" if verdict == "block" else "ai_suggest_allow")
+        reason = str(suggestion.get("reason", "")).strip()
+        body = f"{label}\n{reason}" if reason else label
+
+        try:
+            self.dispatch_notification(request.title, body)
+        except Exception:
+            log_exception("PYAS_Dialog._notify_ai_result")
 
     def get_interactive_lang(self):
         with self.lock_config:
@@ -1414,8 +2004,42 @@ class DialogMixin(AlertPolicyMixin):
         if target:
             lines.append(f"{loc_dialog_text(lang, 'label_target')}: {target}")
 
+        category = {'Process Block': 'process', 'Process DLL Block': 'process',
+            'File Block': 'file', 'Deferred Scan Block': 'file', 'Network Block': 'network'}.get(action, action)
+        process_name = process_path = ''
+        resolved_pid = None
+
         if pid:
-            lines.append(f"{loc_dialog_text(lang, 'label_pid')}: {pid}")
+            try:
+                if getattr(self, 'get_exe_info', None):
+                    process_name, process_path = self.get_exe_info(pid) or ('', '')
+            except Exception:
+                log_exception("PYAS_Dialog.request_block_decision.exe_info")
+
+        elif category == 'file' and source:
+            # 文件类告警由目录监听触发,事件不携带 PID:反查当前占用该文件的进程,补上操作发起方
+            try:
+                users = _query_file_users(source)
+            except Exception:
+                log_exception("PYAS_Dialog.request_block_decision.file_users")
+                users = []
+
+            if users:
+                resolved_pid, rm_name = users[0]
+
+                try:
+                    if getattr(self, 'get_exe_info', None):
+                        exe_name, exe_path = self.get_exe_info(resolved_pid) or ('', '')
+                        process_name, process_path = exe_name or rm_name, exe_path
+                    else:
+                        process_name = rm_name
+                except Exception:
+                    log_exception("PYAS_Dialog.request_block_decision.file_users_exe_info")
+                    process_name = rm_name
+
+        if process_name or pid or resolved_pid:
+            label = loc_dialog_text(lang, 'label_pid')
+            lines.append(f"{label}: {process_name or pid or resolved_pid}")
 
         if finding_description:
             lines.append(f"YARA: {str(finding_description)[:200]}")
@@ -1431,10 +2055,11 @@ class DialogMixin(AlertPolicyMixin):
                 self.write_log('INFO', 'Alert Decision Reused', source=source,
                     detail=f'{action} / {target or ""} / {cached}', file_hash=rule['sha256'])
             return cached != 'allow'
-        category = {'Process Block': 'process', 'Process DLL Block': 'process',
-            'File Block': 'file', 'Deferred Scan Block': 'file', 'Network Block': 'network'}.get(action, action)
+        repeat_count = _record_trigger(rule['key']) if rule else 0
         request = _DecisionRequest(lang, title, "\r\n".join(lines), timeout, category=category, rule=rule,
-            dedup_key=(rule['key'], pid) if rule else None)
+            dedup_key=(rule['key'], pid) if rule else None,
+            process_name=str(process_name or ''), process_path=str(process_path or ''),
+            repeat_count=repeat_count, action=action, source=source, target=target)
         choice = self._get_threat_queue().submit(request)
         if choice == 'allow' and rule:
             fresh = self._make_alert_identity(action, source, target, detection)

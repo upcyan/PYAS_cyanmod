@@ -14,6 +14,25 @@ document.addEventListener('DOMContentLoaded', () => {
     let aiVerdict = '';
     let fpTexts = null;
     const hideFpPanel = () => fpPanel.classList.add('hidden');
+    // AI 分析结果面板:仅分析结束后(就绪/失败)展示结论与建议动作;
+    // 分析中由按钮流光承担,延迟启动期间也只显示按钮上的倒计时
+    const renderAiResult = (ai, lang) => {
+        const panel = byId('ai_result');
+        if (!panel) return;
+        if (!ai || !ai.label || ai.state === 'analyzing' || ai.state === 'delay') { panel.classList.add('hidden'); return; }
+        const messages = window.AppI18n.dict[lang] || window.AppI18n.dict.english_switch;
+        const ready = ai.state === 'ready';
+        byId('ai_result_title').textContent = ready
+            ? (messages.ai_result_title || 'AI 分析结果')
+            : (messages.ai_result_failed || 'AI 分析不可用');
+        const verdict = byId('ai_result_verdict');
+        verdict.textContent = ai.label;
+        verdict.className = 'ai-result-verdict ' + (ready ? (ai.verdict === 'block' ? 'verdict-block' : 'verdict-allow') : 'verdict-failed');
+        const reason = byId('ai_result_reason');
+        reason.textContent = ai.hint || '';
+        reason.classList.toggle('hidden', !ai.hint);
+        panel.classList.remove('hidden');
+    };
     const openFpPanel = () => {
         if (!fpTexts || !currentId) return;
         byId('threat_fp_title').textContent = fpTexts.button;
@@ -75,7 +94,16 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!api) return;
             const data = await api.snapshot();
             if (requestRevision !== revision) return;
-            if (!data) { disable(); byId('threat_confirmation').classList.add('hidden'); return; }
+            if (!data) {
+                // 告警已消失/被接管:立即停掉流光动效,避免残留「分析中」假象
+                disable();
+                aiButton.classList.remove('is-analyzing');
+                aiButton.hidden = true;
+                aiVerdict = '';
+                byId('ai_result')?.classList.add('hidden');
+                byId('threat_confirmation').classList.add('hidden');
+                return;
+            }
             const changed = currentId !== data.id;
             currentId = data.id;
             latestTheme = data.theme;
@@ -91,6 +119,27 @@ document.addEventListener('DOMContentLoaded', () => {
             setText('queue_count', String(data.count ?? data.events.length));
             setText('threat_title', data.title);
             setText('threat_message', data.message);
+            const repeatHint = byId('threat_repeat_hint');
+            if (repeatHint) {
+                if (data.repeat_hint) {
+                    repeatHint.textContent = data.repeat_hint;
+                    repeatHint.classList.remove('hidden');
+                } else {
+                    repeatHint.classList.add('hidden');
+                }
+            }
+            const procLine = byId('threat_process');
+            if (procLine) {
+                const proc = data.process;
+                if (proc && proc.name) {
+                    const label = data.process_label || 'Process';
+                    procLine.textContent = `${label}: ${proc.name}`;
+                    procLine.title = proc.path || '';
+                    procLine.classList.remove('hidden');
+                } else {
+                    procLine.classList.add('hidden');
+                }
+            }
             const localized = texts[data.language] || texts.english_switch;
             let status = data.decision_error ? localized[5] : (data.remaining === null ? data.waiting : data.countdown);
             if (data.duplicates > 1) status += /^zh/.test(document.documentElement.lang)
@@ -110,28 +159,21 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!data.can_remember) repeat.checked = false;
             // AI 建议第四按钮:分析中/失败置灰,仅就绪建议可点击;未启用则隐藏
             const ai = data.ai;
+            const aiAnalyzing = !!ai && ai.state === 'analyzing';
+            aiButton.classList.toggle('is-analyzing', aiAnalyzing);
             if (ai && ai.label) {
                 aiButton.hidden = false;
-                aiButton.textContent = ai.label;
+                setText('threat_ai_label', ai.label);
                 aiButton.title = ai.hint || '';
                 aiVerdict = ai.state === 'ready' ? ai.verdict : '';
                 aiButton.disabled = busy || !!data.resolving || !aiVerdict;
             } else {
                 aiButton.hidden = true;
+                aiButton.classList.remove('is-analyzing');
                 aiVerdict = '';
                 aiButton.disabled = true;
             }
-            // AI 理由可见渲染:不再只藏在 tooltip 里
-            const reasonEl = byId('threat_ai_reason');
-            if (reasonEl) {
-                if (ai && ai.label) {
-                    reasonEl.textContent = ai.state === 'ready' && ai.hint
-                        ? `${ai.label} · ${ai.hint}` : ai.label;
-                    reasonEl.classList.remove('hidden');
-                } else {
-                    reasonEl.classList.add('hidden');
-                }
-            }
+            renderAiResult(ai, data.language);
             // 误报入口:仅文件类告警(有内容身份)显示
             const fp = data.fp;
             if (fp && fp.button) {
@@ -222,6 +264,17 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('keydown', event => {
         if (event.key === 'Escape') { event.preventDefault(); minimize(); }
     });
+    // 前后台上报:AI 结果只在用户没盯着弹窗时才由主程序另行推送,避免重复打扰
+    const reportFocus = (state) => {
+        const api = window.pywebview?.api;
+        if (!api?.set_focus) return;
+        try { api.set_focus(state); } catch (error) { /* 上报失败不影响弹窗 */ }
+    };
+    window.addEventListener('focus', () => reportFocus(true));
+    window.addEventListener('blur', () => reportFocus(false));
+    document.addEventListener('visibilitychange', () => reportFocus(!document.hidden));
+    reportFocus(document.hasFocus());
+
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => window.PyasTheme.apply(latestTheme));
     refresh();
 });

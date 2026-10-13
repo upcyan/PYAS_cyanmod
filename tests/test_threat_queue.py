@@ -48,6 +48,22 @@ class QueueTests(unittest.TestCase):
         session.api.ready()
         snapshot = session.api.snapshot()
         self.assertEqual(snapshot['remaining'], 5)
+        # AI 无结论:倒计时过了也不吞用户点击(决定权交回用户自主决策)
+        request.deadline = time.monotonic() - 1
+        session.api.decide(request.id, 'allow')
+        self.assertEqual(request.choice, 'allow')
+        queue.close()
+
+    def test_stale_click_rejected_only_when_ai_has_verdict(self):
+        """AI 已给出结论时,过期的点击一律拒绝(那一票已由 AI 投出)。"""
+        queue = _ThreatPromptQueue()
+        request = _DecisionRequest('en', 'test', 'test', 5)
+        request.ai = {'state': 'ready', 'verdict': 'block', 'reason': 'bad'}
+        queue.pending.append(request)
+        queue.take_next()
+        session = _WebThreatDialogSession('en', 'test', 'test', 5, str, queue, ConfigApp())
+        session.api.ready()
+        session.api.snapshot()
         request.deadline = time.monotonic() - 1
         session.api.decide(request.id, 'allow')
         self.assertEqual(request.choice, 'block')
