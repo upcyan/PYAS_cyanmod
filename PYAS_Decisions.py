@@ -209,6 +209,108 @@ class AlertPolicyMixin:
                 detail=f"{scope} / {reason} / {rule['action']}", file_hash=rule['sha256'])
         return True
 
+    # ---- 放行记录管理(设置页子页) ----
+
+    def list_release_records(self):
+        """列举永久允许与误报抑制,供设置页「放行记录」展示。"""
+        now = time.time()
+
+        with self._alert_policy_lock():
+            allows = [
+                item for item in self.pyas_config.get("alert_allow_rules", [])
+                if isinstance(item, dict)
+            ]
+            suppress = [
+                item for item in self.pyas_config.get("suppress_rules", [])
+                if isinstance(item, dict) and item.get("expires", 0) > now
+            ]
+
+            permanent = [
+                {
+                    "key": item.get("key", ""),
+                    "action": item.get("action", ""),
+                    "source": item.get("source", ""),
+                    "sha256": item.get("sha256", ""),
+                }
+                for item in allows[:MAX_RULES]
+            ]
+
+            suppress_records = [
+                {
+                    "id": item.get("id", ""),
+                    "action": item.get("action", ""),
+                    # 抑制记录按内容哈希锚定,不保存文件路径;source 字段只记录创建者,不能当路径展示
+                    "source": "",
+                    "sha256": item.get("sha256", ""),
+                    "reason": item.get("reason", ""),
+                    "scope": item.get("scope", ""),
+                    "days_left": max(1, int((item.get("expires", 0) - now) // 86400) + 1),
+                    "hits": int(item.get("hits", 0)),
+                }
+                for item in suppress[:MAX_RULES]
+            ]
+
+        return {"permanent": permanent, "suppress": suppress_records}
+
+    def delete_release_record(self, kind, ident):
+        """删除单条放行记录:kind='permanent'(按 key)或 'suppress'(按 id)。"""
+        if not ident:
+            return False
+
+        with self._alert_policy_lock():
+            if kind == "permanent":
+                key = "alert_allow_rules"
+                field = "key"
+            elif kind == "suppress":
+                key = "suppress_rules"
+                field = "id"
+            else:
+                return False
+
+            old = list(self.pyas_config.get(key, []) or [])
+            kept = [
+                item for item in old
+                if not (isinstance(item, dict) and item.get(field) == ident)
+            ]
+
+            if len(kept) == len(old):
+                return False
+
+            self.pyas_config[key] = kept
+
+            if self.save_config() is False:
+                self.pyas_config[key] = old
+                return False
+
+        if hasattr(self, "write_log"):
+            self.write_log("INFO", "Config Update", detail=f"Release record removed: {kind}/{str(ident)[:16]}")
+        return True
+
+    def clear_release_records(self, kind=None):
+        """清除放行记录:kind=None 全清,'permanent'/'suppress' 分类清。"""
+        with self._alert_policy_lock():
+            changed = False
+
+            if kind in (None, "permanent"):
+                if self.pyas_config.get("alert_allow_rules"):
+                    self.pyas_config["alert_allow_rules"] = []
+                    changed = True
+
+            if kind in (None, "suppress"):
+                if self.pyas_config.get("suppress_rules"):
+                    self.pyas_config["suppress_rules"] = []
+                    changed = True
+
+            if changed and self.save_config() is False:
+                return False
+
+            # 内存级重复决定同步失效
+            self._recent_alert_decisions = {}
+
+        if changed and hasattr(self, "write_log"):
+            self.write_log("INFO", "Config Update", detail=f"Release records cleared: {kind or 'all'}")
+        return True
+
     def _remember_alert_decision(self, request, choice, repeat=False):
         rule = request.rule
         if not rule:

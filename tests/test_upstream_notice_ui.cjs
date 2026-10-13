@@ -37,6 +37,7 @@ const assert = require('node:assert/strict');
                 version: '3.7.0-24', interactive_timeout: 30, ai_provider_mode: 'local',
                 ai_model: '', ai_base_url: '', ai_assist_switch: false,
                 ai_delay_switch: true, ai_delay_seconds: 3, ai_auto_execute: false,
+                dev_channel: true,
             };
             window.__updatePayload = null;
             window.__alerts = [];
@@ -57,6 +58,11 @@ const assert = require('node:assert/strict');
         await page.goto(`${base}/templates/index.html`, { timeout: 20000 });
         await page.waitForFunction(() => document.querySelector('.app-container')?.classList.contains('fade-in'), null, { timeout: 15000 });
 
+        // 开发者模式:主界面版本号后挂「开发者模式」标识
+        assert.equal(await page.evaluate(() => document.getElementById('title_dev_badge')?.classList.contains('hidden')),
+            false, '开发者模式下版本号后应出现开发者模式标识');
+        assert.equal((await page.textContent('#title_dev_badge')).trim(), '开发者模式', '标识文案应来自 i18n');
+
         // 用 checkVisibility:它连带祖先的 display/visibility 一起算,
         // 只看自身样式会把「藏在已关闭弹窗里的元素」判成可见
         const visible = async (sel) => page.evaluate((s) => {
@@ -73,6 +79,9 @@ const assert = require('node:assert/strict');
 
         const upstreamPayload = {
             has_update: false, current: '3.7.0-24', latest: '3.7.0-24',
+            // 真实后端在「自身已是最新」时也会带回最新版安装包,下载按钮必须据此隐藏
+            body: 'cyanmod notes', published_at: '2026-10-05',
+            asset: { name: 'PYAS_Setup_v3.7.0-24.exe', url: 'https://github.com/upcyan/PYAS_cyanmod/releases/download/v3.7.0-24/PYAS_Setup_v3.7.0-24.exe', size: 1024 },
             upstream: {
                 supported: true, has_update: true, repository: '87owo/PYAS',
                 tracked: '3.7.0', latest: 'v3.7.1',
@@ -89,11 +98,15 @@ const assert = require('node:assert/strict');
         assert.ok(text.includes('3.7.0'), `当前跟进版本应出现在提示里,实际: ${text}`);
         assert.equal(await page.textContent('#update_modal_title'), '上游有新版本', '标题应切换为上游提示');
         assert.equal(await visible('#update_download_btn'), false, '没有自身更新时不应出现下载按钮');
+        assert.equal(await visible('#update_modal_asset'), false, '没有自身更新时不应展示本仓库安装包信息');
         assert.equal(await visible('#update_install_btn'), false, '没有自身更新时不应出现安装按钮');
         assert.equal(await visible('#update_page_btn'), false, '自身没有发布页可去时该按钮应隐藏');
         assert.equal(await visible('#update_upstream_btn'), true, '必须给出上游发布页入口');
         assert.equal(await page.getAttribute('#update_upstream_btn', 'data-url'), upstreamPayload.upstream.url,
             '上游按钮要指向上游发布页');
+        const upstreamChangelog = await page.textContent('#update_modal_changelog');
+        assert.ok(upstreamChangelog.includes('upstream notes'), `更新日志应展示上游内容,实际: ${upstreamChangelog}`);
+        assert.ok(!upstreamChangelog.includes('cyanmod notes'), `不应残留本仓库的旧日志,实际: ${upstreamChangelog}`);
         assert.deepEqual(await page.evaluate(() => window.__alerts), [], '有上游更新时不应只弹「已是最新」');
         if (shotDir) {
             fs.mkdirSync(shotDir, { recursive: true });
@@ -110,7 +123,8 @@ const assert = require('node:assert/strict');
         await page.click('#update_close_btn');
         await triggerCheck({
             has_update: true, current: '3.7.0-24', latest: 'v9.0.0-1', url: 'https://github.com/upcyan/PYAS_cyanmod/releases',
-            asset: { name: 'PYAS_Setup_v9.0.0-1.exe', url: 'https://github.com/upcyan/PYAS_cyanmod/releases/download/v9.0.0-1/PYAS_Setup_v9.0.0-1.exe', size: 1024 }, body: 'notes',
+            asset: { name: 'PYAS_Setup_v9.0.0-1.exe', url: 'https://github.com/upcyan/PYAS_cyanmod/releases/download/v9.0.0-1/PYAS_Setup_v9.0.0-1.exe', size: 1024 },
+            body: 'cyanmod notes', published_at: '2026-10-12',
             upstream: upstreamPayload.upstream,
         });
         assert.equal(await visible('#update_modal_upstream'), true, '自身更新与上游提示应同时出现');
@@ -118,6 +132,9 @@ const assert = require('node:assert/strict');
         assert.equal(await visible('#update_download_btn'), true, '自身有更新时保留下载按钮');
         assert.equal(await visible('#update_page_btn'), true, '自身有更新时应给出本仓库发布页');
         assert.equal(await visible('#update_upstream_btn'), true, '上游按钮同时可见');
+        const bothChangelog = await page.textContent('#update_modal_changelog');
+        assert.ok(bothChangelog.includes('cyanmod notes'), `自身有更新时日志应展示本仓库内容,实际: ${bothChangelog}`);
+        assert.ok(!bothChangelog.includes('upstream notes'), `此时不该把上游日志顶到前面,实际: ${bothChangelog}`);
 
         // 3. 普通模式:后端不带 upstream 字段 —— 上游提示整块不出现
         await page.click('#update_close_btn');

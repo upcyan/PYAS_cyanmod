@@ -745,7 +745,8 @@ class _ThreatPromptQueue:
         """用户已自主决策(或队列关闭)时,立刻叫停该请求待发/在途的 AI 分析。
 
         延迟窗口内的请求尚未发起 → 只置位取消标记,连请求都不会发出(零消耗);
-        分析进行中的请求 → 置位并 best-effort 关闭在途连接,响应回来后作废不入缓存。
+        分析进行中的请求 → 置位并 best-effort 关闭在途连接/响应,AI 侧流式读取会在
+        下一个数据块边界立即停止,残余结论作废不入缓存。
         """
         if request is None:
             return
@@ -912,11 +913,6 @@ class _WebDecisionAPI:
         self._session.ready.set()
         return True
 
-    def set_focus(self, focused):
-        """页面 focus/blur 上报:AI 结果只在用户没盯着弹窗时才另发通知。"""
-        self._session.focused = bool(focused)
-        return True
-
     def snapshot(self):
         session = self._session
         with session.queue.condition:
@@ -1041,8 +1037,6 @@ class _WebThreatDialogSession:
         self.hwnd = None
         self.ready = threading.Event()
         self.destroying = False
-        # 弹窗是否在前台(由页面 focus/blur 上报):决定 AI 结果是否需要另行推送
-        self.focused = False
         self.api = _WebDecisionAPI(self)
 
     @staticmethod
@@ -1894,36 +1888,8 @@ class DialogMixin(AlertPolicyMixin):
             request,
             {"state": "ready", "verdict": suggestion["verdict"], "reason": suggestion["reason"]},
         )
-        self._notify_ai_result(queue, request, suggestion)
-
-    def _notify_ai_result(self, queue, request, suggestion):
-        """AI 出结果后把结论推到用户面前。
-
-        仅在「用户还没裁决 + 当前没在看着弹窗」时才另发通知:弹窗本身就是置顶的,
-        用户正看着它时内联面板已经足够,再弹一次只会变成打扰。
-        """
-        if not suggestion or not hasattr(self, "dispatch_notification"):
-            return
-
-        with queue.condition:
-            if queue.active is not request or request.done.is_set():
-                return
-
-            focused = bool(getattr(queue.session, "focused", False))
-
-        if focused:
-            return
-
-        verdict = suggestion.get("verdict")
-        lang = request.lang
-        label = loc_dialog_text(lang, "ai_suggest_block" if verdict == "block" else "ai_suggest_allow")
-        reason = str(suggestion.get("reason", "")).strip()
-        body = f"{label}\n{reason}" if reason else label
-
-        try:
-            self.dispatch_notification(request.title, body)
-        except Exception:
-            log_exception("PYAS_Dialog._notify_ai_result")
+        # AI 结论只写入弹窗状态(按钮标签 + 结论面板),用户在置顶弹窗里直接查看,
+        # 不再另发系统通知(弹窗本身即唯一呈现渠道)
 
     def get_interactive_lang(self):
         with self.lock_config:

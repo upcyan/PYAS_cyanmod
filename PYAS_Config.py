@@ -233,6 +233,9 @@ class ConfigMixin:
             cfg = self.pyas_config.copy()
             cfg["autostart_mode"] = self.autostart_mode
             cfg["upstream_tracked"] = UPSTREAM_TRACKED
+            # 界面据此在版本号后挂「开发者模式」标识;不读生成文件时按普通模式
+            import PYAS_Channel
+            cfg["dev_channel"] = bool(PYAS_Channel.IS_DEV)
 
             # API Key 不出库:回传掩码,密文字段一并剔除
             from PYAS_AI import unprotect_ai_key

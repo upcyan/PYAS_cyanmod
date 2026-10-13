@@ -75,6 +75,10 @@ const assert = require('node:assert/strict');
         await page.evaluate(() => window.syncMaximizeIcon(false));
         assert.equal(await page.getAttribute('#maximize_button', 'aria-label'), '最大化');
 
+        // 普通模式(后端不带 dev_channel)版本号后不出现「开发者模式」标识
+        assert.equal(await page.evaluate(() => document.getElementById('title_dev_badge')?.classList.contains('hidden')),
+            true, '普通模式下版本号后不应出现开发者模式标识');
+
         // ===== 2. 卡片入口:可聚焦 + 语义 + 回车激活 =====
         const card = await page.evaluate(() => {
             const el = document.querySelector('.quick-item[data-target="quarantine_window"]');

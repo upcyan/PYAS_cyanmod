@@ -65,14 +65,14 @@ class UpdateChannelTests(unittest.TestCase):
 
     def test_dev_channel_reports_newer_upstream(self):
         result = self.api(dev=True, upstream_payload=[
-            {'tag_name': 'v3.6.9'},
-            {'tag_name': 'v3.7.1', 'body': 'upstream notes', 'published_at': '2026-10-01T00:00:00Z'},
+            {'tag_name': UPSTREAM_TRACKED},
+            {'tag_name': 'v9.9.9', 'body': 'upstream notes', 'published_at': '2026-10-01T00:00:00Z'},
         ]).check_update()
         upstream = result.get('upstream')
         self.assertIsNotNone(upstream, '开发者模式必须带上 upstream 字段')
         self.assertTrue(upstream['supported'])
         self.assertTrue(upstream['has_update'])
-        self.assertEqual(upstream['latest'], 'v3.7.1')
+        self.assertEqual(upstream['latest'], 'v9.9.9')
         self.assertEqual(upstream['tracked'], UPSTREAM_TRACKED)
         self.assertEqual(upstream['repository'], UPSTREAM_REPO)
         self.assertIn(UPSTREAM_REPO, upstream['url'])
@@ -112,7 +112,7 @@ class UpdateChannelTests(unittest.TestCase):
         self.assertEqual(result['latest'], 'v9.0.0-1')
 
     def test_self_error_still_carries_upstream(self):
-        result = self.api(dev=True, self_status=404, upstream_payload=[{'tag_name': 'v3.7.1'}]).check_update()
+        result = self.api(dev=True, self_status=404, upstream_payload=[{'tag_name': 'v9.9.9'}]).check_update()
         self.assertEqual(result['error_code'], 'repository_unavailable')
         self.assertTrue(result['upstream']['has_update'])
 

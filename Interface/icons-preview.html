@@ -409,7 +409,7 @@ body.dark .passlog code { background: rgba(255,255,255,.1); }
     <div class="note">终稿·去盾 + 纯芯片优化：外框 12×12→<b>14×14</b>(5~19) 更饱满，8 引脚由长 4 收到<b>长 3</b>(2~5 / 19~22，与 i-chip 同规格)，中心勾放大到 <code>m8 12 3 3 5-6</code> 撑住框心；盾+芯片版在 16px 糊团，已弃</div></div>
 
   <div class="row"><div class="meta"><b>i-sliders</b><span>敏感目录过滤</span></div>
-    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2Z"/><path d="M7 12h10M7 16h6"/></svg></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h3m4 0h9M4 12h9m4 0h3M4 18h3m4 0h9"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="9" cy="18" r="2"/></svg></div>
     <div class="cell new"><svg class="ic"><use href="#i-sliders"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-sliders"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-sliders"/></svg></div>
     <div class="note"><b>v5 优化·换图案</b>：三线三滑块表达的是「参数可调」，读不出「目录」；改成文件夹 + 内部清单线（<code>M7 12h10M7 16h6</code>）= 目录与其下的规则条目。该条在界面里是 <code>custom_protect_window</code>「自訂防護」清单页入口，与同组各「XX 防护」的盾族保持区分（此条强调「目录/清单」而非盾）</div></div>
 </div>
@@ -524,7 +524,7 @@ body.dark .passlog code { background: rgba(255,255,255,.1); }
     <div class="note">经线椭圆收敛角重算，与赤道相切</div></div>
 
   <div class="row"><div class="meta"><b>i-reset</b><span>重置选项</span></div>
-    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 6 6 0 0 0-6 3L3 9"/><path d="M3 3v6h6"/><path d="M12 7v5l3 2"/></svg></div>
+    <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6m3-3v5l3 2"/></svg></div>
     <div class="cell new"><svg class="ic"><use href="#i-reset"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-reset"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-reset"/></svg></div>
     <div class="note"><b>v6 修正连接点</b>：原版弧的缺口只在左下约 40°，而箭头横杠从 (3,10) 水平伸出 6px 直接穿进圆内——箭头根本不在缺口里，看着像「插进圆弧」。改为把缺口开到 1/4 圆（<code>(12,3)</code> 经小弧 + 直线引到 <code>(3,9)</code>），箭头 <code>M3 3v6h6</code> 嵌在缺口内，与弧端点相接且不再越界；时钟指针原样保留</div></div>
 

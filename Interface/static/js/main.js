@@ -1,4 +1,4 @@
-﻿['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
     document.addEventListener(eventName, e => {
         e.preventDefault();
     });
@@ -220,7 +220,24 @@ document.addEventListener('DOMContentLoaded', () => {
         junk: [{key: 'path', label: 'col_path', flex: 3}, {key: 'sizeStr', label: 'col_size', flex: 1}],
         popup: [{key: 'mode', label: 'col_status', flex: 0.7, isI18n: true}, {key: 'exe', label: 'col_prog', flex: 1}, {key: 'class', label: 'col_class', flex: 1}, {key: 'title', label: 'col_title', flex: 2}],
         repair: [{key: 'display', label: 'col_repair', flex: 1, isI18n: true}, {key: 'path', label: 'col_path', flex: 3}],
-        netmon: [{key: 'name', label: 'col_name', flex: 1.5}, {key: 'pid', label: 'col_pid', flex: 0.5}, {key: 'downStr', label: 'col_down_speed', flex: 1}, {key: 'upStr', label: 'col_up_speed', flex: 1}, {key: 'connCount', label: 'col_conn_count', flex: 0.8}]
+        netmon: [{key: 'name', label: 'col_name', flex: 1.5}, {key: 'pid', label: 'col_pid', flex: 0.5}, {key: 'downStr', label: 'col_down_speed', flex: 1}, {key: 'upStr', label: 'col_up_speed', flex: 1}, {key: 'connCount', label: 'col_conn_count', flex: 0.8}],
+        release: [{key: 'kind', label: 'col_type', flex: 1, isI18n: true}, {key: 'action', label: 'col_func', flex: 1.2, isI18n: true}, {key: 'source', label: 'col_path', flex: 3}, {key: 'hash', label: 'col_hash', flex: 1.4}, {key: 'status', label: 'col_status', flex: 1}, {key: 'hits', label: 'col_hits', flex: 0.6}]
+    };
+
+    const buildReleaseRows = (data) => {
+        const rows = [];
+        (data.permanent || []).forEach(item => rows.push({
+            kind: 'release_kind_permanent', action: item.action || '',
+            source: item.source || '-', hash: item.sha256 || '-',
+            status: '-', hits: '-', value: 'p:' + (item.key || ''),
+        }));
+        (data.suppress || []).forEach(item => rows.push({
+            kind: 'release_kind_suppress', action: item.action || '',
+            source: item.source || '-', hash: item.sha256 || '-',
+            status: formatMsg('release_days_left', String(item.days_left || 0)),
+            hits: String(item.hits || 0), value: 's:' + (item.id || ''),
+        }));
+        return rows;
     };
 
     const buildCustomSelectElement = (select) => {
@@ -884,6 +901,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (targetId === 'repair_window') fetchRepair();
 
         if (['whitelist_window', 'quarantine_window', 'popup_window', 'custom_protect_window'].includes(targetId)) refreshConfigLists();
+
+        if (targetId === 'release_window' && window.pywebview) {
+            window.pywebview.api.list_release_records().then(data => {
+                renderDataGrid('#release_window', buildReleaseRows(data), cols.release, 'value', false);
+            }).catch(() => {});
+        }
 
         if (targetId === 'about_window') loadChangelogs();
         if (targetId === 'ai_window') refreshAiTokenUsage();
@@ -1813,6 +1836,30 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    document.getElementById('release_select')?.addEventListener('change', (e) => {
+        const val = e.target.value;
+        if (!window.pywebview) return updateCustomSelectUI('release_select', 'none');
+
+        const refresh = () => window.pywebview.api.list_release_records().then(data => {
+            renderDataGrid('#release_window', buildReleaseRows(data), cols.release, 'value', false);
+        });
+
+        if (val === 'remove') {
+            const checked = getCheckedValues('#release_window');
+            if (checked.length === 0) return updateCustomSelectUI('release_select', 'none');
+            Promise.all(checked.map(v => {
+                const sep = v.indexOf(':');
+                return window.pywebview.api.delete_release_record(v.slice(0, sep), v.slice(sep + 1));
+            })).then(refresh).then(() => updateCustomSelectUI('release_select', 'none'));
+        } else if (val === 'clear') {
+            window.pywebview.api.show_confirm(getMsg('title_prompt'), getMsg('msg_clear_release_confirm')).then(ok => {
+                if (ok) window.pywebview.api.clear_release_records().then(refresh);
+            }).finally(() => updateCustomSelectUI('release_select', 'none'));
+        } else {
+            updateCustomSelectUI('release_select', 'none');
+        }
+    });
+
     document.getElementById('log_export_select')?.addEventListener('change', (e) => {
         const val = e.target.value;
         const checked = getCheckedValues('#log_export_window');
@@ -2124,11 +2171,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const openUpdateModal = async (res) => {
         updateModalState.result = res;
         updateModalState.downloading = false;
-        // 本仓库发布页按钮只在自身有更新时出现;上游单独提示时只给上游发布页,
-        // 免得两个「发布页」按钮指向不同项目
-        updateModalState.pageUrl = res.has_update ? (res.url || '') : '';
+        // 本仓库发布页/下载按钮只在自身有更新时出现;上游单独提示时只给上游发布页,
+        // 免得两个「发布页」按钮指向不同项目,也免得给出无从下载的按钮
+        const selfUpdate = !!res.has_update;
         // 上游跟进提示(开发者模式专有):没带 upstream 字段就是普通模式,整块不出现
         const upstream = res.upstream && res.upstream.has_update ? res.upstream : null;
+        updateModalState.pageUrl = selfUpdate ? (res.url || '') : '';
         const upstreamBox = document.getElementById('update_modal_upstream');
         if (upstreamBox) {
             if (upstream) {
@@ -2163,7 +2211,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const asset = document.getElementById('update_modal_asset');
         if (asset) {
-            if (res.asset && res.asset.name) {
+            if (selfUpdate && res.asset && res.asset.name) {
                 const sizeText = res.asset.size > 0 ? ` (${formatSize(res.asset.size)})` : '';
                 asset.textContent = `${res.asset.name}${sizeText}`;
                 asset.classList.remove('hidden');
@@ -2174,7 +2222,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         setModalElement('update_modal_progress', false);
         setModalElement('update_modal_status', false);
-        setModalElement('update_download_btn', !!(res.asset && res.asset.url));
+        // 能下载的只有本仓库安装包:上游提示没有对应安装包,不给下载按钮
+        setModalElement('update_download_btn', selfUpdate && !!(res.asset && res.asset.url));
         setModalElement('update_install_btn', false);
         const downloadBtn = document.getElementById('update_download_btn');
         if (downloadBtn) downloadBtn.disabled = false;
@@ -2185,11 +2234,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const changelog = document.getElementById('update_modal_changelog');
         if (changelog) {
-            const body = (res.body || '').trim();
+            // 自身有新版展示自身日志;自身已是最新、上游有新版时改展示上游日志
+            const notes = selfUpdate
+                ? { body: res.body, latest: res.latest, at: res.published_at }
+                : (upstream ? { body: upstream.body, latest: upstream.latest, at: upstream.published_at } : null);
+            const body = String((notes && notes.body) || '').trim();
             if (body) {
-                const meta = res.published_at
-                    ? `<span class="changelog-meta">${escapeHtml(res.latest)} · ${escapeHtml(res.published_at)}</span>`
-                    : `<span class="changelog-meta">${escapeHtml(res.latest)}</span>`;
+                const meta = notes.at
+                    ? `<span class="changelog-meta">${escapeHtml(String(notes.latest))} · ${escapeHtml(String(notes.at))}</span>`
+                    : `<span class="changelog-meta">${escapeHtml(String(notes.latest))}</span>`;
                 changelog.innerHTML = meta + escapeHtml(body);
                 changelog.classList.remove('hidden');
             } else {
@@ -2446,6 +2499,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderDataGrid('#custom_protect_window', [], cols.fileList, 'path', false);
     renderDataGrid('#popup_window', [], cols.popup, 'value', false);
     renderDataGrid('#log_export_window', [], cols.log, 'id', true);
+    renderDataGrid('#release_window', [], cols.release, 'value', false);
     renderDataGrid('#netmon_window', [], cols.netmon, 'pid', false);
 
     let gridResizeTimer = null;
@@ -2542,6 +2596,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (versionChip) versionChip.textContent = 'v' + (cfg.version || '');
                 const titleVersion = document.getElementById('title_version');
                 if (titleVersion) titleVersion.textContent = 'v' + (cfg.version || '');
+                // 开发者模式(本地构建)在版本号后挂标识,与发布包区分
+                document.getElementById('title_dev_badge')?.classList.toggle('hidden', !cfg.dev_channel);
                 const notifySelect = document.getElementById('notify_channel_select');
                 if (notifySelect) {
                     const channel = cfg.notify_channel === 'custom' ? 'custom' : 'system';

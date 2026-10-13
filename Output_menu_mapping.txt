@@ -1,3 +1,0 @@
-[Files]
-"MenuPackage\AppxManifest.xml" "AppxManifest.xml"
-"MenuPackage\Assets\icon.png" "Assets\icon.png"

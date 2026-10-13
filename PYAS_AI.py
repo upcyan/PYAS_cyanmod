@@ -7,6 +7,7 @@ P1 提供连接性验证;P2 的拦截建议与 P3 的日志归纳都复用这里
 from PYAS_Diagnostics import log_exception
 import base64
 import json
+import socket
 import ctypes
 import ctypes.wintypes
 import requests
@@ -460,8 +461,12 @@ def request_ai_verdict(base_url, model, api_key, category, title, detail, lang="
 
     cancel_event 用于「用户已自主决策」场景:
       - 发起前已取消 → 直接返回,不发请求;
-      - 请求在途 → 通过 session_holder 暴露的 Session 关闭连接,尽早中断;
+      - 请求在途 → 传输层用流式 SSE,取消方关闭连接后,客户端在下一个数据块边界
+        立即停止拉取并断开(本地服务收到断连会中止生成;旧版非流式必须等完整响应体,
+        用户裁决后最多还会空跑 _AI_VERDICT_TIMEOUT 秒——那正是「提前决策不能及时
+        终止分析」的根因);
       - 响应已回但已取消 → 不解析、不计用量,调用方也不会入缓存。
+    服务端不支持流式而返回整体 JSON 时,回退一次性解析,行为与旧版一致。
     """
     if cancel_event is not None and cancel_event.is_set():
         return None
@@ -470,10 +475,75 @@ def request_ai_verdict(base_url, model, api_key, category, title, detail, lang="
     user_content = f"Category: {category}\nTitle: {title}\n{detail}\nWrite reason in {language}."
 
     session = requests.Session()
+    response = None
+
+    def _shutdown_raw_socket():
+        # response.close() 会等读取方释放内部锁(另一线程调用会互相卡死);
+        # 直接对底层 socket shutdown 才能立刻唤醒阻塞中的读取
+        try:
+            raw = response.raw
+        except Exception:
+            return
+
+        stack = [raw]
+        visited = set()
+
+        while stack:
+            obj = stack.pop()
+
+            if obj is None or id(obj) in visited:
+                continue
+
+            visited.add(id(obj))
+
+            if isinstance(obj, socket.socket):
+                try:
+                    obj.shutdown(socket.SHUT_RDWR)
+                except Exception:
+                    pass
+
+                try:
+                    # Windows 上 shutdown 也唤不醒另一线程中已阻塞的 recv;
+                    # _real_close 绕过 SocketIO 引用计数立即 closesocket,实测可立刻唤醒
+                    real_close = getattr(obj, "_real_close", None)
+
+                    if real_close is not None:
+                        real_close()
+                    else:
+                        obj.close()
+                except Exception:
+                    pass
+
+                return
+
+            for attr in ("_original_response", "_fp", "fp", "raw", "_sock"):
+                try:
+                    stack.append(getattr(obj, attr))
+                except Exception:
+                    pass
+
+    def abort_connection():
+        if response is not None:
+            _shutdown_raw_socket()
+
+        for resource in (response, session):
+            if resource is None:
+                continue
+
+            try:
+                resource.close()
+            except Exception:
+                pass
+
+    class _AbortHandle:
+        """session_holder 里暴露的取消句柄:close() 即断开在途请求。"""
+
+        def close(self):
+            abort_connection()
 
     if session_holder is not None:
-        # 交给调用方持有句柄,取消时可从另一线程关闭在途连接
-        session_holder.append(session)
+        # 交给调用方持有句柄,取消时可从另一线程关闭在途连接/响应
+        session_holder.append(_AbortHandle())
 
     try:
         if cancel_event is not None and cancel_event.is_set():
@@ -489,10 +559,12 @@ def request_ai_verdict(base_url, model, api_key, category, title, detail, lang="
                 ],
                 "temperature": 0,
                 "max_tokens": 200,
-                "stream": False,
+                "stream": True,
+                "stream_options": {"include_usage": True},
             },
             headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
             timeout=_AI_VERDICT_TIMEOUT,
+            stream=True,
         )
     except Exception:
         # 取消导致的连接中断属预期路径,不记异常
@@ -500,23 +572,89 @@ def request_ai_verdict(base_url, model, api_key, category, title, detail, lang="
             log_exception("PYAS_AI.request_ai_verdict")
 
         return None
-    finally:
-        try:
-            session.close()
-        except Exception:
-            pass
 
     if cancel_event is not None and cancel_event.is_set():
+        abort_connection()
         return None
 
     if response.status_code != 200:
+        abort_connection()
         return None
 
-    try:
-        payload = response.json()
-        content = payload["choices"][0]["message"]["content"]
-    except Exception:
-        return None
+    if not hasattr(response, "iter_lines"):
+        # 整体 JSON 响应(测试替身/不支持流式的服务端):按旧版方式解析
+        try:
+            payload = response.json()
+        except Exception:
+            return None
+    else:
+        # 逐块读取 SSE:块间检查取消标记,用户裁决后立刻停止,不等剩余 token 生成完
+        content_parts = []
+        usage = None
+        saw_sse = False
+        cancelled = False
+        non_sse_parts = []
+
+        try:
+            for raw_line in response.iter_lines(chunk_size=512):
+                if cancel_event is not None and cancel_event.is_set():
+                    cancelled = True
+                    break
+
+                non_sse_parts.append(raw_line)
+                line = raw_line.decode("utf-8", "replace") if isinstance(raw_line, bytes) else raw_line
+
+                if not isinstance(line, str) or not line.startswith("data:"):
+                    continue
+
+                data = line[5:].strip()
+
+                if data == "[DONE]":
+                    break
+
+                try:
+                    event = json.loads(data)
+                except ValueError:
+                    continue
+
+                if not isinstance(event, dict):
+                    continue
+
+                saw_sse = True
+
+                if isinstance(event.get("usage"), dict):
+                    usage = event["usage"]
+
+                choices = event.get("choices")
+
+                if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                    delta = choices[0].get("delta")
+
+                    if isinstance(delta, dict) and isinstance(delta.get("content"), str):
+                        content_parts.append(delta["content"])
+        except Exception:
+            # 取消导致的连接中断属预期路径,不记异常
+            if cancel_event is None or not cancel_event.is_set():
+                log_exception("PYAS_AI.request_ai_verdict")
+
+            return None
+        finally:
+            abort_connection()
+
+        if cancelled or (cancel_event is not None and cancel_event.is_set()):
+            return None
+
+        if saw_sse:
+            payload = {"choices": [{"message": {"content": "".join(content_parts)}}], "usage": usage}
+        else:
+            # 服务端没按 SSE 下发(整体 JSON):把已读到的行拼回来按旧版解析
+            if not non_sse_parts:
+                return None
+
+            try:
+                payload = json.loads(b"\n".join(non_sse_parts))
+            except ValueError:
+                return None
 
     if usage_sink:
         # 计数失败绝不能影响建议本身;本地模型无 usage 字段时为 0,直接跳过
@@ -527,5 +665,10 @@ def request_ai_verdict(base_url, model, api_key, category, title, detail, lang="
                 usage_sink(tokens)
         except Exception:
             log_exception("PYAS_AI.request_ai_verdict.usage_sink")
+
+    try:
+        content = payload["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        return None
 
     return parse_ai_verdict(content)

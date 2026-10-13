@@ -422,13 +422,32 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
                 winreg.KEY_READ,
             ) as key:
                 try:
-                    server, _ = winreg.QueryValueEx(key, "ProxyServer")
-
-                    if server and "=" not in server:
-                        candidates.append("http://" + server)
+                    # ProxyEnable=0 时 ProxyServer 只是残留配置,照样用会把请求
+                    # 打到已停用的本地端口(实测过期端口直接报 SSLError)
+                    enabled, _ = winreg.QueryValueEx(key, "ProxyEnable")
 
                 except FileNotFoundError:
-                    pass
+                    enabled = 0
+
+                try:
+                    server, _ = winreg.QueryValueEx(key, "ProxyServer")
+
+                except FileNotFoundError:
+                    server = ""
+
+                if enabled and server:
+                    # IE 设置两种写法:整体 "host:port" 与分协议 "http=..;https=.."
+                    if "=" in server:
+                        entries = dict(
+                            part.split("=", 1) for part in server.split(";") if "=" in part
+                        )
+
+                        for value in (entries.get("https"), entries.get("http")):
+                            if value and value.strip():
+                                candidates.append("http://" + value.strip())
+
+                    else:
+                        candidates.append("http://" + server)
 
                 try:
                     pac, _ = winreg.QueryValueEx(key, "AutoConfigURL")
@@ -541,7 +560,7 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
 
         except requests.RequestException as error:
             log_exception('PYAS_Tools.ToolsMixin._check_upstream_update.network')
-            return {'supported': True, 'error': True, 'error_code': 'network_error', 'detail': type(error).__name__}
+            return {'supported': True, 'error': True, 'error_code': 'network_error', 'detail': f'{type(error).__name__}: {str(error)[:160]}'}
         except Exception:
             log_exception('PYAS_Tools.ToolsMixin._check_upstream_update')
             return {'supported': True, 'error': True, 'error_code': 'invalid_response'}
@@ -632,7 +651,7 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
 
         except requests.RequestException as error:
             log_exception('PYAS_Tools.ToolsMixin.check_update.network')
-            return {'error': True, 'error_code': 'network_error', 'detail': type(error).__name__}
+            return {'error': True, 'error_code': 'network_error', 'detail': f'{type(error).__name__}: {str(error)[:160]}'}
         except Exception:
             log_exception("PYAS_Tools.ToolsMixin.check_update:274")
             pass

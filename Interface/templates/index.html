@@ -144,6 +144,7 @@
             <div class="title-group">
                 <div class="navigate-title" data-i18n="app_name">PYAS Security Cyanmod</div>
                 <span class="version-chip" id="title_version"></span>
+                <span class="version-chip dev-chip hidden" id="title_dev_badge" data-i18n="dev_mode_badge">开发者模式</span>
             </div>
             <div class="window-controls">
                 <button class="ctrl-btn" id="about_button" data-target="about_window">
@@ -384,6 +385,13 @@
                             </div>
                             <button class="icon-action-btn"><svg><use href="#i-chevron-right"/></svg></button>
                         </div>
+                        <div class="list-item" style="cursor: pointer;" data-target="release_window">
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-file-check"/></svg>
+                            <div class="item-info">
+                                <h2 data-i18n="release_records">放行记录</h2><p data-i18n="release_records_desc">查看并管理永久允许与误报抑制规则</p>
+                            </div>
+                            <button class="icon-action-btn"><svg><use href="#i-chevron-right"/></svg></button>
+                        </div>
                     </div>
                 </section>
 
@@ -528,7 +536,7 @@
                             <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-shield-bot"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>智能體加固</h2><p data-i18n="ai_agent_desc">智能體的進程監控、權限與行為審計</p>
-                                <div class="ai-chips"><span class="ai-chip" title="AutoClaw"><img class="ai-chip-logo" src="/static/img/logos/autoclaw.png" alt="AutoClaw" data-letter="A" data-color="#2563EB"></span><span class="ai-chip" title="ChatGPT"><img class="ai-chip-logo" src="/static/img/logos/openai.svg" alt="ChatGPT" data-letter="C" data-color="#10A37F"></span><span class="ai-chip" title="DeepSeek"><img class="ai-chip-logo" src="/static/img/logos/deepseek.png" alt="DeepSeek" data-letter="D" data-color="#4D6BFE"></span><span class="ai-chip" title="豆包"><img class="ai-chip-logo" src="/static/img/logos/doubao.png" alt="豆包" data-letter="D" data-color="#325AB4"></span><span class="ai-chip" title="Hermes"><img class="ai-chip-logo" src="/static/img/logos/hermes.png" alt="Hermes" data-letter="H" data-color="#8B5CF6"></span><span class="ai-chip" title="Kimi Code"><img class="ai-chip-logo" src="/static/img/logos/kimi.png" alt="Kimi Code" data-letter="K" data-color="#1F2937"></span><span class="ai-chip" title="MimoCode"><img class="ai-chip-logo" src="/static/img/logos/mimo.png" alt="MimoCode" data-letter="M" data-color="#FF6900"></span><span class="ai-chip" title="OpenClaw"><img class="ai-chip-logo" src="/static/img/logos/openclaw.svg" alt="OpenClaw" data-letter="O" data-color="#EF4444"></span><span class="ai-chip" title="千问"><img class="ai-chip-logo" src="/static/img/logos/qwen.png" alt="千问" data-letter="Q" data-color="#FF6A00"></span><span class="ai-chip" title="Trae"><img class="ai-chip-logo" src="/static/img/logos/trae.png" alt="Trae" data-letter="T" data-color="#2563EB"></span><span class="ai-chip" title="WorkBuddy"><img class="ai-chip-logo" src="/static/img/logos/workbuddy.svg" alt="WorkBuddy" data-letter="W" data-color="#12B7F5"></span><span class="ai-chip" title="ZCode"><img class="ai-chip-logo" src="/static/img/logos/zcode.ico" alt="ZCode" data-letter="Z" data-color="#2563EB"></span><span class="ai-chip ai-chip-more" title="更多智能体">…</span></div>
+                                <div class="ai-chips"><span class="ai-chip" title="AutoClaw"><img class="ai-chip-logo" src="/static/img/logos/autoclaw.png" alt="AutoClaw" data-letter="A" data-color="#2563EB"></span><span class="ai-chip" title="ChatGPT"><img class="ai-chip-logo" src="/static/img/logos/openai.svg" alt="ChatGPT" data-letter="C" data-color="#10A37F"></span><span class="ai-chip" title="DeepSeek"><img class="ai-chip-logo" src="/static/img/logos/deepseek.png" alt="DeepSeek" data-letter="D" data-color="#4D6BFE"></span><span class="ai-chip" title="豆包"><img class="ai-chip-logo" src="/static/img/logos/doubao.png" alt="豆包" data-letter="D" data-color="#325AB4"></span><span class="ai-chip" title="Hermes"><img class="ai-chip-logo" src="/static/img/logos/hermes.png" alt="Hermes" data-letter="H" data-color="#8B5CF6"></span><span class="ai-chip" title="Kimi Code"><img class="ai-chip-logo" src="/static/img/logos/kimi.png" alt="Kimi Code" data-letter="K" data-color="#1F2937"></span><span class="ai-chip" title="MimoCode"><img class="ai-chip-logo" src="/static/img/logos/mimo.png" alt="MimoCode" data-letter="M" data-color="#FF6900"></span><span class="ai-chip" title="OpenClaw"><img class="ai-chip-logo" src="/static/img/logos/openclaw.svg" alt="OpenClaw" data-letter="O" data-color="#EF4444"></span><span class="ai-chip" title="千问"><img class="ai-chip-logo" src="/static/img/logos/qwen.png" alt="千问" data-letter="Q" data-color="#FF6A00"></span><span class="ai-chip" title="Trae"><img class="ai-chip-logo" src="/static/img/logos/trae.png" alt="Trae" data-letter="T" data-color="#2563EB"></span><span class="ai-chip" title="WorkBuddy"><img class="ai-chip-logo" src="/static/img/logos/workbuddy.svg" alt="WorkBuddy" data-letter="W" data-color="#12B7F5"></span><span class="ai-chip" title="ZCode"><img class="ai-chip-logo" src="/static/img/logos/zcode.png" alt="ZCode" data-letter="Z" data-color="#2563EB"></span><span class="ai-chip ai-chip-more" title="更多智能体">…</span></div>
                             </div>
                             <span class="ai-soon" data-i18n>即將上線</span>
                         </div>
@@ -631,7 +639,7 @@
                             <button class="icon-action-btn"><svg><use href="#i-chevron-right"/></svg></button>
                         </div>
                         <div class="list-item">
-                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg>
+                            <svg class="item-icon item-icon-compact" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg>
                             <div class="item-info">
                                 <div class="update-title-row">
                                     <h2 data-i18n>檢查更新</h2>
@@ -715,6 +723,26 @@
                                 <option value="extract" data-i18n="btn_extract_item">提取項目</option>
                                 <option value="remove" data-i18n="btn_remove_item">移除項目</option>
                                 <option value="quarantine" data-i18n="act_quarantine">加入隔離區</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="manage-widget flex-grow"><ul class="manage-list"></ul></div>
+                </section>
+
+                <section id="release_window" class="page sub-page">
+                    <div class="sub-header-toolbar">
+                        <button class="icon-btn" data-target="tool_window"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+                        <h2 data-i18n="release_records">放行记录</h2>
+                        <div class="spacer"></div>
+                        <div class="search-box">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                            <input type="text" data-i18n-placeholder="search_item" placeholder="搜尋項目...">
+                        </div>
+                        <div class="action-group modern-action-group">
+                            <select id="release_select" class="modern-select">
+                                <option value="none" selected disabled data-i18n="btn_select">選擇</option>
+                                <option value="remove" data-i18n="btn_remove_item">移除項目</option>
+                                <option value="clear" data-i18n="act_clear_all">全部清除</option>
                             </select>
                         </div>
                     </div>

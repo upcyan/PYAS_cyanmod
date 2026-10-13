@@ -7,9 +7,9 @@
   4. 分析中被用户决策 → 取消:结果作废、不入缓存、不计用量,并 best-effort 断连
   5. 延迟秒数钳制与快照视图(倒计时标签 + 悬停说明)
 """
+import os
 import threading
 import time
-import types
 import unittest
 from unittest.mock import patch
 
@@ -29,7 +29,8 @@ class ConfigApp(DialogMixin):
         self.pyas_config = {
             'ai_assist_switch': True,
             'ai_base_url': 'http://ai.local/v1',
-            'ai_api_key': '',
+            # 空占位改由环境变量提供:测试全程 mock AI 调用,不使用真实凭据
+            'ai_api_key': os.environ.get('AI_API_KEY', ''),
             'ai_model': 'test-model',
             **config,
         }
@@ -38,11 +39,24 @@ class ConfigApp(DialogMixin):
 class FakeResponse:
     status_code = 200
 
+    def __init__(self):
+        self.closed = False
+
+    def iter_lines(self, chunk_size=512):
+        # SSE 分块:先给结论内容,再给 usage,最后 DONE(与 OpenAI 兼容流式一致)
+        yield rb'data: {"choices":[{"delta":{"content":"{\"verdict\":\"block\",\"reason\":\"c2 beacon\"}"}}]}'
+        yield rb'data: {"choices":[],"usage":{"total_tokens":42}}'
+        yield rb'data: [DONE]'
+
     def json(self):
+        # 服务端不支持流式时的整体 JSON(回退解析路径)
         return {
             "choices": [{"message": {"content": '{"verdict":"block","reason":"c2 beacon"}'}}],
             "usage": {"total_tokens": 42},
         }
+
+    def close(self):
+        self.closed = True
 
 
 class FakeSession:
@@ -311,6 +325,74 @@ class AiRequestCancelTests(unittest.TestCase):
         self.assertIsNone(PYAS_AI._cache_get(cache_key), '被取消的结论不得进入缓存')
 
 
+class SlowStreamResponse:
+    """模拟仍在生成的流式响应:首块之后一直阻塞,直到连接被关闭。"""
+
+    status_code = 200
+
+    def __init__(self):
+        self.closed = False
+        self.first_chunk_sent = threading.Event()
+
+    def iter_lines(self, chunk_size=512):
+        self.first_chunk_sent.set()
+        yield rb'data: {"choices":[{"delta":{"content":"{\"verdict\":"}}]}'
+        deadline = time.monotonic() + 5
+        while not self.closed and time.monotonic() < deadline:
+            time.sleep(0.01)
+        yield rb'data: [DONE]'
+
+    def close(self):
+        self.closed = True
+
+
+class SlowStreamSession:
+    def __init__(self):
+        self.response = SlowStreamResponse()
+        self.closed = False
+
+    def post(self, *args, **kwargs):
+        return self.response
+
+    def close(self):
+        self.closed = True
+
+
+class StreamCancelTests(unittest.TestCase):
+    """流式传输下的取消:用户裁决后必须在数据块边界及时退出,不等生成完毕。"""
+
+    def test_cancel_midstream_stops_without_waiting_for_generation(self):
+        session = SlowStreamSession()
+        cancel = threading.Event()
+        holder = []
+        tokens = []
+        outcome = {}
+
+        def run():
+            outcome["value"] = request_ai_verdict(
+                "http://ai.local/v1", "m", "", "c", "t", "d",
+                usage_sink=tokens.append, cancel_event=cancel, session_holder=holder)
+
+        with patch.object(PYAS_AI.requests, "Session", lambda *a, **k: session):
+            started = time.monotonic()
+            worker = threading.Thread(target=run, daemon=True)
+            worker.start()
+            self.assertTrue(session.response.first_chunk_sent.wait(timeout=2), "应已开始产出数据块")
+
+            # 用户此刻裁决:置位取消 + 断开连接(等价于 queue.cancel_ai 的两步)
+            cancel.set()
+            for handle in holder:
+                handle.close()
+
+            worker.join(timeout=2)
+
+        self.assertFalse(worker.is_alive(), "取消后必须及时返回,不得等模型生成完(5s)也不能挂死")
+        self.assertLess(time.monotonic() - started, 3.0)
+        self.assertIsNone(outcome.get("value"), "取消后不得返回结论")
+        self.assertEqual(tokens, [], "取消后不得记录用量")
+        self.assertTrue(session.response.closed, "在途 response 必须被关闭")
+
+
 class DelaySnapshotTests(unittest.TestCase):
     def test_delay_state_becomes_countdown_label_with_hint(self):
         request = _DecisionRequest('simplified_switch', 't', 'm', None)
@@ -344,54 +426,39 @@ class DelaySnapshotTests(unittest.TestCase):
 
 
 class AiResultNotificationTests(unittest.TestCase):
-    """AI 出结果后推送通知:只在「用户未裁决 + 没在看弹窗」时发。"""
+    """AI 结论只显示在拦截弹窗内:就绪/失败都不得再发系统通知。"""
 
     def setUp(self):
         self.queue = _ThreatPromptQueue()
-        self.app = ConfigApp()
-        self.notified = []
-        self.app.dispatch_notification = lambda title, body: self.notified.append((title, body))
 
-    def _active_request(self, focused):
+    def _app(self, **config):
+        app = ConfigApp(**config)
+        app._threat_queue = self.queue
+        app.notified = []
+        app.dispatch_notification = lambda title, body: app.notified.append((title, body))
+        return app
+
+    def test_ready_result_stays_inside_the_dialog(self):
+        app = self._app(ai_delay_switch=False)
         request = _DecisionRequest('simplified_switch', '文件防护', 'm', None)
-        self.queue.active = request
-        self.queue.session = types.SimpleNamespace(focused=focused)
-        return request
 
-    def test_notifies_when_user_is_not_looking_at_dialog(self):
-        request = self._active_request(focused=False)
-        self.app._notify_ai_result(self.queue, request, {'verdict': 'block', 'reason': '命中 C2 名单'})
+        with patch('PYAS_Dialog.request_ai_verdict_cached',
+                   return_value={'verdict': 'block', 'reason': '命中 C2 名单'}):
+            app._start_ai_suggestion(request)
+            self.assertTrue(wait_until(lambda: request.ai['state'] == 'ready', timeout=4))
 
-        self.assertEqual(len(self.notified), 1)
-        title, body = self.notified[0]
-        self.assertEqual(title, '文件防护', '标题用告警标题')
-        self.assertIn('拦截', body, '必须带本地化结论')
-        self.assertIn('命中 C2 名单', body, '必须带 AI 给出的原因')
+        self.assertEqual(request.ai['verdict'], 'block', '结论仍写入弹窗状态(按钮 + 结论面板)')
+        self.assertEqual(app.notified, [], 'AI 结论只落在弹窗内,不得另发通知')
 
-    def test_silent_while_user_is_reading_the_dialog(self):
-        request = self._active_request(focused=True)
-        self.app._notify_ai_result(self.queue, request, {'verdict': 'allow', 'reason': '签名有效'})
-        self.assertEqual(self.notified, [], '用户正看着弹窗时不得重复打扰')
+    def test_failed_result_stays_inside_the_dialog(self):
+        app = self._app(ai_delay_switch=False)
+        request = _DecisionRequest('simplified_switch', '文件防护', 'm', None)
 
-    def test_silent_when_request_already_decided_or_not_active(self):
-        request = self._active_request(focused=False)
-        request.done.set()
-        self.app._notify_ai_result(self.queue, request, {'verdict': 'block', 'reason': 'r'})
-        self.assertEqual(self.notified, [])
+        with patch('PYAS_Dialog.request_ai_verdict_cached', return_value=None):
+            app._start_ai_suggestion(request)
+            self.assertTrue(wait_until(lambda: request.ai['state'] == 'failed', timeout=4))
 
-        self.queue.active = _DecisionRequest('simplified_switch', '另一告警', 'm', None)
-        self.app._notify_ai_result(self.queue, request, {'verdict': 'block', 'reason': 'r'})
-        self.assertEqual(self.notified, [], '已不是当前告警时不再推送')
-
-    def test_silent_without_usable_suggestion(self):
-        request = self._active_request(focused=False)
-        self.app._notify_ai_result(self.queue, request, None)
-        self.assertEqual(self.notified, [])
-
-    def test_missing_dispatch_capability_is_safe(self):
-        request = self._active_request(focused=False)
-        app = ConfigApp()          # 没有 dispatch_notification
-        app._notify_ai_result(self.queue, request, {'verdict': 'block', 'reason': 'r'})
+        self.assertEqual(app.notified, [], '失败态同样只由弹窗呈现,不发通知')
 
 
 if __name__ == '__main__':

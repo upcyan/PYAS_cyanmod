@@ -1,18 +1,45 @@
 """Execute the production update methods without starting Windows services."""
 import ast
+import os
 import re
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 import requests
 import PYAS_Channel
 from PYAS_Version import VERSION, UPSTREAM_REPO, UPSTREAM_TRACKED
 
+
+class _FakeWinreg:
+    """只实现 _system_proxy_candidates 用到的注册表入口,值由用例切换。"""
+    HKEY_CURRENT_USER = 0
+    KEY_READ = 0
+    VALUES = {}
+
+    class _Key:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    @classmethod
+    def OpenKey(cls, *args, **kwargs):
+        return cls._Key()
+
+    @classmethod
+    def QueryValueEx(cls, key, name):
+        if name not in cls.VALUES:
+            raise FileNotFoundError(name)
+        return cls.VALUES[name], 1
+
+
 tree = ast.parse((Path(__file__).resolve().parents[1] / 'PYAS_Tools.py').read_text(encoding='utf-8'))
 main = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'ToolsMixin')
-names = {'check_update', '_check_self_update', '_is_dev_channel', '_check_upstream_update', 'compare_versions'}
-scope = {'requests': requests, 're': re, 'VERSION': VERSION, 'UPSTREAM_REPO': UPSTREAM_REPO,
-    'UPSTREAM_TRACKED': UPSTREAM_TRACKED, 'log_exception': Mock()}
+names = {'check_update', '_check_self_update', '_is_dev_channel', '_check_upstream_update', 'compare_versions',
+    '_system_proxy_candidates'}
+scope = {'requests': requests, 're': re, 'os': os, 'winreg': _FakeWinreg, 'VERSION': VERSION,
+    'UPSTREAM_REPO': UPSTREAM_REPO, 'UPSTREAM_TRACKED': UPSTREAM_TRACKED, 'log_exception': Mock()}
 exec(compile(ast.Module(body=[n for n in main.body if isinstance(n, ast.FunctionDef) and n.name in names], type_ignores=[]), 'PYAS_Tools.py', 'exec'), scope)
 UpdateAPI = type('UpdateAPI', (), {name: scope[name] for name in names})
 
@@ -64,3 +91,26 @@ class UpdateTests(unittest.TestCase):
         api = UpdateAPI()
         api._github_get = Mock(side_effect=requests.ConnectTimeout())
         self.assertEqual(api.check_update()['error_code'], 'network_error')
+
+    def test_registry_proxy_respects_enable_flag(self):
+        # 回归:ProxyEnable=0 时 ProxyServer 只是残留配置,拿去当代理会打到已停用端口
+        api = UpdateAPI()
+        with patch.dict(os.environ, {}, clear=True):
+            _FakeWinreg.VALUES = {'ProxyEnable': 0, 'ProxyServer': '127.0.0.1:26561'}
+            self.assertEqual(api._system_proxy_candidates(), [])
+
+            _FakeWinreg.VALUES = {'ProxyEnable': 1, 'ProxyServer': '127.0.0.1:7890'}
+            self.assertEqual(api._system_proxy_candidates(), ['http://127.0.0.1:7890'])
+
+    def test_registry_proxy_per_protocol_form(self):
+        api = UpdateAPI()
+        with patch.dict(os.environ, {}, clear=True):
+            _FakeWinreg.VALUES = {'ProxyEnable': 1, 'ProxyServer': 'http=127.0.0.1:7890;https=127.0.0.1:7891'}
+            self.assertEqual(api._system_proxy_candidates(),
+                ['http://127.0.0.1:7891', 'http://127.0.0.1:7890'])
+
+    def test_registry_proxy_missing_values(self):
+        api = UpdateAPI()
+        with patch.dict(os.environ, {}, clear=True):
+            _FakeWinreg.VALUES = {}
+            self.assertEqual(api._system_proxy_candidates(), [])

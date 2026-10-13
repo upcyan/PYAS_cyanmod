@@ -23,3 +23,6 @@ Release/
 
 # 构建渠道生成文件(build.py 每次打包前写入)
 PYAS_Build.py
+
+# 旧版构建脚本留下的 mapping 文件(build_menu.py 现在写 MenuPackage/_mapping.txt)
+Output_menu_mapping.txt

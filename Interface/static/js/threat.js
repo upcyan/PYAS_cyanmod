@@ -249,16 +249,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('keydown', event => {
         if (event.key === 'Escape') { event.preventDefault(); minimize(); }
     });
-    // 前后台上报:AI 结果只在用户没盯着弹窗时才由主程序另行推送,避免重复打扰
-    const reportFocus = (state) => {
-        const api = window.pywebview?.api;
-        if (!api?.set_focus) return;
-        try { api.set_focus(state); } catch (error) { /* 上报失败不影响弹窗 */ }
-    };
-    window.addEventListener('focus', () => reportFocus(true));
-    window.addEventListener('blur', () => reportFocus(false));
-    document.addEventListener('visibilitychange', () => reportFocus(!document.hidden));
-    reportFocus(document.hasFocus());
 
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => window.PyasTheme.apply(latestTheme));
     refresh();

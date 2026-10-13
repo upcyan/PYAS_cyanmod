@@ -74,10 +74,13 @@
 #threat_ai:not(:disabled) { border-color: var(--accent-color); color: var(--accent-color); background: transparent; }
 #threat_ai:not(:disabled):hover { background-color: var(--accent-alpha); }
 
-/* AI 分析中:按钮边缘七彩流光(动态)。
-   ::before = 大尺寸圆形七彩盘绕中心匀速旋转 —— 用圆形而非矩形:旋转不改变覆盖范围,
-   不会像矩形旋转那样在左右两端周期性漏出透明边(闪烁);色相按角度分布,边缘自然呈现七彩流转。
-   ::after  = 内衬底色 + 轻微模糊羽化 —— 彩色不是硬切边,而是由外缘向按钮内部渐隐过渡。 */
+/* AI 分析中:沿按钮边框流动的细光带。
+   ::before = 直径略大于按钮对角线的旋转圆盘(圆形旋转覆盖恒定,不会漏边)。
+   锥形渐变只有一段「彗尾→亮头」光带、其余角度透明:圆盘与按钮尺寸相近时,
+   边框各点对应圆盘上很大的角度范围,光带经过时才依次点亮,看起来就是光
+   沿边框在跑;不再用远大于按钮的彩虹盘(那会让整圈边框几乎同色、只是缓慢变色)。
+   再叠一层恒定的浅色底(var(--accent-alpha)),光带离开后边框仍隐约可见。
+   ::after  = 内衬底色,只留 2px 贴边细环 —— 不再向内模糊晕染,细而不抢眼。 */
 #threat_ai.is-analyzing {
   position: relative;
   border-color: transparent;
@@ -93,30 +96,36 @@
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 400%;
+  width: 130%;
   aspect-ratio: 1 / 1;
   border-radius: 50%;
-  background: conic-gradient(from 0deg, #ff3b30, #ff9500, #ffcc00, #34c759, #00c7be, #007aff, #5856d6, #ff2d55, #ff3b30);
-  animation: ai-rainbow-rotate 2.6s linear infinite;
+  background:
+    conic-gradient(from 0deg,
+      transparent 0deg 190deg,
+      var(--accent-alpha) 235deg,
+      var(--accent-color) 322deg,
+      var(--accent-color) 354deg,
+      transparent 360deg),
+    var(--accent-alpha);
+  animation: ai-border-flow 2.2s linear infinite;
   will-change: transform;
   z-index: 0;
 }
 #threat_ai.is-analyzing::after {
   content: "";
   position: absolute;
-  inset: 4px;
+  inset: 2px;   /* 只留 2px 细环:彩色贴边,不向按钮内部扩散 */
   border-radius: inherit;
   background: var(--bg-panel);
-  filter: blur(4px);   /* 羽化内缘:彩色向按钮内部渐变过渡,而非硬切边 */
   z-index: 1;
 }
 #threat_ai.is-analyzing .btn-label { position: relative; z-index: 2; }
-@keyframes ai-rainbow-rotate {
+@keyframes ai-border-flow {
   from { transform: translate(-50%, -50%) rotate(0deg); }
   to { transform: translate(-50%, -50%) rotate(360deg); }
 }
 @media (prefers-reduced-motion: reduce) {
-  /* 动效敏感:停旋转(保留居中位移),静态虹彩边仍在,信息不丢失 */
+  /* 动效敏感:停旋转(保留居中位移),残留静态浅色边环,信息不丢失 */
   #threat_ai.is-analyzing::before { animation: none; transform: translate(-50%, -50%); }
 }
 

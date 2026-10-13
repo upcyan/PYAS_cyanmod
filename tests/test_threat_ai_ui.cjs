@@ -1,5 +1,5 @@
 /* Run with Playwright available: node tests/test_threat_ai_ui.cjs [screenshot-dir]
-   覆盖:AI 分析中七彩流光边、分析后面板结论、建议动作点击、失败态、未启用态。 */
+   覆盖:AI 分析中沿边框流动的细光带、分析后面板结论、建议动作点击、失败态、未启用态。 */
 const { chromium } = require('playwright');
 const http = require('node:http');
 const fs = require('node:fs');
@@ -28,7 +28,7 @@ const assert = require('node:assert/strict');
         const errors = [];
         page.on('pageerror', error => errors.push(String(error)));
         await page.addInitScript(() => {
-            window.aiTest = { state: 'analyzing', verdict: '', label: 'AI 分析中…', hint: '', decisions: [], blank: false, focusReports: [] };
+            window.aiTest = { state: 'analyzing', verdict: '', label: 'AI 分析中…', hint: '', decisions: [], blank: false };
             window.pywebview = { api: {
                 ready: async () => true,
                 snapshot: async () => (window.aiTest.blank ? null : ({
@@ -44,23 +44,12 @@ const assert = require('node:assert/strict');
                     } : null,
                 })),
                 decide: async (id, choice) => { window.aiTest.decisions.push({ id, choice }); return true; },
-                set_focus: async (state) => { window.aiTest.focusReports.push(state); return true; },
                 minimize: async () => true,
             } };
         });
         await page.goto(`http://127.0.0.1:${server.address().port}/templates/threat.html`);
         await page.getByRole('button', { name: '拦截', exact: true }).waitFor();
         await page.waitForFunction(() => !document.getElementById('threat_block').disabled);
-
-        // 0b. 前后台上报:主程序据此决定 AI 结果要不要另外推送
-        assert.ok(await page.evaluate(() => window.aiTest.focusReports.length > 0),
-            '弹窗必须在加载后上报一次前后台状态');
-        await page.evaluate(() => {
-            window.dispatchEvent(new Event('blur'));
-            window.dispatchEvent(new Event('focus'));
-        });
-        assert.deepEqual(await page.evaluate(() => window.aiTest.focusReports.slice(-2)), [false, true],
-            '失焦/获焦必须如实上报');
 
         // 0. 永久允许=放行语义:绿色实底(白字,对比度达标);拦截保持主色实底
         const permanentStyle = await page.evaluate(() => {
@@ -73,7 +62,7 @@ const assert = require('node:assert/strict');
         const aiButton = page.locator('#threat_ai');
         const panel = page.locator('#ai_result');
 
-        // 1. 分析中:按钮可见置灰、带流光类、伪元素动画名为 ai-rainbow-rotate;面板隐藏
+        // 1. 分析中:按钮可见置灰、带流光类、伪元素动画为 ai-border-flow;面板隐藏
         await page.waitForFunction(() => !document.getElementById('threat_ai').hidden);
         assert.equal(await aiButton.getAttribute('class'), 'action-btn modern-btn ai-btn is-analyzing');
         assert.equal(await aiButton.isDisabled(), true);
@@ -83,13 +72,14 @@ const assert = require('node:assert/strict');
             const style = getComputedStyle(document.getElementById('threat_ai'), '::before');
             return { name: style.animationName, duration: style.animationDuration, timing: style.animationTimingFunction };
         });
-        assert.equal(anim.name, 'ai-rainbow-rotate');
-        assert.equal(anim.duration, '2.6s');
+        assert.equal(anim.name, 'ai-border-flow');
+        assert.equal(anim.duration, '2.2s');
         assert.equal(anim.timing, 'linear');
 
-        // 1b. 流光必须是「动态且不掉边」:圆形七彩盘远大于按钮对角线,旋转时覆盖恒定;
-        //     内衬底色带模糊羽化,彩色由外缘向内渐变过渡(不是硬切边)
-        const rainbow = await page.evaluate(() => {
+        // 1b. 流光必须是「沿边框流动的细光带」:
+        //     圆盘盖住按钮对角线(旋转不掉边)且与按钮尺寸相近(光带才会绕边框跑);
+        //     光带之外的角度透明,不整圈上色;内衬只留 2px 细环且不再模糊晕染
+        const flow = await page.evaluate(() => {
             const button = document.getElementById('threat_ai');
             const box = button.getBoundingClientRect();
             const before = getComputedStyle(button, '::before');
@@ -98,15 +88,20 @@ const assert = require('node:assert/strict');
                 radius: before.borderRadius,
                 width: parseFloat(before.width),
                 diagonal: Math.hypot(box.width, box.height),
+                backgroundImage: before.backgroundImage,
                 afterFilter: after.filter,
                 afterInset: after.top,
             };
         });
-        assert.equal(rainbow.radius, '50%', 'rainbow must be a disc so rotation never uncovers the button');
-        assert.ok(rainbow.width > rainbow.diagonal * 1.5,
-            `disc (${rainbow.width}px) must dwarf button diagonal (${rainbow.diagonal.toFixed(1)}px)`);
-        assert.ok(rainbow.afterFilter.includes('blur'), 'inner cover must be feathered (inward gradient), got ' + rainbow.afterFilter);
-        assert.equal(rainbow.afterInset, '4px');
+        assert.equal(flow.radius, '50%', 'disc must be a circle so rotation never uncovers the button');
+        assert.ok(flow.width >= flow.diagonal,
+            `disc (${flow.width}px) must cover button diagonal (${flow.diagonal.toFixed(1)}px)`);
+        assert.ok(flow.backgroundImage.includes('conic-gradient'),
+            'edge colors must come from a conic light band, got ' + flow.backgroundImage);
+        assert.ok(flow.backgroundImage.includes('rgba(0, 0, 0, 0)'),
+            'angles outside the light band must stay transparent, got ' + flow.backgroundImage);
+        assert.equal(flow.afterFilter, 'none', 'inner cover must not feather inward anymore');
+        assert.equal(flow.afterInset, '2px', 'only a thin 2px edge ring may remain');
         const output = process.argv[2];
         if (output) {
             fs.mkdirSync(output, { recursive: true });
@@ -203,7 +198,7 @@ const assert = require('node:assert/strict');
         assert.equal(await panel.isVisible(), false);
 
         assert.deepEqual(errors, []);
-        console.log('Threat AI UI: PASS (dynamic rainbow edge w/ inward feather, disc coverage, delay state w/o analysis, result panel, block/allow actions, stop-on-complete, cleared-when-gone, failed state, disabled state, dark theme)');
+        console.log('Threat AI UI: PASS (flowing thin edge band, disc coverage, no whole-ring tint, delay state w/o analysis, result panel, block/allow actions, stop-on-complete, cleared-when-gone, failed state, disabled state, dark theme)');
     } finally {
         if (browser) await browser.close();
         await new Promise(resolve => server.close(resolve));

@@ -1,4 +1,4 @@
-﻿* {
+* {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
@@ -1549,6 +1549,14 @@ body.resizing-active * {
     border-radius: var(--radius-pill);
     background-color: var(--accent-alpha);
     color: var(--accent-color);
+}
+
+/* 版本号后的「开发者模式」标识:描边弱化,不与版本徽章抢视觉 */
+.version-chip.dev-chip {
+    background-color: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-weight: 500;
 }
 
 .changelog-widget {
