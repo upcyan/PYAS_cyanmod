@@ -426,6 +426,13 @@
                             <label class="toggle-switch"><input type="checkbox" checked data-config-key="suffix_switch"><span class="slider"></span></label>
                         </div>
                         <div class="list-item">
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-bell"/></svg>
+                            <div class="item-info">
+                                <h2 data-i18n>免打擾模式</h2><p data-i18n>系統忙碌、全螢幕或演示時,攔截彈窗靜默排隊不彈出</p>
+                            </div>
+                            <label class="toggle-switch"><input type="checkbox" data-config-key="dnd_switch"><span class="slider"></span></label>
+                        </div>
+                        <div class="list-item">
                             <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-monitor-power"/></svg>
                             <div class="item-info">
                                 <h2 data-i18n>開機啟動</h2><p data-i18n>此選項可以設定開機自動執行</p>
@@ -538,7 +545,10 @@
                                 <h2 data-i18n>智能體加固</h2><p data-i18n="ai_agent_desc">智能體的進程監控、權限與行為審計</p>
                                 <div class="ai-chips"><span class="ai-chip" title="AutoClaw"><img class="ai-chip-logo" src="/static/img/logos/autoclaw.png" alt="AutoClaw" data-letter="A" data-color="#2563EB"></span><span class="ai-chip" title="ChatGPT"><img class="ai-chip-logo" src="/static/img/logos/openai.svg" alt="ChatGPT" data-letter="C" data-color="#10A37F"></span><span class="ai-chip" title="DeepSeek"><img class="ai-chip-logo" src="/static/img/logos/deepseek.png" alt="DeepSeek" data-letter="D" data-color="#4D6BFE"></span><span class="ai-chip" title="豆包"><img class="ai-chip-logo" src="/static/img/logos/doubao.png" alt="豆包" data-letter="D" data-color="#325AB4"></span><span class="ai-chip" title="Hermes"><img class="ai-chip-logo" src="/static/img/logos/hermes.png" alt="Hermes" data-letter="H" data-color="#8B5CF6"></span><span class="ai-chip" title="Kimi Code"><img class="ai-chip-logo" src="/static/img/logos/kimi.png" alt="Kimi Code" data-letter="K" data-color="#1F2937"></span><span class="ai-chip" title="MimoCode"><img class="ai-chip-logo" src="/static/img/logos/mimo.png" alt="MimoCode" data-letter="M" data-color="#FF6900"></span><span class="ai-chip" title="OpenClaw"><img class="ai-chip-logo" src="/static/img/logos/openclaw.svg" alt="OpenClaw" data-letter="O" data-color="#EF4444"></span><span class="ai-chip" title="千问"><img class="ai-chip-logo" src="/static/img/logos/qwen.png" alt="千问" data-letter="Q" data-color="#FF6A00"></span><span class="ai-chip" title="Trae"><img class="ai-chip-logo" src="/static/img/logos/trae.png" alt="Trae" data-letter="T" data-color="#2563EB"></span><span class="ai-chip" title="WorkBuddy"><img class="ai-chip-logo" src="/static/img/logos/workbuddy.svg" alt="WorkBuddy" data-letter="W" data-color="#12B7F5"></span><span class="ai-chip" title="ZCode"><img class="ai-chip-logo" src="/static/img/logos/zcode.png" alt="ZCode" data-letter="Z" data-color="#2563EB"></span><span class="ai-chip ai-chip-more" title="更多智能体">…</span></div>
                             </div>
-                            <span class="ai-soon" data-i18n>即將上線</span>
+                            <button class="modern-btn" id="ai_agent_scan" data-i18n>掃描本機</button>
+                        </div>
+                        <div class="list-item hidden" id="ai_agent_results_item">
+                            <div class="item-info" id="ai_agent_results"></div>
                         </div>
                         <div class="settings-group">
                         <div class="list-item">
@@ -602,7 +612,9 @@
                         <div class="list-item settings-child">
                             <div class="item-info">
                                 <h2 data-i18n>模型名稱</h2><p data-i18n>例如 qwen2.5:7b 或 gpt-4o-mini</p>
+                                <p id="ai_models_hint" class="ai-hint"></p>
                             </div>
+                            <button class="modern-btn" id="ai_models_scan" data-i18n>掃描模型</button>
                             <input type="text" id="ai_model_input" class="modern-input" placeholder="模型名稱" data-i18n-placeholder="模型名稱" spellcheck="false">
                         </div>
                         <div class="list-item settings-child" id="ai_token_row">
@@ -619,6 +631,29 @@
                             <button class="modern-btn" id="ai_test_button" data-i18n>測試連接</button>
                         </div>
                     </div>
+                    <div class="settings-group">
+                        <div class="list-item">
+                            <div class="item-info">
+                                <h2 data-i18n>誤報抑制規則</h2><p data-i18n>內容或簽名錨定的誤報豁免,90 天自動過期</p>
+                            </div>
+                            <button class="modern-btn" id="suppress_refresh" data-i18n>重新整理</button>
+                        </div>
+                        <div class="list-item" id="suppress_empty">
+                            <div class="item-info"><p class="ai-hint" data-i18n>暫無抑制規則</p></div>
+                        </div>
+                        <div id="suppress_list"></div>
+                    </div>
+                    <div class="settings-group">
+                        <div class="list-item">
+                            <div class="item-info">
+                                <h2 data-i18n>AI 規則草稿</h2><p data-i18n>從放行記錄歸納候選抑制規則,須逐條審核</p>
+                            </div>
+                            <button class="modern-btn" id="drafts_generate" data-i18n>產生草稿</button>
+                        </div>
+                        <div class="list-item" id="drafts_empty">
+                            <div class="item-info"><p class="ai-hint" data-i18n>暫無草稿;產生後在此逐條批准或拒絕</p></div>
+                        </div>
+                        <div id="drafts_list"></div>
                     </div>
                 </section>
 

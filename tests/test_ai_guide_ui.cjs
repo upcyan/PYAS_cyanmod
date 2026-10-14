@@ -97,6 +97,16 @@ const assert = require('node:assert/strict');
         assert.equal(structure.tipVisible, true, '引导文字必须可见');
 
         // 3. 洞口必须正好对准「模型接入」:没有任何 dim 与该区块相交
+        // Enabling assistance expands rows and starts a smooth scroll; await actual alignment.
+        await page.waitForFunction(() => {
+            const layer = document.getElementById('ai_model_guide');
+            const target = document.getElementById('ai_model_group').getBoundingClientRect();
+            return [...layer.querySelectorAll('.ai-guide-dim')].every(el => {
+                const d = el.getBoundingClientRect();
+                return d.right <= target.left + .5 || d.left >= target.right - .5
+                    || d.bottom <= target.top + .5 || d.top >= target.bottom - .5;
+            });
+        });
         const hole = await page.evaluate(() => {
             const layer = document.getElementById('ai_model_guide');
             const target = document.getElementById('ai_model_group').getBoundingClientRect();

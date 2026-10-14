@@ -119,7 +119,7 @@ const assert = require('node:assert/strict');
                 h2Size: getComputedStyle(row.querySelector('.item-info h2')).fontSize,
             });
             return {
-                order: rows.map(r => r.querySelector('.item-info h2')?.textContent?.trim()).slice(0, 6),
+                order: rows.filter(r => r.querySelector('.item-info h2')).map(r => r.querySelector('.item-info h2').textContent.trim()).slice(0, 6),
                 assist: describe(find('ai_assist_switch')),
                 delay: describe(find('ai_delay_switch')),
                 delaySeconds: describe(document.querySelector('[data-setting-parent="ai_delay_switch"]')),

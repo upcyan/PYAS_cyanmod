@@ -93,29 +93,40 @@ class StarterTests(unittest.TestCase):
 
     def test_queue_starts_analysis_once_not_for_followers(self):
         starter = Mock()
-        queue = _ThreatPromptQueue(ai_starter=starter)
+        displayed = threading.Event()
+        release = threading.Event()
+        class HeldSession:
+            hwnd = None
+            def run(self):
+                displayed.set()
+                release.wait(3)
+        # Deduplication must not race a real native window failing/closing on a test host.
+        queue = _ThreatPromptQueue(ai_starter=starter, session_factory=lambda *a, **kw: HeldSession())
         request = _DecisionRequest('english_switch', 't', 'm', None, dedup_key=('k', 1))
         follower = _DecisionRequest('english_switch', 't', 'm', None, dedup_key=('k', 1))
+        threads = []
         try:
             first = threading.Thread(target=queue.submit, args=(request,))
+            threads.append(first)
             first.start()
-            deadline = time.monotonic() + 2
-            while starter.call_count < 1 and time.monotonic() < deadline:
-                time.sleep(.005)
+            self.assertTrue(displayed.wait(2))
             self.assertEqual(starter.call_count, 1)
-
             second = threading.Thread(target=queue.submit, args=(follower,))
+            threads.append(second)
             second.start()
-            deadline = time.monotonic() + 1
-            while queue.count < 2 and time.monotonic() < deadline:
-                time.sleep(.005)
-            self.assertEqual(queue.count, 2)
+            with queue.condition:
+                self.assertTrue(queue.condition.wait_for(lambda: queue.count == 2, timeout=2))
             self.assertEqual(starter.call_count, 1)
         finally:
             queue.close()
-        for thread in (first, second):
-            thread.join(2)
-            self.assertFalse(thread.is_alive())
+            release.set()
+            for thread in threads:
+                thread.join(2)
+                self.assertFalse(thread.is_alive())
+            worker = queue.worker
+            if worker:
+                worker.join(2)
+                self.assertFalse(worker.is_alive())
 
 
 class DeadlineChoiceTests(unittest.TestCase):

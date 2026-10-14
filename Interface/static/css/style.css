@@ -312,7 +312,7 @@ body {
 
 .modern-select:hover, .modern-select:focus { 
     border-color: var(--accent-color); 
-    box-shadow: 0 0 0 2px var(--accent-shadow); 
+    box-shadow: 0 0 0 2px var(--accent-shadow);
 }
 
 .modern-btn {
@@ -509,16 +509,16 @@ body {
 }
 
 .item-info h2 { 
-    font-size: var(--text-xl); 
+    font-size: var(--text-xl);
     font-weight: 600; 
     letter-spacing: -0.2px; 
     white-space: nowrap; 
 }
 
 .item-info p { 
-    font-size: var(--text-sm); 
+    font-size: var(--text-sm);
     color: var(--text-secondary); 
-    margin-top: var(--space-1); 
+    margin-top: var(--space-1);
     white-space: nowrap; 
 }
 
@@ -1823,6 +1823,18 @@ body.resizing-active * {
 
 #ai_window .item-info .ai-chips {
     margin-top: 8px;
+}
+
+/* AI+ 管理(抑制规则/草稿/智能体) */
+.suppress-row { gap: 10px; }
+.suppress-title { font-size: 13px; color: var(--text-primary); }
+.mono { font-family: Consolas, Menlo, monospace; font-size: 12px; }
+
+/* 拦截弹窗:AI 理由可见渲染 */
+.ai-reason {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: var(--accent-color);
 }
 
 /* ==========================================================================

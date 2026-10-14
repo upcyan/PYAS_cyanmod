@@ -10,6 +10,7 @@ import ctypes
 import ctypes.wintypes
 from PYAS_Tools import MEMORY_BASIC_INFORMATION
 from PYAS_Cloud import CloudQueueMixin
+from PYAS_Detection import DetectionResult, detection_result
 
 
 class ScannerMixin(CloudQueueMixin):
@@ -130,10 +131,10 @@ class ScannerMixin(CloudQueueMixin):
             sen_switch = self.pyas_config.get("sensitive_switch", False)
 
         try:
-            pe_label, _ = self.properties.pe_scan(file_path, enhanced_mode=sen_switch)
+            pe_label, pe_score = self.properties.pe_scan(file_path, enhanced_mode=sen_switch)
 
             if pe_label:
-                return pe_label
+                return detection_result(pe_label, "ml", score=pe_score)
         except Exception:
             log_exception("PYAS_Scanner.ScannerMixin.scan_engine:115")
             pass
@@ -143,7 +144,9 @@ class ScannerMixin(CloudQueueMixin):
                 yara_label, _ = self.heuristic.yara_scan(file_path)
 
                 if yara_label:
-                    return yara_label
+                    if isinstance(yara_label, DetectionResult):
+                        return yara_label
+                    return detection_result(yara_label, "yr")
         except Exception:
             log_exception("PYAS_Scanner.ScannerMixin.scan_engine:123")
             pass

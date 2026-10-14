@@ -883,6 +883,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const switchPage = (targetId) => {
+        if (targetId === 'ai_window') loadAiPageData?.();
         const oldActive = document.querySelector('.page.active');
         if (oldActive && oldActive.id !== targetId) {
             if (oldActive.id === 'junk_window') {
@@ -1355,6 +1356,132 @@ document.addEventListener('DOMContentLoaded', () => {
         local: { url: 'http://127.0.0.1:11434/v1', model: 'qwen2.5:7b' },
         cloud: { url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
     };
+    // —— AI+ 页:按需加载与交互(抑制规则 / P3 草案 / P4 智能体 / Ollama)——
+    var loadAiPageData;
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+    const scopeLabel = key => getMsg(`suppress_scope_${key}`) || key;
+    let aiPageLoaded = false;
+
+    loadAiPageData = async () => {
+        const api = window.pywebview?.api;
+        if (!api || aiPageLoaded) return;
+        aiPageLoaded = true;
+        await Promise.all([renderSuppressionRules(), renderDrafts(), renderAgentActivity()]);
+    };
+
+    const renderSuppressionRules = async () => {
+        const list = document.getElementById('suppress_list');
+        const empty = document.getElementById('suppress_empty');
+        if (!list) return;
+        try {
+            const rules = await window.pywebview.api.get_suppression_rules();
+            empty?.classList.toggle('hidden', rules.length > 0);
+            list.replaceChildren(...rules.map(rule => {
+                const row = document.createElement('div');
+                row.className = 'list-item suppress-row';
+                const expired = rule.expires > 0 && rule.expires * 1000 < Date.now();
+                row.innerHTML = `<div class="item-info"><p class="suppress-title">${esc(scopeLabel(rule.scope))}`
+                    + ` · <span class="mono">${esc(rule.sha256.slice(0, 16))}…</span>`
+                    + `${rule.signer ? ` · <span class="mono">${esc(rule.signer.slice(0, 12))}…</span>` : ''}</p>`
+                    + `<p class="ai-hint">${esc(rule.note || rule.reason)} · ${getMsg('suppress_hits')}: ${rule.hits}`
+                    + ` · ${getMsg('suppress_expires')}: ${new Date(rule.expires * 1000).toLocaleDateString()}`
+                    + `${rule.source === 'ai' ? ' · AI' : ''}${expired ? ' · ⚠' : ''}</p></div>`;
+                const del = document.createElement('button');
+                del.className = 'modern-btn';
+                del.textContent = getMsg('suppress_delete');
+                del.addEventListener('click', async () => {
+                    if (await window.pywebview.api.delete_suppression_rule(rule.id)) renderSuppressionRules();
+                });
+                row.appendChild(del);
+                return row;
+            }));
+        } catch (error) { console.error('Suppression rules load failed', error); }
+    };
+
+    const renderDrafts = async () => {
+        const list = document.getElementById('drafts_list');
+        const empty = document.getElementById('drafts_empty');
+        if (!list) return;
+        try {
+            const drafts = await window.pywebview.api.get_ai_rule_drafts();
+            empty?.classList.toggle('hidden', drafts.length > 0);
+            list.replaceChildren(...drafts.map(draft => {
+                const row = document.createElement('div');
+                row.className = 'list-item suppress-row';
+                row.innerHTML = `<div class="item-info"><p class="mono">${esc(draft.sha256.slice(0, 24))}…</p>`
+                    + `<p class="ai-hint">${esc(draft.note || draft.reason)} · AI</p></div>`;
+                const ok = document.createElement('button');
+                ok.className = 'modern-btn primary-btn';
+                ok.textContent = getMsg('draft_approve');
+                ok.addEventListener('click', async () => {
+                    if (await window.pywebview.api.resolve_ai_rule_draft(draft.id, true)) {
+                        aiPageLoaded = false; await loadAiPageData();
+                    }
+                });
+                const no = document.createElement('button');
+                no.className = 'modern-btn';
+                no.textContent = getMsg('draft_reject');
+                no.addEventListener('click', async () => {
+                    if (await window.pywebview.api.resolve_ai_rule_draft(draft.id, false)) renderDrafts();
+                });
+                row.append(ok, no);
+                return row;
+            }));
+        } catch (error) { console.error('Drafts load failed', error); }
+    };
+
+    const renderAgentActivity = async () => {
+        const box = document.getElementById('ai_agent_results');
+        const wrap = document.getElementById('ai_agent_results_item');
+        if (!box) return;
+        try {
+            const activity = await window.pywebview.api.get_agent_activity();
+            wrap?.classList.toggle('hidden', activity.length === 0);
+            box.replaceChildren(...activity.map(item => {
+                const p = document.createElement('p');
+                p.className = 'ai-hint';
+                p.textContent = `${item.name} · ${item.exe} · ${item.count} pid`;
+                return p;
+            }));
+        } catch (error) { console.error('Agent activity load failed', error); }
+    };
+
+    document.getElementById('suppress_refresh')?.addEventListener('click', renderSuppressionRules);
+    document.getElementById('drafts_generate')?.addEventListener('click', async () => {
+        const api = window.pywebview?.api;
+        if (!api) return;
+        try {
+            const res = await api.generate_ai_rule_drafts();
+            if (res?.ok) { await renderDrafts(); }
+            else window.pywebview.api.show_alert(getMsg('title_error'),
+                res?.error === 'no_data' ? getMsg('draft_no_data') : getMsg('draft_failed'), 'warning');
+        } catch (error) { console.error('Draft generation failed', error); }
+    });
+    document.getElementById('ai_agent_scan')?.addEventListener('click', async () => {
+        await window.pywebview?.api.scan_agent_processes?.();
+        await renderAgentActivity();
+    });
+    document.getElementById('ai_models_scan')?.addEventListener('click', async () => {
+        const api = window.pywebview?.api;
+        const hint = document.getElementById('ai_models_hint');
+        if (!api || !hint) return;
+        hint.textContent = '…';
+        try {
+            const res = await api.scan_local_ai_models();
+            if (!res?.ok || !res.models?.length) { hint.textContent = getMsg('ollama_none'); return; }
+            hint.replaceChildren(...res.models.slice(0, 8).map(name => {
+                const chip = document.createElement('span');
+                chip.className = 'ai-chip';
+                chip.textContent = name;
+                chip.addEventListener('click', () => {
+                    const input = document.getElementById('ai_model_input');
+                    if (input) { input.value = name; input.dispatchEvent(new Event('change')); }
+                });
+                return chip;
+            }));
+        } catch (error) { console.error('Model scan failed', error); hint.textContent = getMsg('ollama_none'); }
+    });
+
 
     const applyAiModeUI = (mode) => {
         const isLocal = mode !== 'cloud';

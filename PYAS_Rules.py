@@ -1,12 +1,20 @@
 from PYAS_Diagnostics import log_exception
 import os
+import threading
 import yara
+from PYAS_Detection import detection_result
 
 
 class RuleScanner:
     def __init__(self):
         self.rules = None
         self.network = []
+        # 检测结果翻译层:命中规则的 meta description,按扫描线程隔离
+        self._meta_local = threading.local()
+
+    def last_description(self):
+        """同线程最近一次 yara_scan 的规则描述;无则空串。"""
+        return str(getattr(self._meta_local, "description", "") or "")
 
     def load_path(self, path, callback=None):
         yara_files = {}
@@ -57,6 +65,7 @@ class RuleScanner:
             pass
 
     def yara_scan(self, file_path):
+        self._meta_local.description = ""
         try:
             if not self.rules:
                 return False, False
@@ -65,16 +74,20 @@ class RuleScanner:
 
             if matches:
                 rule_name = str(matches[0])
+                self._meta_local.description = str(matches[0].meta.get("description", "") or "")
 
                 try:
                     label = rule_name.split("_")[0]
                     platform = rule_name.split("_")[1]
                     family = rule_name.split("_")[2]
 
-                    return f"{label}:{platform}/{family}.{len(matches)}!yr", 100
+                    finding = f"{label}:{platform}/{family}.{len(matches)}!yr"
+                    return detection_result(finding, "yr",
+                        description=self._meta_local.description, rules=tuple(map(str, matches))), 100
                 except Exception:
                     log_exception("PYAS_Rules.RuleScanner.yara_scan:70")
-                    return rule_name, 100
+                    return detection_result(rule_name, "yr",
+                        description=self._meta_local.description, rules=tuple(map(str, matches))), 100
 
             return False, False
         except Exception:
@@ -82,6 +95,7 @@ class RuleScanner:
             return False, False
 
     def yara_mem_scan(self, pid):
+        self._meta_local.description = ""
         try:
             if not self.rules:
                 return False, False
@@ -90,16 +104,20 @@ class RuleScanner:
 
             if matches:
                 rule_name = str(matches[0])
+                self._meta_local.description = str(matches[0].meta.get("description", "") or "")
 
                 try:
                     label = rule_name.split("_")[0]
                     platform = rule_name.split("_")[1]
                     family = rule_name.split("_")[2]
 
-                    return f"{label}:{platform}/{family}.{len(matches)}!ym", 100
+                    finding = f"{label}:{platform}/{family}.{len(matches)}!ym"
+                    return detection_result(finding, "ym",
+                        description=self._meta_local.description, rules=tuple(map(str, matches))), 100
                 except Exception:
                     log_exception("PYAS_Rules.RuleScanner.yara_mem_scan:91")
-                    return rule_name, 100
+                    return detection_result(rule_name, "ym",
+                        description=self._meta_local.description, rules=tuple(map(str, matches))), 100
 
             return False, False
         except Exception:
