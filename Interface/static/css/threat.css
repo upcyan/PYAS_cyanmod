@@ -124,10 +124,9 @@
   from { transform: translate(-50%, -50%) rotate(0deg); }
   to { transform: translate(-50%, -50%) rotate(360deg); }
 }
-@media (prefers-reduced-motion: reduce) {
-  /* 动效敏感:停旋转(保留居中位移),残留静态浅色边环,信息不丢失 */
-  #threat_ai.is-analyzing::before { animation: none; transform: translate(-50%, -50%); }
-}
+/* 流动光带是「AI 分析中」唯一的进行中指示,不跟随系统的「减少动态效果」:
+   系统关掉窗口动画后(SPI_GETCLIENTAREAANIMATION=0)浏览器会把
+   prefers-reduced-motion 报成 reduce,停掉旋转的话按钮看上去与卡死无异。 */
 
 /* AI 分析结果面板:分析结束后在主题内容区展示结论与建议动作 */
 .ai-result {

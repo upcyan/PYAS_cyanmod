@@ -221,7 +221,15 @@ document.addEventListener('DOMContentLoaded', () => {
         popup: [{key: 'mode', label: 'col_status', flex: 0.7, isI18n: true}, {key: 'exe', label: 'col_prog', flex: 1}, {key: 'class', label: 'col_class', flex: 1}, {key: 'title', label: 'col_title', flex: 2}],
         repair: [{key: 'display', label: 'col_repair', flex: 1, isI18n: true}, {key: 'path', label: 'col_path', flex: 3}],
         netmon: [{key: 'name', label: 'col_name', flex: 1.5}, {key: 'pid', label: 'col_pid', flex: 0.5}, {key: 'downStr', label: 'col_down_speed', flex: 1}, {key: 'upStr', label: 'col_up_speed', flex: 1}, {key: 'connCount', label: 'col_conn_count', flex: 0.8}],
-        release: [{key: 'kind', label: 'col_type', flex: 1, isI18n: true}, {key: 'action', label: 'col_func', flex: 1.2, isI18n: true}, {key: 'source', label: 'col_path', flex: 3}, {key: 'hash', label: 'col_hash', flex: 1.4}, {key: 'status', label: 'col_status', flex: 1}, {key: 'hits', label: 'col_hits', flex: 0.6}]
+        release: [{key: 'kind', label: 'col_type', flex: 1, isI18n: true}, {key: 'action', label: 'col_func', flex: 1.2, isI18n: true}, {key: 'source', label: 'col_path', flex: 3}, {key: 'hash', label: 'col_hash', flex: 1.3}, {key: 'status', label: 'col_status', flex: 0.9}, {key: 'hits', label: 'col_hits', flex: 0.55}, {key: 'createdStr', label: 'col_created', flex: 1.15}]
+    };
+
+    const formatReleaseTime = (epoch) => {
+        const stamp = Number(epoch || 0);
+        if (!(stamp > 0)) return '-';
+        const date = new Date(stamp * 1000);
+        const pad = value => String(value).padStart(2, '0');
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
     };
 
     const buildReleaseRows = (data) => {
@@ -229,13 +237,17 @@ document.addEventListener('DOMContentLoaded', () => {
         (data.permanent || []).forEach(item => rows.push({
             kind: 'release_kind_permanent', action: item.action || '',
             source: item.source || '-', hash: item.sha256 || '-',
-            status: '-', hits: '-', value: 'p:' + (item.key || ''),
+            status: '-', hits: String(item.hits || 0),
+            created: Number(item.created || 0), createdStr: formatReleaseTime(item.created),
+            value: 'p:' + (item.key || ''),
         }));
         (data.suppress || []).forEach(item => rows.push({
             kind: 'release_kind_suppress', action: item.action || '',
             source: item.source || '-', hash: item.sha256 || '-',
             status: formatMsg('release_days_left', String(item.days_left || 0)),
-            hits: String(item.hits || 0), value: 's:' + (item.id || ''),
+            hits: String(item.hits || 0),
+            created: Number(item.created || 0), createdStr: formatReleaseTime(item.created),
+            value: 's:' + (item.id || ''),
         }));
         return rows;
     };
@@ -438,7 +450,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const decisionTitle = document.getElementById('clear_alert_rules_title');
         const decisionDescription = document.getElementById('clear_alert_rules_desc');
         if (decisionTitle) decisionTitle.textContent = /^zh/.test(document.documentElement.lang) ? '清除已记住的告警决定' : 'Clear remembered alert decisions';
-        if (decisionDescription) decisionDescription.textContent = /^zh/.test(document.documentElement.lang) ? '撤销永久允许及 30 秒重复操作规则；保留普通白名单' : 'Revoke permanent and short-lived alert rules; keep the regular whitelist';
+        if (decisionDescription) decisionDescription.textContent = /^zh/.test(document.documentElement.lang) ? '撤销永久允许及短期重复决定规则（重复窗口随确认次数延长，最长 1 小时）；保留普通白名单' : 'Revoke permanent and short-lived alert rules; keep the regular whitelist';
 
         const progressText = document.getElementById('progress_text');
         if (progressText && progressText.dataset.dynamicMsg) {
@@ -596,7 +608,7 @@ document.addEventListener('DOMContentLoaded', () => {
             displayData.sort((a, b) => {
                 const valA = a[state.sortKey] ?? '', valB = b[state.sortKey] ?? '';
                 
-                const rawKeyMap = { 'sizeStr': 'size', 'downStr': 'down', 'upStr': 'up' };
+                const rawKeyMap = { 'sizeStr': 'size', 'downStr': 'down', 'upStr': 'up', 'createdStr': 'created' };
                 if (rawKeyMap[state.sortKey] && rawKeyMap[state.sortKey] in a && rawKeyMap[state.sortKey] in b) {
                     const rawKey = rawKeyMap[state.sortKey];
                     return state.sortAsc ? a[rawKey] - b[rawKey] : b[rawKey] - a[rawKey];
@@ -1847,9 +1859,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (val === 'remove') {
             const checked = getCheckedValues('#release_window');
             if (checked.length === 0) return updateCustomSelectUI('release_select', 'none');
+            // 行 value 用单字母前缀(p:/s:)保持紧凑;后端 API 契约是 permanent/suppress
+            const kindOf = { p: 'permanent', s: 'suppress' };
             Promise.all(checked.map(v => {
                 const sep = v.indexOf(':');
-                return window.pywebview.api.delete_release_record(v.slice(0, sep), v.slice(sep + 1));
+                return window.pywebview.api.delete_release_record(kindOf[v.slice(0, sep)], v.slice(sep + 1));
             })).then(refresh).then(() => updateCustomSelectUI('release_select', 'none'));
         } else if (val === 'clear') {
             window.pywebview.api.show_confirm(getMsg('title_prompt'), getMsg('msg_clear_release_confirm')).then(ok => {

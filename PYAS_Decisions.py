@@ -7,14 +7,34 @@ from contextlib import contextmanager
 from uuid import uuid4
 
 MAX_RULES = 256
-REPEAT_SECONDS = 30
-REPEAT_USES = 20
+REPEAT_SECONDS = 60
+REPEAT_USES = 100
+# 阶梯式重复有效期:已消费次数越多,窗口越长(按同一份内容的重复确认递增信任)
+REPEAT_TIERS = ((40, 3600), (15, 900), (5, 300))
+REPEAT_MAX_LIFETIME = 86400
 
 # 误报抑制:只锚定文件内容(SHA-256),绝不锚定目录/进程名/扩展名。
 # scope 'file_rule' = 该内容 × 该检测结果(L1);'file' = 该内容 × 全部检测(L2)
 SUPPRESS_TTL = 90 * 86400
 SUPPRESS_SCOPES = ('file_rule', 'file')
 SUPPRESS_REASONS = ('dev_tool', 'installer', 'enterprise', 'game_patch', 'other')
+
+# 永久允许记录随命中/展示补上 hits、created 等字段,匹配只能按身份字段比对
+PERMANENT_IDENTITY_FIELDS = ('action', 'source', 'target', 'sha256', 'detection', 'key')
+# 命中计数首次与每 N 次落盘一次,避免高频事件反复写配置
+HIT_PERSIST_EVERY = 50
+
+
+def _identity_view(item):
+    return {field: item.get(field) for field in PERMANENT_IDENTITY_FIELDS} if isinstance(item, dict) else None
+
+
+def _repeat_window(consumed):
+    """按已消费次数查阶梯窗口:消费越多,窗口越长。"""
+    for floor, seconds in REPEAT_TIERS:
+        if consumed >= floor:
+            return seconds
+    return REPEAT_SECONDS
 
 
 def alert_identity(action, source, target, detection, opener=None):
@@ -95,7 +115,7 @@ class AlertPolicyMixin:
             return None
         with self._alert_policy_lock():
             rules = self.pyas_config.get('alert_allow_rules', [])
-            if isinstance(rules, list) and any(isinstance(item, dict) and item == rule for item in rules[:MAX_RULES]):
+            if isinstance(rules, list) and self._count_permanent_hits_locked(rules, rule):
                 return 'allow'
             if self._match_suppression_locked(rule) is not None:
                 return 'allow'
@@ -107,8 +127,33 @@ class AlertPolicyMixin:
             item = recent.get(rule['key'])
             if item and item['rule'] == rule and item['uses'] >= uses:
                 item['uses'] -= uses
+                # 阶梯顺延:消费越多窗口越长;只延长不缩短,且受绝对寿命上限约束
+                created = item.get('created', now)
+                item['until'] = min(
+                    max(item['until'], now + _repeat_window(REPEAT_USES - item['uses'])),
+                    created + REPEAT_MAX_LIFETIME,
+                )
                 return item['choice']
         return None
+
+    def _count_permanent_hits_locked(self, rules, rule):
+        """按身份字段命中永久允许并累计计数;首次与每 HIT_PERSIST_EVERY 次落盘一次。"""
+        matched = None
+
+        for item in rules[:MAX_RULES]:
+            if isinstance(item, dict) and _identity_view(item) == rule:
+                matched = item
+                break
+
+        if matched is None:
+            return False
+
+        matched['hits'] = int(matched.get('hits', 0)) + 1
+
+        if matched['hits'] <= 1 or matched['hits'] % HIT_PERSIST_EVERY == 0:
+            self.save_config()
+
+        return True
 
     def _match_suppression_locked(self, rule):
         """内容锚定抑制匹配;命中即累计审计计数,过期条目顺带清理。"""
@@ -231,6 +276,8 @@ class AlertPolicyMixin:
                     "action": item.get("action", ""),
                     "source": item.get("source", ""),
                     "sha256": item.get("sha256", ""),
+                    "hits": int(item.get("hits", 0)),
+                    "created": float(item.get("created", 0) or 0),
                 }
                 for item in allows[:MAX_RULES]
             ]
@@ -246,6 +293,7 @@ class AlertPolicyMixin:
                     "scope": item.get("scope", ""),
                     "days_left": max(1, int((item.get("expires", 0) - now) // 86400) + 1),
                     "hits": int(item.get("hits", 0)),
+                    "created": float(item.get("created", 0) or 0),
                 }
                 for item in suppress[:MAX_RULES]
             ]
@@ -323,10 +371,12 @@ class AlertPolicyMixin:
             if choice == 'permanent':
                 old = self.pyas_config.get('alert_allow_rules', [])
                 rules = list(old) if isinstance(old, list) else []
-                if rule not in rules:
+                # 落库的条目带 hits/created,重复判断只能按身份字段比
+                if not any(isinstance(item, dict) and _identity_view(item) == rule for item in rules[:MAX_RULES]):
                     if len(rules) >= MAX_RULES:
                         return False
-                    self.pyas_config['alert_allow_rules'] = [*rules, rule]
+                    entry = {**rule, 'created': time.time(), 'hits': 0}
+                    self.pyas_config['alert_allow_rules'] = [*rules, entry]
                     if self.save_config() is False:
                         self.pyas_config['alert_allow_rules'] = old
                         return False
@@ -336,8 +386,10 @@ class AlertPolicyMixin:
                     recent = self._recent_alert_decisions = {}
                 if len(recent) >= MAX_RULES:
                     recent.pop(next(iter(recent)))
+                now = time.monotonic()
                 recent[rule['key']] = {'rule': rule, 'choice': choice,
-                    'until': time.monotonic() + REPEAT_SECONDS, 'uses': REPEAT_USES}
+                    'until': now + REPEAT_SECONDS, 'uses': REPEAT_USES,
+                    'created': now}
         if hasattr(self, 'write_log'):
             self.write_log('WARN' if choice == 'permanent' else 'INFO', 'Alert Decision Remembered',
                 source=rule['source'], detail=f"{rule['action']} / {rule['target']} / {choice} / repeat={repeat}", file_hash=rule['sha256'])

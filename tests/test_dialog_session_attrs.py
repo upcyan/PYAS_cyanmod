@@ -208,7 +208,7 @@ class DeadlineFallbackTests(unittest.TestCase):
             sys.modules["webview"] = self._saved_webview
 
     def _stage(self, ai_state, timeout=5):
-        owner = ConfigApp(theme="white_switch")
+        owner = ConfigApp(theme="white_switch", ai_assist_switch=True, ai_auto_execute=True)
         queue = _ThreatPromptQueue()
         request = _DecisionRequest("zh", "title", "body", timeout)
         request.ai = ai_state
@@ -234,9 +234,17 @@ class DeadlineFallbackTests(unittest.TestCase):
         return worker
 
     def test_no_ai_verdict_returns_decision_to_user(self):
-        """AI 分析中/失败时,超时不得擅自拦截——撤销倒计时,等用户自己点。"""
+        """超时自动执行模式:AI 分析中不起表;AI 失败起表但到点不得擅自拦截,
+        撤销倒计时、把决定权交回用户。"""
+        # 分析中:不起表(倒计时只等 AI 出结论后才开始)
         queue, request, session = self._stage({"state": "analyzing", "verdict": "", "reason": ""})
-        self.assertIsNotNone(request.deadline)
+        self.assertIsNone(request.deadline, "AI 分析中不得起表")
+        self.assertIsNone(session.api.snapshot()["remaining"])
+        queue.close()
+
+        # AI 失败:起表(给用户一段处理窗口),到点无结论 → 撤销、交回人工
+        queue, request, session = self._stage({"state": "failed", "verdict": "", "reason": ""})
+        self.assertIsNotNone(request.deadline, "AI 失败仍起表,给用户处理窗口")
         request.deadline = time.monotonic() - 1
         worker = self._start(session)
         try:

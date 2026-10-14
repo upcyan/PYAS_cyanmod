@@ -102,6 +102,14 @@ const assert = require('node:assert/strict');
             'angles outside the light band must stay transparent, got ' + flow.backgroundImage);
         assert.equal(flow.afterFilter, 'none', 'inner cover must not feather inward anymore');
         assert.equal(flow.afterInset, '2px', 'only a thin 2px edge ring may remain');
+
+        // 1b-2. 系统关掉动画(浏览器把 prefers-reduced-motion 报成 reduce)时也必须继续动:
+        //       流光是「AI 分析中」唯一的进行中指示,停转会让按钮看上去像卡死
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        assert.equal(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches), true);
+        assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('threat_ai'), '::before').animationName),
+            'ai-border-flow', 'AI 分析中的流光不跟随系统的减少动态效果设置');
+        await page.emulateMedia({ reducedMotion: null });
         const output = process.argv[2];
         if (output) {
             fs.mkdirSync(output, { recursive: true });

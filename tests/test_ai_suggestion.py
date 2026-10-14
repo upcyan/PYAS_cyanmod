@@ -198,6 +198,60 @@ class SnapshotTests(unittest.TestCase):
         self.assertIsNone(ai_snapshot_view(request))
 
 
+class AutoExecuteCountdownTests(unittest.TestCase):
+    """超时自动执行的倒计时:必须等 AI 出结论才起表,失败回退人工决策。"""
+
+    def _session(self, timeout):
+        owner = ConfigApp(theme='black_switch', language='english_switch',
+                          ai_assist_switch=True, ai_auto_execute=True)
+        queue = _ThreatPromptQueue()
+        request = _DecisionRequest('english_switch', 't', 'm', timeout)
+        queue.pending.append(request)
+        queue.take_next()
+        session = _WebThreatDialogSession('en', 't', 'm', timeout, str, queue, owner)
+        session.api.ready()
+        return queue, request, session
+
+    def test_delay_and_analyzing_never_arm_the_countdown(self):
+        for state in ('delay', 'analyzing'):
+            queue, request, session = self._session(30)
+            request.ai = {'state': state, 'verdict': '', 'reason': '', 'deadline': time.monotonic() + 3}
+            self.assertIsNone(session.api.snapshot()['remaining'],
+                              f'{state} 阶段不得起表:AI 还没结论')
+            queue.close()
+
+    def test_ready_state_arms_the_countdown(self):
+        queue, request, session = self._session(30)
+        request.ai = {'state': 'ready', 'verdict': 'allow', 'reason': 'ok'}
+        remaining = session.api.snapshot()['remaining']
+        self.assertIn(remaining, (30, 29), f'就绪后应起表,实际 {remaining}')
+        queue.close()
+
+    def test_failed_state_falls_back_to_manual(self):
+        queue, request, session = self._session(30)
+        request.ai = {'state': 'failed', 'verdict': '', 'reason': ''}
+        remaining = session.api.snapshot()['remaining']
+        self.assertIn(remaining, (30, 29), '失败也要起表,给一段人工处理窗口')
+        # 到点:AI 无结论 → 撤销倒计时,交回人工(不自动拦截、更不自动放行)
+        request.deadline = time.monotonic() - 1
+        self.assertIsNone(ai_deadline_choice(request), '失败态到点不得自动裁决')
+        queue.close()
+
+    def test_classic_auto_block_still_arms_without_ai(self):
+        owner = ConfigApp(theme='black_switch', language='english_switch',
+                          interactive_auto_block=True)
+        owner.pyas_config['interactive_timeout'] = 30
+        queue = _ThreatPromptQueue()
+        request = _DecisionRequest('english_switch', 't', 'm', 30)
+        queue.pending.append(request)
+        queue.take_next()
+        session = _WebThreatDialogSession('en', 't', 'm', 30, str, queue, owner)
+        session.api.ready()
+        remaining = session.api.snapshot()['remaining']
+        self.assertIn(remaining, (30, 29), '无 AI 参与时保持原自动拦截语义')
+        queue.close()
+
+
 class SetAiStateTests(unittest.TestCase):
     def test_no_late_writes_after_decision(self):
         queue = _ThreatPromptQueue()

@@ -43,6 +43,12 @@ ID_BLOCK_BUTTON = 1001
 ID_ALLOW_BUTTON = 1002
 ID_COUNTDOWN_TIMER = 1
 
+# 弹窗窗口在「最后一个告警处理完」之后仍保留的秒数。
+# 保留是为了复用同一个 WebView 窗口:每次新建窗口都要重新加载 threat.html
+# 与全部静态资源(实测仅页面就 50ms+,原生窗口创建更慢),连续多条告警时
+# 用户会看到「白屏一阵子才出内容」。短间隔内的下一条告警直接复用现成窗口。
+THREAT_WINDOW_IDLE_GRACE = 20
+
 SPI_GETWORKAREA = 0x0030
 HWND_TOPMOST = -1
 SWP_SHOWWINDOW = 0x0040
@@ -704,6 +710,10 @@ class _ThreatPromptQueue:
                         self.ai_starter(request)
                     except Exception:
                         log_exception("PYAS_Dialog._ThreatPromptQueue.submit.ai_starter")
+                if self.worker is not None and self.active is None:
+                    # 窗口处于空窗保留期:worker 正阻塞在会话里,没人把 pending
+                    # 提升为 active,这里就地提升,否则这条告警永远等不到裁决
+                    self.take_next()
             if self.worker is None:
                 self.worker = threading.Thread(target=self._run, daemon=True, name="PYAS.ThreatQueue")
                 self.worker.start()
@@ -919,9 +929,19 @@ class _WebDecisionAPI:
             request = session.queue.active
             if request is None:
                 return None
-            if (session.ready.is_set() and request.timeout and request.deadline is None
-                    and not request.timeout_consumed):
-                request.deadline = time.monotonic() + request.timeout
+            if session.ready.is_set() and request.timeout and not request.timeout_consumed and request.deadline is None:
+                state = request.ai if isinstance(request.ai, dict) else {}
+                ai_phase = state.get("state")
+                if session.owner._ai_auto_execute_enabled():
+                    # 自动执行模式:只在 AI 已出结论(就绪/失败)后起表,此时
+                    # AI 不会再变,剩余时间才是有意义的「未处理就自动执行」。
+                    # 分析中(delay/analyzing)不起表;失败照常起表,到点无结论
+                    # 则 ai_deadline_choice 返回 None → 撤销倒计时交回人工决策。
+                    if ai_phase in ("ready", "failed"):
+                        request.deadline = time.monotonic() + request.timeout
+                elif ai_phase is None:
+                    # 经典自动拦截模式(无 AI 建议参与):界面就绪即起表,保持原语义
+                    request.deadline = time.monotonic() + request.timeout
             remaining = max(0, math.ceil(request.deadline - time.monotonic())) if request.deadline else None
             events = session.queue.describe()
             result = {
@@ -953,9 +973,15 @@ class _WebDecisionAPI:
                 "ai": ai_snapshot_view(request),
                 "fp": fp_snapshot_view(request),
             }
-        with session.owner.lock_config:
-            result["theme"] = session.owner.pyas_config.get("theme", "system_switch")
-            result["language"] = session.owner.pyas_config.get("language", "english_switch")
+        # 主题/语言只用于界面显示:直接读配置字典,不进全局配置锁。
+        # snapshot 在 pywebview 桥接线程上每 400ms 轮询一次;若在这里等
+        # lock_config,配置写盘(保存/回滚/监视重载)持锁稍久,弹窗就会
+        # 卡在 Loading… 且 ready 发不出去,30 秒后被看门狗判为「UI failed
+        # to initialize」而自动拦截 —— 线上已实测发生。CPython 的 dict.get
+        # 是原子的,两个显示用字符串不需要加锁。
+        config = getattr(session.owner, "pyas_config", None) or {}
+        result["theme"] = config.get("theme", "system_switch")
+        result["language"] = config.get("language", "english_switch")
         return result
 
     def decide(self, request_id, choice, repeat=False):
@@ -1037,7 +1063,23 @@ class _WebThreatDialogSession:
         self.hwnd = None
         self.ready = threading.Event()
         self.destroying = False
+        # 最后一次「有告警在处理」的时刻;队列清空后据此决定是否继续保留窗口
+        self._last_active_at = time.monotonic()
         self.api = _WebDecisionAPI(self)
+
+    def _should_keep_alive(self, request, now=None):
+        """最后一个告警处理完后,窗口在宽限期内保持存活以复用。
+
+        判定与 run() 主循环分离,便于单测:队列里还有告警必保留;清空后
+        未超过宽限期仍保留(此时窗口继续显示最后一条的结果,或已随
+        snapshot 变空而进入空态),超过宽限期才放行销毁。
+        """
+        if request is not None:
+            self._last_active_at = time.monotonic()
+            return True
+
+        now = time.monotonic() if now is None else now
+        return (now - self._last_active_at) < THREAT_WINDOW_IDLE_GRACE
 
     @staticmethod
     def _bottom_right_position(width, height, scale=1.0, margin=16):
@@ -1076,31 +1118,54 @@ class _WebThreatDialogSession:
         self.hwnd = True  # Queue operations use post_message, not a native HWND.
         self.window.events.closing += self._on_closing
         started = time.monotonic()
+        idle = False
         try:
             while True:
+                entered_idle = False
+                revived = False
                 with self.queue.condition:
                     request = self.queue.active
-                    if self.queue.closed or request is None:
+                    if self.queue.closed or not self._should_keep_alive(request):
                         break
-                    if request.deadline and request.deadline <= time.monotonic():
-                        verdict = ai_deadline_choice(request)
-                        if verdict is None:
-                            # AI 没给出结论:不代替用户决定,撤销倒计时交回用户自主决策
-                            request.timeout_consumed = True
-                            request.deadline = None
+                    if request is None:
+                        # 宽限期内队列已空:窗口收起待命,空窗态不再显示失效按钮
+                        if not idle:
+                            idle = True
+                            entered_idle = True
+                    else:
+                        if idle:
+                            idle = False
+                            revived = True
+                        if request.deadline and request.deadline <= time.monotonic():
+                            verdict = ai_deadline_choice(request)
+                            if verdict is None:
+                                # AI 没给出结论:不代替用户决定,撤销倒计时交回用户自主决策
+                                request.timeout_consumed = True
+                                request.deadline = None
+                                continue
+                            if verdict != "block":
+                                try:
+                                    self.owner.write_log(
+                                        "INFO", "AI Suggestion Applied",
+                                        detail=f"{request.title} / {verdict}",
+                                    )
+                                except Exception:
+                                    pass
+                            self.queue.complete(verdict)
+                            self.queue.take_next()
                             continue
-                        if verdict != "block":
-                            try:
-                                self.owner.write_log(
-                                    "INFO", "AI Suggestion Applied",
-                                    detail=f"{request.title} / {verdict}",
-                                )
-                            except Exception:
-                                pass
-                        self.queue.complete(verdict)
-                        self.queue.take_next()
-                        continue
                     self.queue.condition.wait(.2)
+                if entered_idle:
+                    try:
+                        self.window.minimize()
+                    except Exception:
+                        log_exception("PYAS_Dialog._WebThreatDialogSession.run.idle_minimize")
+                if revived:
+                    # 空窗期内来了新告警:同一窗口重新前置显示,不再重建
+                    try:
+                        self.post_message(WM_SHOW_PENDING)
+                    except Exception:
+                        log_exception("PYAS_Dialog._WebThreatDialogSession.run.revive")
                 if not self.ready.is_set() and time.monotonic() - started > 30:
                     raise RuntimeError("Threat window UI failed to initialize")
         finally:
@@ -1713,7 +1778,7 @@ class DialogMixin(AlertPolicyMixin):
             auto_execute = bool(self.pyas_config.get("ai_auto_execute", False))
 
             if ai_assist and auto_execute:
-                # 二级选项:超时自动执行 AI 建议(就绪执行,未就绪一律拦截)
+                # 二级选项:超时自动执行 AI 建议(仅就绪执行;失败回退人工)
                 try:
                     timeout = int(
                         self.pyas_config.get("ai_auto_execute_timeout", 60)

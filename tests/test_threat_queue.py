@@ -7,6 +7,7 @@ from unittest.mock import Mock
 from PYAS_Dialog import (
     DialogMixin, _DecisionRequest, _ThreatDialogSession, _ThreatPromptQueue,
     WM_CLOSE, WM_TIMER, ID_COUNTDOWN_TIMER,
+    THREAT_WINDOW_IDLE_GRACE,
     _WebThreatDialogSession,
 )
 
@@ -123,6 +124,116 @@ class QueueTests(unittest.TestCase):
         finally:
             release.set()
             queue.close()
+
+    def test_window_idle_grace_keeps_session_reusable(self):
+        """队列清空后窗口在宽限期内保活,期间新告警复用同一窗口而非重建。
+
+        每次新建 WebView 窗口都要重新加载 threat.html(实测仅页面就 50ms+),
+        用户看到的是白屏;宽限期就是给短间隔内的下一条告警留的复用窗口。
+        """
+        owner = ConfigApp(theme='black_switch', language='simplified_switch')
+        queue = _ThreatPromptQueue()
+        request = _DecisionRequest('en', 'test', 'test', None)
+        queue.pending.append(request)
+        queue.take_next()
+        session = _WebThreatDialogSession('en', 'test', 'test', None, str, queue, owner)
+        self.assertTrue(session._should_keep_alive(request), '处理中必须保活')
+
+        idle_at = time.monotonic()
+        self.assertTrue(session._should_keep_alive(None, now=idle_at), '刚清空仍在宽限期内')
+        self.assertTrue(session._should_keep_alive(None, now=idle_at + THREAT_WINDOW_IDLE_GRACE - 1))
+        self.assertFalse(
+            session._should_keep_alive(None, now=idle_at + THREAT_WINDOW_IDLE_GRACE + 1),
+            '宽限期满必须放行销毁,否则弹窗永久驻留')
+        self.assertTrue(session._should_keep_alive(request), '期间又来告警会重置空窗计时')
+        self.assertTrue(session._should_keep_alive(None), '重置后宽限期重新起算')
+        queue.close()
+
+    def test_snapshot_does_not_wait_on_config_lock(self):
+        """弹窗快照(400ms 轮询)不得等全局配置锁。
+
+        snapshot 在 pywebview 桥接线程上执行;一旦配置写盘/回滚持锁较久,
+        界面就卡在 Loading… 且 ready 发不出去,30 秒后被看门狗判为
+        「UI failed to initialize」而自动拦截 —— 线上实测发生过。
+        """
+        owner = ConfigApp(theme='black_switch', language='simplified_switch')
+        queue = _ThreatPromptQueue()
+        request = _DecisionRequest('en', 'test', 'test', None)
+        queue.pending.append(request)
+        queue.take_next()
+        session = _WebThreatDialogSession('en', 'test', 'test', None, str, queue, owner)
+
+        holding = threading.Event()
+        release = threading.Event()
+
+        def hold_config_lock():
+            with owner.lock_config:
+                holding.set()
+                release.wait(3)
+
+        holder = threading.Thread(target=hold_config_lock, daemon=True)
+        holder.start()
+        self.assertTrue(holding.wait(1), '另一线程应已持有配置锁(模拟配置写盘)')
+        try:
+            captured = []
+            poller = threading.Thread(target=lambda: captured.append(session.api.snapshot()))
+            poller.start()
+            poller.join(1.0)
+            self.assertFalse(poller.is_alive(), '快照被配置锁卡住:弹窗会停在 Loading…')
+            self.assertEqual(captured[0]['theme'], 'black_switch')
+            self.assertEqual(captured[0]['language'], 'simplified_switch')
+        finally:
+            release.set()
+            holder.join(2)
+        queue.close()
+
+    def test_idle_session_promotes_new_request_without_new_worker(self):
+        """空窗保留期内提交的新告警必须就地提升为当前项,不能卡在 pending 里。
+
+        原逻辑靠 worker 循环 take_next 提升;保活后 worker 阻塞在会话里,
+        若不在 submit 就地提升,这条告警会永远等不到裁决。
+        """
+        started = threading.Event()
+        release = threading.Event()
+
+        def session_factory(*args, queue):
+            class Session:
+                hwnd = True
+                def run(self):
+                    started.set()
+                    # 模拟宽限期待命:阻塞到测试放行,窗口保持存活
+                    release.wait(5)
+                def post_message(self, message):
+                    pass
+            return Session()
+
+        queue = _ThreatPromptQueue(session_factory)
+        first = _DecisionRequest('en', 'first', 'body', None)
+        second = _DecisionRequest('en', 'second', 'body', None)
+        first_thread = threading.Thread(target=queue.submit, args=(first,))
+        second_thread = threading.Thread(target=queue.submit, args=(second,))
+        try:
+            first_thread.start()
+            self.assertTrue(started.wait(1))
+            deadline = time.monotonic() + 1
+            while queue.active is not first and time.monotonic() < deadline:
+                time.sleep(.005)
+            self.assertIs(queue.active, first)
+            queue.complete('allow')
+            self.assertTrue(first.done.is_set())
+
+            second_thread.start()
+            deadline = time.monotonic() + 1
+            while queue.active is not second and time.monotonic() < deadline:
+                time.sleep(.005)
+            self.assertIs(queue.active, second, '空窗期内的新告警应立即成为当前项')
+            queue.complete('block')
+            self.assertTrue(second.done.wait(1))
+        finally:
+            release.set()
+            queue.close()
+            first_thread.join(2)
+            second_thread.join(2)
 
     def test_shutdown_resolves_active_pending_and_capacity_waiters(self):
         started = threading.Event()
