@@ -1512,9 +1512,11 @@ document.addEventListener('DOMContentLoaded', () => {
             box.replaceChildren(...activity.map(item => {
                 const p = document.createElement('p');
                 p.className = 'ai-hint';
-                // elevated>0 时追加提权进程数(数据行缀,非 i18n 键,与「 pid」同风格)
+                // admin×N=提权进程数;✓=主程序签名已验证(无标记=仅名字匹配)。
+                // 数据行缀非 i18n 键,与「 pid」同风格
                 p.textContent = `${item.name} · ${item.exe} · ${item.count} pid`
-                    + (item.elevated ? ` · admin×${item.elevated}` : '');
+                    + (item.elevated ? ` · admin×${item.elevated}` : '')
+                    + (item.verified ? ' · ✓' : '');
                 return p;
             }));
         } catch (error) { console.error('Agent activity load failed', error); }

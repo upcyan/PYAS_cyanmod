@@ -106,6 +106,31 @@ class ScanTests(unittest.TestCase):
         self.assertEqual(len(self.owner.logs), 0)
         self.assertEqual(self.owner.get_agent_activity()[0]['name'], 'Claude Code')
 
+    def test_identity_tier_from_signature(self):
+        # 有映像路径→验签名定档;路径查不到→跳过验证(verify 收到空串按未验证)
+        with patch('PYAS_Agents._process_image_path', side_effect=['', 'C:\\tools\\claude.exe']), \
+             patch('PYAS_Agents.verify_agent_identity', return_value=True) as verify:
+            activity = self.owner.scan_agent_processes(
+                lister=lambda: [('claude.exe', 1), ('claude.exe', 2)])
+        self.assertTrue(activity[0]['verified'])
+        verify.assert_called_once_with('C:\\tools\\claude.exe')
+
+        with patch('PYAS_Agents._process_image_path', return_value=''), \
+             patch('PYAS_Agents.verify_agent_identity', return_value=False) as verify:
+            activity = self.owner.scan_agent_processes(lister=lambda: [('kimi.exe', 7)])
+        self.assertFalse(activity[0]['verified'])
+
+    def test_identify_agent_for_event_tiers_and_switch(self):
+        self.owner.pyas_config = {"agent_switch": True}
+        with patch('PYAS_Agents.verify_agent_identity', return_value=True):
+            product, verified = self.owner.identify_agent_for_event(
+                'C:\\proj\\app.py', 'C:\\tools\\Claude\\claude.exe')
+        self.assertEqual((product, verified), ('Claude Code', True))
+
+        self.owner.pyas_config = {"agent_switch": False}
+        self.assertEqual(
+            self.owner.identify_agent_for_event('C:\\tools\\ZCode\\zcode.exe', ''), (None, False))
+
 
 class InstalledAgentsTests(unittest.TestCase):
     """已安装过滤:L1 进程 > L2 快捷方式/npm > 安装位置,按目录顺序返回。"""

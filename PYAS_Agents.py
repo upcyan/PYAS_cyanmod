@@ -11,6 +11,7 @@ import os
 import time
 
 from PYAS_Diagnostics import log_exception
+from PYAS_Signature import SignatureScanner
 
 # 智能体目录:唯一真源(显示名/匹配 token/图标/徽标/安装位置线索)。
 # 界面按「本机已安装」过滤后渲染图标带;activity 列表用 name 对齐。
@@ -112,6 +113,81 @@ def match_agent_name(exe_name):
             return entry["name"]
 
     return None
+
+
+# 身份验证结果缓存:签名不随时间变化,同一文件一个进程周期只验一次
+_verify_cache = {}
+_signer = None
+
+
+def _get_signer():
+    """懒加载 WinVerifyTrust;初始化失败返回 None(调用方按未验证处理)。"""
+    global _signer
+
+    if _signer is None:
+        try:
+            scanner = SignatureScanner()
+            scanner.init_windll(["wintrust"])
+            _signer = scanner
+        except Exception:
+            log_exception("PYAS_Agents._get_signer")
+            _signer = False
+
+    return _signer or None
+
+
+def _process_image_path(pid):
+    """查询进程映像完整路径;失败返回空串。"""
+    try:
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, int(pid))
+    except Exception:
+        return ""
+
+    if not handle:
+        return ""
+
+    try:
+        buf = ctypes.create_unicode_buffer(1024)
+        size = ctypes.c_ulong(ctypes.sizeof(buf))
+
+        if ctypes.windll.kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+            return buf.value
+
+        return ""
+    finally:
+        ctypes.windll.kernel32.CloseHandle(handle)
+
+
+def verify_agent_identity(exe_path):
+    """身份分档:Authenticode 有效签名=已验证;缺失/失败=未验证(名字级弱证据)。
+
+    fail-closed:验证不出来就不给信用,任何异常都落未验证档。
+    """
+    path = str(exe_path or "")
+
+    if not path or not os.path.isfile(path):
+        return False
+
+    key = os.path.normcase(os.path.abspath(path))
+
+    if key in _verify_cache:
+        return _verify_cache[key]
+
+    signer = _get_signer()
+    result = False
+
+    if signer:
+        try:
+            result = bool(signer.sign_verify(path))
+        except Exception:
+            log_exception("PYAS_Agents.verify_agent_identity")
+            result = False
+
+    if len(_verify_cache) >= 64:
+        _verify_cache.clear()
+
+    _verify_cache[key] = result
+    return result
 
 
 def _process_is_elevated(pid):
@@ -306,6 +382,21 @@ class AgentMonitorMixin:
                     pass
 
             item["elevated"] = elevated
+
+            # 身份分档:取一个代表进程的映像路径做签名验证(每产品每次扫描最多一次)
+            image_path = ""
+
+            for pid in item["pids"]:
+                image_path = _process_image_path(pid)
+
+                if image_path:
+                    break
+
+            try:
+                item["verified"] = verify_agent_identity(image_path)
+            except Exception:
+                item["verified"] = False
+
             known = self._agent_sightings.get(item["name"])
             last_logged = (known or {}).get("last_logged", 0)
             # 功能开关只关「监控+审计」:页面内浏览明细不受影响
@@ -433,3 +524,32 @@ class AgentMonitorMixin:
             self.write_log("INFO", "Agent Related Event", source=str(path), detail=product)
 
         return product
+
+    def identify_agent_for_event(self, source, process_path):
+        """防护事件的智能体身份识别:名字命中落审计,签名验证定档。
+
+        返回 (产品名或 None, 是否已验证);开关关闭一律 (None, False)。
+        交互路径专用——自动拦截路径走 note_agent_for_path,不验签名省一次 IO。
+        """
+        if not self._agent_feature_enabled():
+            return None, False
+
+        for candidate in (source, process_path):
+            if not candidate:
+                continue
+
+            product = match_agent_name(os.path.basename(str(candidate)))
+
+            if not product:
+                continue
+
+            if hasattr(self, "write_log"):
+                self.write_log("INFO", "Agent Related Event", source=str(candidate), detail=product)
+
+            try:
+                return product, verify_agent_identity(candidate)
+            except Exception:
+                log_exception("PYAS_Agents.identify_agent_for_event")
+                return product, False
+
+        return None, False

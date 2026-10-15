@@ -211,9 +211,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const proc = data.process;
                 if (proc && proc.name) {
                     const label = data.process_label || 'Process';
-                    // agent 是名字级弱证据的产品名(专有名词,不做翻译)
+                    // agent 是产品名(专有名词,不做翻译);✓=二进制签名已验证,无标记=仅名字匹配
                     procLine.textContent = data.agent
-                        ? `${label}: ${proc.name} · ${data.agent}`
+                        ? `${label}: ${proc.name} · ${data.agent}${data.agent_verified ? ' ✓' : ''}`
                         : `${label}: ${proc.name}`;
                     procLine.title = proc.path || '';
                     procLine.classList.remove('hidden');
