@@ -168,6 +168,8 @@ class RuntimeMixin:
             "notify_channel": "system",
             "interactive_auto_block": False,
             "classic_menu_switch": False,
+            # 智能体加固:后台监控+事件审计的总开关(纯审计不拦截,默认开)
+            "agent_switch": True,
             "ai_assist_switch": False,
             "ai_auto_execute": False,
             "ai_auto_execute_timeout": 60,

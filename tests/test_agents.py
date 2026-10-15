@@ -97,6 +97,15 @@ class ScanTests(unittest.TestCase):
             activity = self.owner.scan_agent_processes(lister=lambda: [('claude.exe', 1)])
         self.assertEqual(activity[0]['elevated'], 0)
 
+    def test_switch_off_disables_audit_but_keeps_view(self):
+        self.owner.pyas_config = {"agent_switch": False}
+        # 关=不审计、不标注(note_agent_for_path 返回 None),页面浏览数据仍在
+        self.assertIsNone(self.owner.note_agent_for_path('C:\\tools\\ZCode\\zcode.exe'))
+        with patch('PYAS_Agents._process_is_elevated', return_value=True):
+            self.owner.scan_agent_processes(lister=lambda: [('claude.exe', 1)])
+        self.assertEqual(len(self.owner.logs), 0)
+        self.assertEqual(self.owner.get_agent_activity()[0]['name'], 'Claude Code')
+
 
 class InstalledAgentsTests(unittest.TestCase):
     """已安装过滤:L1 进程 > L2 快捷方式/npm > 安装位置,按目录顺序返回。"""

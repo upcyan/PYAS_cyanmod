@@ -268,8 +268,11 @@ class AgentMonitorMixin:
             item["elevated"] = elevated
             known = self._agent_sightings.get(item["name"])
             last_logged = (known or {}).get("last_logged", 0)
+            # 功能开关只关「监控+审计」:页面内浏览明细不受影响
+            enabled = self._agent_feature_enabled()
 
-            if hasattr(self, "write_log") and time.time() - last_logged >= self.SIGHTING_LOG_INTERVAL:
+            if (enabled and hasattr(self, "write_log")
+                    and time.time() - last_logged >= self.SIGHTING_LOG_INTERVAL):
                 self.write_log("INFO", "Agent Detected",
                     source=item["exe"],
                     detail=f"{item['name']} / {item['count']} process(es)")
@@ -280,7 +283,8 @@ class AgentMonitorMixin:
 
             was_elevated = (known or {}).get("elevated", 0)
 
-            if item["elevated"] > 0 and not was_elevated and hasattr(self, "write_log"):
+            if (enabled and item["elevated"] > 0 and not was_elevated
+                    and hasattr(self, "write_log")):
                 self.write_log("WARN", "Agent Elevated",
                     source=item["exe"],
                     detail=(f"{item['name']}: {item['elevated']}/{item['count']} "
@@ -292,6 +296,10 @@ class AgentMonitorMixin:
     def get_agent_activity(self):
         return list(getattr(self, "_agent_sightings", {}).values())
 
+    def _agent_feature_enabled(self):
+        """智能体加固总开关(agent_switch):关=不监控、不写审计、不做事件标注。"""
+        return bool(getattr(self, "pyas_config", {}).get("agent_switch", True))
+
     # 后台监控间隔:周期枚举进程,「检测到智能体」不再依赖用户进 AI+ 页
     MONITOR_INTERVAL = 300
 
@@ -299,19 +307,21 @@ class AgentMonitorMixin:
         """持续监控:周期扫描智能体进程,维护快照并落「检测到」审计。
 
         扫描本身毫秒级;审计受 SIGHTING_LOG_INTERVAL 限频,常驻不会刷日志。
-        小步睡眠保证 closing 置位后约一秒内退出。
+        1 秒节拍同时承担关闭响应与开关跟随:关掉 agent_switch 后最多 1 秒
+        停止扫描,重新打开后到下一个周期点自动恢复。
         """
+        last_scan = 0.0
+
         while not getattr(self, "closing", False):
-            try:
-                self.scan_agent_processes()
-            except Exception:
-                log_exception("PYAS_Agents.agent_monitor_thread")
+            if self._agent_feature_enabled() and time.monotonic() - last_scan >= interval:
+                last_scan = time.monotonic()
 
-            for _ in range(max(1, int(interval))):
-                if getattr(self, "closing", False):
-                    return
+                try:
+                    self.scan_agent_processes()
+                except Exception:
+                    log_exception("PYAS_Agents.agent_monitor_thread")
 
-                time.sleep(1)
+            time.sleep(1)
 
     def list_installed_agents(self):
         """本机已安装的智能体(按 AGENT_CATALOG 顺序),供图标带过滤。
@@ -362,10 +372,16 @@ class AgentMonitorMixin:
         ]
 
     def note_agent_for_path(self, path):
-        """防护事件来源命中智能体指纹时写一条审计(供 AI 分析与人工裁决参考)。"""
+        """防护事件来源命中智能体指纹时写一条审计(供 AI 分析与人工裁决参考)。
+
+        开关关闭时返回 None:既不落审计,也不给弹窗/AI 做智能体标注。
+        """
         product = match_agent_name(os.path.basename(str(path or "")))
 
-        if product and hasattr(self, "write_log"):
+        if not product or not self._agent_feature_enabled():
+            return None
+
+        if hasattr(self, "write_log"):
             self.write_log("INFO", "Agent Related Event", source=str(path), detail=product)
 
         return product

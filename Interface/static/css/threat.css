@@ -48,9 +48,10 @@
 .threat-footer { flex-shrink: 0; padding: 0 20px 20px; }
 .threat-repeat { display: flex; gap: 8px; align-items: flex-start; color: var(--text-secondary); font-size: var(--text-xs); line-height: 1.5; margin-bottom: 12px; }
 .threat-repeat input { margin-top: 3px; accent-color: var(--accent-color); }
-.threat-meta { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
+/* 确认语与误报入口分行排布:两条都是长文本,同排 space-between 会挤成一行难区分 */
+.threat-meta { display: flex; flex-direction: column; align-items: stretch; gap: 6px; margin-bottom: 12px; }
 .threat-meta .threat-repeat { margin-bottom: 0; }
-.fp-link { background: none; border: none; padding: 2px 4px; color: var(--text-secondary); font-size: var(--text-xs); cursor: pointer; flex-shrink: 0; }
+.fp-link { background: none; border: none; padding: 2px 0; color: var(--text-secondary); font-size: var(--text-xs); cursor: pointer; flex-shrink: 0; text-align: left; }
 .fp-link:hover:not(:disabled) { color: var(--accent-color); }
 #threat_fp_panel { padding: 12px; border: 1px solid var(--border-color); border-radius: var(--radius-panel); background: var(--bg-panel); margin-bottom: 10px; font-size: var(--text-sm); line-height: 1.5; }
 #threat_fp_title { font-weight: 600; margin-bottom: 6px; }
