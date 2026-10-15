@@ -667,6 +667,9 @@ body {
     border-radius: var(--radius-circle);
     transition: color var(--dur-fast), background-color var(--dur-fast);
 }
+/* 清空按钮可见性:有值,或输入框获得焦点(点进任意输入框即可见,不只打字后) */
+.search-box:focus-within .search-clear,
+.input-clearable:focus-within .search-clear,
 .search-box.has-value .search-clear,
 .input-clearable.has-value .search-clear { display: flex; }
 .search-clear:hover { color: var(--text-primary); }

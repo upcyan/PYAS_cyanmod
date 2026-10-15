@@ -375,5 +375,29 @@ document.addEventListener('DOMContentLoaded', () => {
         if (disposed) { disposed = false; refresh(); }
     });
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => window.PyasTheme.apply(latestTheme));
+
+    // 误报复注框复用主窗口的清空按钮实现(.input-clearable 样式已随 style.css 加载)
+    const fpNote = byId('threat_fp_note');
+    if (fpNote && !fpNote.closest('.input-clearable')) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'input-clearable';
+        fpNote.parentNode.insertBefore(wrapper, fpNote);
+        wrapper.appendChild(fpNote);
+        const clear = document.createElement('button');
+        clear.type = 'button';
+        clear.className = 'search-clear';
+        clear.setAttribute('aria-label', 'clear');
+        clear.innerHTML = '<svg aria-hidden="true" focusable="false"><use href="#i-close"/></svg>';
+        clear.addEventListener('click', () => {
+            fpNote.value = '';
+            fpNote.dispatchEvent(new Event('input', { bubbles: true }));
+            fpNote.focus();
+        });
+        wrapper.appendChild(clear);
+        const syncNote = () => wrapper.classList.toggle('has-value', fpNote.value.length > 0);
+        fpNote.addEventListener('input', syncNote);
+        syncNote();
+    }
+
     refresh();
 });
