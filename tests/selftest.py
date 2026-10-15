@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """PYAS Security Cyanmod 用户自测脚本(黑盒,仅用标准库)。
 
-用法:
-    py -3 selftest.py            全量自测(智能体项会等待后台扫描,最长约 6.5 分钟)
-    py -3 selftest.py --fast     快速模式(跳过等待,智能体项只布置环境并提示)
-    py -3 selftest.py --only 智能体   只跑名字含关键字的项
+两种模式:
+    py -3 selftest.py             自助测试:列出项目菜单,自选编号执行,可反复测
+    py -3 selftest.py --auto      自动测试:全量跑一遍(智能体项含后台扫描等待)
+    py -3 selftest.py --fast      自动测试的快速版(智能体项只布置环境不等待)
+    py -3 selftest.py --only X    只跑名字含 X 的项(脚本化用)
 
 适用:源码目录(py -3 直接跑)或已安装机器(把本脚本和 selftest.bat 放任意目录)。
 本脚本只读系统状态、只创建/清理自己的测试文件,不修改 PYAS 配置,不拦截不注入。
@@ -31,9 +32,13 @@ SELFTEST_EXE = os.path.join(os.environ.get("TEMP", "."), "claude-selftest.exe")
 AGENT_WAIT_SECONDS = 400  # 后台监控 5 分钟一轮,留 6.5 分钟余量
 
 FAST = "--fast" in sys.argv
+AUTO = "--auto" in sys.argv
 ONLY = ""
 if "--only" in sys.argv:
     ONLY = sys.argv[sys.argv.index("--only") + 1]
+
+# 智能体项是否等待后台扫描:--auto 默认等(--fast 时不等);自助模式运行时逐次询问
+WAIT_FOR_AGENT = AUTO and not FAST
 
 RESULTS = []
 CHECKS = []
@@ -135,9 +140,10 @@ def notification_enabled():
     return True
 
 
-def check(name):
+def check(name, hint=""):
+    """登记一个测试项;hint 显示在菜单里(耗时/前提提示)。"""
     def register(func):
-        CHECKS.append((name, func))
+        CHECKS.append({"name": name, "hint": hint, "func": func})
         return func
     return register
 
@@ -245,7 +251,7 @@ def check_update(cfg, cfg_err):
         return "WARN", f"GitHub 暂时连不上({exc})——不影响防护,只影响检查更新"
 
 
-@check("智能体加固(端到端)")
+@check("智能体加固(端到端)", "约 5-7 分钟(等后台扫描);关闭等待则只布置环境")
 def check_agent(cfg, cfg_err):
     if cfg_err:
         return "SKIP", cfg_err
@@ -270,9 +276,9 @@ def check_agent(cfg, cfg_err):
                                 stderr=subprocess.DEVNULL)
         out(f"    仿真进程已启动: {SELFTEST_EXE}(pid {proc.pid})")
 
-        if FAST:
-            return "INFO", ("快速模式不等待:开 AI+ 页(会立即扫一次)看「检测到智能体」里"
-                            "有没有 claude-selftest.exe,然后重跑本项验证自动判定")
+        if not WAIT_FOR_AGENT:
+            return "INFO", ("未等待:开 AI+ 页(会立即扫一次)看「检测到智能体」里有没有"
+                            " claude-selftest.exe;然后重跑本项并选择等待,验证自动判定")
 
         out("    等待后台扫描(每 5 分钟一轮,最长等 6.5 分钟,可 Ctrl+C 中止)…")
 
@@ -333,20 +339,8 @@ def check_interactive(cfg, cfg_err):
                     "配合真实样本或历史拦截验证;误报可用弹窗的误报入口登记")
 
 
-def main():
-    if not IS_NT:
-        out("本脚本仅支持 Windows。")
-        return 1
-
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
-
-    out("=" * 64)
-    out("PYAS Security Cyanmod 用户自测")
-    out("=" * 64)
-
+def run_checks(selection):
+    """执行选中的测试项,返回本批失败数。selection 为 CHECKS 下标列表。"""
     cfg, cfg_err = load_config()
 
     if not cfg_err:
@@ -354,9 +348,9 @@ def main():
 
     failures = 0
 
-    for name, func in CHECKS:
-        if ONLY and ONLY not in name:
-            continue
+    for index in selection:
+        item = CHECKS[index]
+        name, func = item["name"], item["func"]
 
         try:
             status, note = func(cfg, cfg_err)
@@ -369,20 +363,120 @@ def main():
         out(f"[{status:^4}] {name}  {note}")
         RESULTS.append(f"[{status}] {name}  {note}")
 
-    out("=" * 64)
-    verdict = "存在失败项,建议按提示处理后重跑" if failures else "全部关键项通过"
-    out(f"结论: {verdict}({len(RESULTS)} 项,失败 {failures})")
+    out("-" * 64)
+    out(f"本批结果: {len(selection)} 项,失败 {failures}")
+    return failures
 
+
+def save_results(verdict):
     try:
-        report_file = os.path.join(os.environ.get("TEMP", "."),
-                                   "PYAS_selftest_report.txt")
-        with open(report_file, "w", encoding="utf-8") as f:
-            f.write("\n".join(RESULTS) + f"\n结论: {verdict}\n")
-        out(f"报告已保存: {report_file}")
+        report_file = os.path.join(os.environ.get("TEMP", "."), "PYAS_selftest_report.txt")
+        with open(report_file, "a", encoding="utf-8") as f:
+            f.write(time.strftime("[%Y-%m-%d %H:%M:%S] ") + verdict + "\n")
+            f.write("\n".join(RESULTS[-32:]) + "\n")
+        out(f"记录已追加: {report_file}")
     except OSError:
         pass
 
+
+def parse_selection(raw):
+    """解析用户输入:'1,3' / '1 3' / '1，3'(中文逗号) / 空=全部;非法编号忽略。"""
+    raw = raw.strip().replace("，", ",").replace("、", ",")
+
+    if not raw or raw.lower() in ("a", "all", "all"):
+        return list(range(len(CHECKS)))
+
+    picked = []
+
+    for token in raw.replace(",", " ").split():
+        if token.isdigit():
+            index = int(token) - 1
+
+            if 0 <= index < len(CHECKS) and index not in picked:
+                picked.append(index)
+
+    return picked
+
+
+def menu():
+    """自助测试:菜单循环,自选项目反复执行。"""
+    while True:
+        out("")
+        out("=" * 64)
+        out("自助测试——输入编号执行(可多选,空格/逗号分隔);回车=全部;a=全部;q=退出")
+        out("-" * 64)
+
+        for index, item in enumerate(CHECKS, 1):
+            hint = f"    —— {item['hint']}" if item["hint"] else ""
+            out(f"  {index}. {item['name']}{hint}")
+
+        try:
+            raw = input("选择> ")
+        except (EOFError, KeyboardInterrupt):
+            out("")
+            return 0
+
+        if raw.strip().lower() in ("q", "quit", "exit", "退出"):
+            return 0
+
+        selection = parse_selection(raw)
+
+        if not selection:
+            out("没有有效编号,请重新输入。")
+            continue
+
+        global WAIT_FOR_AGENT
+
+        if any(CHECKS[i]["name"].startswith("智能体加固") for i in selection) and not AUTO and not FAST:
+            answer = input("智能体项是否等待后台扫描(最长 6.5 分钟,更严谨)? [y/N] ").strip().lower()
+            WAIT_FOR_AGENT = answer in ("y", "yes", "是")
+
+        out("=" * 64)
+        failures = run_checks(selection)
+        save_results(f"自助测试 {len(selection)} 项,失败 {failures}")
+
+
+def auto():
+    """自动测试:全量执行(--only 时跑名字匹配的项)。"""
+    global WAIT_FOR_AGENT
+    WAIT_FOR_AGENT = not FAST
+
+    selection = [i for i, item in enumerate(CHECKS) if not ONLY or ONLY in item["name"]]
+
+    if not selection:
+        out(f"没有匹配「{ONLY}」的测试项。")
+        return 1
+
+    out("=" * 64)
+    out("自动测试——执行 "
+        + ", ".join(CHECKS[i]["name"] for i in selection)
+        + ("(快速模式:智能体项不等待)" if FAST else ""))
+    out("=" * 64)
+    failures = run_checks(selection)
+    verdict = "存在失败项,建议按提示处理后重跑" if failures else "全部关键项通过"
+    out("=" * 64)
+    out(f"结论: {verdict}({len(selection)} 项,失败 {failures})")
+    save_results(f"自动测试 {len(selection)} 项,失败 {failures}:{verdict}")
     return 1 if failures else 0
+
+
+def main():
+    if not IS_NT:
+        out("本脚本仅支持 Windows。")
+        return 1
+
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+    if ONLY:
+        return auto()  # --only 走自动流程,只是范围收窄
+
+    if AUTO:
+        return auto()
+
+    return menu()
 
 
 if __name__ == "__main__":
