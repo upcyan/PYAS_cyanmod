@@ -1624,10 +1624,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const inputEl = input || document.getElementById('ai_model_input');
         if (inputEl) inputEl.setAttribute('aria-expanded', 'true');
-        // fixed 定位在打开期间不跟随滚动:一滚/一改窗口就关掉,避免坐标漂移悬空
-        window.addEventListener('scroll', closeModelMenu, { capture: true, passive: true, once: true });
-        window.addEventListener('resize', closeModelMenu, { passive: true, once: true });
     };
+
+    // fixed 定位在打开期间不跟随滚动:页面滚动/窗口改变时关闭,避免坐标漂移悬空;
+    // 但菜单自身滚动(滚轮/拖滚动条)不能关——滚动源在菜单内时忽略
+    const menuViewportHandler = (event) => {
+        const menu = document.getElementById('ai_model_menu');
+        if (!menu || !menu.classList.contains('open')) return;
+        if (event.target instanceof Node && menu.contains(event.target)) return;
+        closeModelMenu();
+    };
+    window.addEventListener('scroll', menuViewportHandler, { capture: true, passive: true });
+    window.addEventListener('resize', menuViewportHandler, { passive: true });
 
     const closeModelMenu = () => {
         const menu = document.getElementById('ai_model_menu');
