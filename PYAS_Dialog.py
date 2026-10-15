@@ -52,6 +52,13 @@ ID_COUNTDOWN_TIMER = 1
 # 用户会看到「白屏一阵子才出内容」。短间隔内的下一条告警直接复用现成窗口。
 THREAT_WINDOW_IDLE_GRACE = 20
 
+# 告警窗尺寸:锚位计算与 create_window 必须用同一组常量——曾把高度写进
+# 两处,只改 create_window 不改锚位,窗口会按旧高度算右下角坐标、底部出屏。
+# 高度按「检测证据+AI 决策+操作区同屏」取值,1080p 与 768 高度的机器都放得下。
+THREAT_WINDOW_WIDTH = 720
+THREAT_WINDOW_HEIGHT = 680
+THREAT_WINDOW_MIN_SIZE = (560, 520)
+
 SPI_GETWORKAREA = 0x0030
 HWND_TOPMOST = -1
 SWP_SHOWWINDOW = 0x0040
@@ -1125,8 +1132,10 @@ class _WebThreatDialogSession:
     def _bottom_right_position(width, height, scale=1.0, margin=16):
         work = ctypes.wintypes.RECT()
         if ctypes.windll.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(work), 0):
-            return (work.right - int(width * scale) - int(margin * scale),
-                    work.bottom - int(height * scale) - int(margin * scale))
+            x = work.right - int(width * scale) - int(margin * scale)
+            y = work.bottom - int(height * scale) - int(margin * scale)
+            # 窗口比工作区还高时(小屏+大 DPI)锚位会算出负值:钳回可见区域
+            return (max(int(margin * scale), x), max(int(margin * scale), y))
         return int(margin * scale), int(margin * scale)
 
     def run(self):
@@ -1147,10 +1156,11 @@ class _WebThreatDialogSession:
         except Exception:
             log_exception("PYAS_Dialog._WebThreatDialogSession.run.theme")
             theme = "system_switch"
-        pos_x, pos_y = self._bottom_right_position(720, 520, scale)
+        pos_x, pos_y = self._bottom_right_position(THREAT_WINDOW_WIDTH, THREAT_WINDOW_HEIGHT, scale)
         self.window = webview.create_window(
             "PYAS · Pending alerts", url=url, js_api=self.api,
-            width=720, height=520, min_size=(560, 420),
+            width=THREAT_WINDOW_WIDTH, height=THREAT_WINDOW_HEIGHT,
+            min_size=THREAT_WINDOW_MIN_SIZE,
             frameless=True, easy_drag=False, on_top=True, text_select=True,
             background_color=window_background_for(theme),
             x=pos_x, y=pos_y,

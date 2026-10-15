@@ -232,7 +232,10 @@
 }
 @media (prefers-reduced-motion: reduce) {
     .ai-window-glow { transition: none; }
-    .ai-window-glow::before { animation: none; }
+    /* 流光是「AI 分析中」唯一的活动指示:系统动画效果关闭(办公机常态,
+       实测本机 ClientAreaAnimation=False)会命中 reduced-motion,之前的
+       animation:none 让流光变纯静态,被用户当成故障上报。它是装饰性的
+       小面积旋转、pointer-events:none,这里豁免;过渡动画仍尊重系统设置 */
 }
 @media (max-width: 620px) {
     .threat-layout { grid-template-columns: 118px minmax(0, 1fr); gap: 10px; padding: 12px; }
