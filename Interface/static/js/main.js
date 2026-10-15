@@ -1066,7 +1066,11 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const data = (homeLogFilter === 'all' ? homeLogs : homeLogs.filter(l => l.level === homeLogFilter))
+        // 智能体筛选:三类审计动作(检测/提权/事件关联),跨 INFO/WARN 两个级别
+        const agentActions = ['Agent Detected', 'Agent Elevated', 'Agent Related Event'];
+        const data = (homeLogFilter === 'all' ? homeLogs
+            : homeLogFilter === 'agent' ? homeLogs.filter(l => agentActions.includes(String(l.action || '')))
+            : homeLogs.filter(l => l.level === homeLogFilter))
             .slice(-200)
             .sort((a, b) => (homeLogSortDesc ? -1 : 1) * String(a.time_str || '').localeCompare(String(b.time_str || '')));
 

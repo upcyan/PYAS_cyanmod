@@ -59,6 +59,33 @@ AGENT_CATALOG = (
 # 兼容旧引用:token 元组列表(名字/顺序随 AGENT_CATALOG)
 AGENT_FINGERPRINTS = tuple((entry["name"], entry["tokens"]) for entry in AGENT_CATALOG)
 
+# 审计详情写入时就地取 UI 语言的模板(日志落盘后不会再翻译)。
+# detected: {0}=产品名 {1}=进程数;elevated: {0}=产品名 {1}=提权数 {2}=总进程数
+_AUDIT_TEXTS = {
+    "traditional_switch": ("{0} / {1} 個處理程序執行中",
+        "{0}：{1}/{2} 個處理程序取得管理員令牌（從未提權轉為提權）"),
+    "simplified_switch": ("{0} / {1} 个进程运行中",
+        "{0}：{1}/{2} 个进程拥有管理员令牌（从未提权变为提权）"),
+    "english_switch": ("{0} / {1} process(es) running",
+        "{0}: {1}/{2} process(es) obtained an administrator token (newly elevated)"),
+    "japanese_switch": ("{0} / {1} 個のプロセスが実行中",
+        "{0}: {1}/{2} 個のプロセスが管理者トークンを取得（新たに昇格）"),
+    "korean_switch": ("{0} / {1}개 프로세스 실행 중",
+        "{0}: {1}/{2}개 프로세스가 관리자 토큰 보유(새로 권한 상승)"),
+    "french_switch": ("{0} / {1} processus en cours",
+        "{0} : {1}/{2} processus avec jeton administrateur (nouvelle élévation)"),
+    "spanish_switch": ("{0} / {1} proceso(s) en ejecución",
+        "{0}: {1}/{2} proceso(s) con token de administrador (nueva elevación)"),
+    "hindi_switch": ("{0} / {1} प्रक्रियाएँ चल रही हैं",
+        "{0}: {1}/{2} प्रक्रियाओं के पास व्यवस्थापक टोकन (नई विशेषाधिकार वृद्धि)"),
+    "arabic_switch": ("{0} / {1} عملية قيد التشغيل",
+        "{0}: {1}/{2} عملية لها رمز مسؤول (ترقية جديدة)"),
+    "russian_switch": ("{0} / {1} процес(ов) запущено",
+        "{0}: {1}/{2} процесс(ов) с токеном администратора (новое повышение)"),
+    "slovenian_switch": ("{0} / {1} procesov teče",
+        "{0}: {1}/{2} procesov ima skrbniški žeton (novo povišanje)"),
+}
+
 
 def match_agent_name(exe_name):
     """可执行文件名 → 代理产品名;不匹配返回 None。"""
@@ -270,12 +297,13 @@ class AgentMonitorMixin:
             last_logged = (known or {}).get("last_logged", 0)
             # 功能开关只关「监控+审计」:页面内浏览明细不受影响
             enabled = self._agent_feature_enabled()
+            detected_text, elevated_text = self._audit_texts()
 
             if (enabled and hasattr(self, "write_log")
                     and time.time() - last_logged >= self.SIGHTING_LOG_INTERVAL):
                 self.write_log("INFO", "Agent Detected",
                     source=item["exe"],
-                    detail=f"{item['name']} / {item['count']} process(es)")
+                    detail=detected_text.format(item["name"], item["count"]))
                 item["last_logged"] = time.time()
 
             if known:
@@ -285,10 +313,9 @@ class AgentMonitorMixin:
 
             if (enabled and item["elevated"] > 0 and not was_elevated
                     and hasattr(self, "write_log")):
+                # 不带 source:日志列表的明细列优先显示 source,文案要在第一眼看到
                 self.write_log("WARN", "Agent Elevated",
-                    source=item["exe"],
-                    detail=(f"{item['name']}: {item['elevated']}/{item['count']} "
-                            "process(es) with administrator token"))
+                    detail=elevated_text.format(item["name"], item["elevated"], item["count"]))
 
         self._agent_sightings = {item["name"]: item for item in activity}
         return activity
@@ -299,6 +326,11 @@ class AgentMonitorMixin:
     def _agent_feature_enabled(self):
         """智能体加固总开关(agent_switch):关=不监控、不写审计、不做事件标注。"""
         return bool(getattr(self, "pyas_config", {}).get("agent_switch", True))
+
+    def _audit_texts(self):
+        """按当前 UI 语言取审计详情模板;未知语言回退英文。"""
+        lang = getattr(self, "pyas_config", {}).get("language", "english_switch")
+        return _AUDIT_TEXTS.get(lang, _AUDIT_TEXTS["english_switch"])
 
     # 后台监控间隔:周期枚举进程,「检测到智能体」不再依赖用户进 AI+ 页
     MONITOR_INTERVAL = 300
