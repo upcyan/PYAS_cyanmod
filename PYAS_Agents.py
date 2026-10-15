@@ -1,30 +1,63 @@
 # -*- coding: utf-8 -*-
-"""智能体加固(P4 MVP):识别本机运行的 AI 编码代理,用于审计与告警上下文。
+"""智能体加固(P4 MVP):识别本机运行/已安装的 AI 编码代理,用于审计与告警上下文。
 
-仅做用户态进程枚举与指纹匹配,不注入、不拦截;检测到代理进程触发防护事件时,
-在决策审计里带上代理标记,让 AI 分析与人工裁决都有上下文。
+仅做用户态探测(进程枚举、快捷方式与安装位置存在性),不注入、不拦截、不扫盘;
+检测到代理进程触发防护事件时,在决策审计里带上代理标记,让 AI 分析与人工裁决
+都有上下文。界面按「已安装」过滤图标带。
 """
 import ctypes
+import glob
 import os
 import time
 
 from PYAS_Diagnostics import log_exception
 
-# 主流 AI 编码代理的可执行名片段(大小写不敏感的包含匹配)
-AGENT_FINGERPRINTS = (
-    ("WorkBuddy", ("workbuddy",)),
-    ("ZCode", ("zcode",)),
-    ("AutoBot", ("autobot",)),
-    ("ChatGPT", ("chatgpt", "codex")),
-    ("Trae", ("trae",)),
-    ("Kimi Code", ("kimi",)),
-    ("MimoCode", ("mimocode", "mimo-code")),
-    ("Claude Code", ("claude",)),
-    ("Cursor", ("cursor",)),
-    ("GitHub Copilot", ("copilot",)),
-    ("Aider", ("aider",)),
-    ("Cline", ("cline", "continue")),
+# 智能体目录:唯一真源(显示名/匹配 token/图标/徽标/安装位置线索)。
+# 界面按「本机已安装」过滤后渲染图标带;activity 列表用 name 对齐。
+# logo=None 表示没有方形图标,前端用 letter+color 渲染字母徽标。
+# paths 为相对常见根目录(home / APPDATA / LOCALAPPDATA / Programs / npm)的 glob。
+AGENT_CATALOG = (
+    {"name": "AutoClaw",        "tokens": ("autoclaw",),
+     "logo": "autoclaw.png",    "letter": "A",  "color": "#2563EB", "paths": ("autoclaw*",)},
+    {"name": "ChatGPT",         "tokens": ("chatgpt", "codex"),
+     "logo": "openai.svg",      "letter": "C",  "color": "#10A37F", "paths": (".codex", "codex*")},
+    {"name": "Claude Code",     "tokens": ("claude",),
+     "logo": "claude.svg",      "letter": "Cl", "color": "#D97757", "paths": (".claude", "claude*")},
+    {"name": "DeepSeek",        "tokens": ("deepseek",),
+     "logo": "deepseek.png",    "letter": "D",  "color": "#4D6BFE", "paths": ("deepseek*", ".deepseek*")},
+    {"name": "豆包",             "tokens": ("doubao", "豆包"),
+     "logo": "doubao.png",      "letter": "D",  "color": "#325AB4", "paths": ("doubao*", "豆包*")},
+    {"name": "Hermes",          "tokens": ("hermes",),
+     "logo": "hermes.png",      "letter": "H",  "color": "#8B5CF6", "paths": ("hermes*", ".hermes*")},
+    {"name": "Kimi Code",       "tokens": ("kimi",),
+     "logo": "kimi.png",        "letter": "K",  "color": "#1F2937", "paths": (".kimi*", "kimi*")},
+    {"name": "MimoCode",        "tokens": ("mimocode", "mimo-code"),
+     "logo": "mimo.png",        "letter": "M",  "color": "#FF6900", "paths": (".mimocode*", "mimo-code*")},
+    {"name": "OpenClaw",        "tokens": ("openclaw",),
+     "logo": "openclaw.svg",    "letter": "O",  "color": "#EF4444", "paths": ("openclaw*", ".openclaw*")},
+    {"name": "千问",             "tokens": ("qwen", "qwen-code", "qianwen"),
+     "logo": "qwen.png",        "letter": "Q",  "color": "#FF6A00", "paths": ("qwen*", ".qwen*")},
+    {"name": "Trae",            "tokens": ("trae",),
+     "logo": "trae.png",        "letter": "T",  "color": "#2563EB", "paths": ("Programs/*Trae*", "Trae CN", "TRAE SOLO CN")},
+    {"name": "WorkBuddy",       "tokens": ("workbuddy",),
+     "logo": "workbuddy.svg",   "letter": "W",  "color": "#12B7F5", "paths": ("WorkBuddy", ".workbuddy")},
+    {"name": "ZCode",           "tokens": ("zcode",),
+     "logo": "zcode.png",       "letter": "Z",  "color": "#2563EB", "paths": ("Programs/ZCode", ".zcode")},
+    {"name": "Cursor",          "tokens": ("cursor",),
+     "logo": "cursor.svg",      "letter": "Cu", "color": "#4A4A4A", "paths": ("Programs/cursor", "Cursor")},
+    {"name": "GitHub Copilot",  "tokens": ("copilot",),
+     "logo": "githubcopilot.svg", "letter": "G", "color": "#4A4A4A",
+     "paths": (".vscode/extensions/github.copilot*", ".copilot")},
+    {"name": "Cline",           "tokens": ("cline", "continue"),
+     "logo": "cline.svg",       "letter": "Cl", "color": "#0EA5E9",
+     "paths": (".vscode/extensions/cline.cline-*", ".continue")},
+    {"name": "Aider",           "tokens": ("aider",),
+     "logo": None,              "letter": "Ai", "color": "#0D9488",
+     "paths": (".aider", "Python/Scripts/aider*")},
 )
+
+# 兼容旧引用:token 元组列表(名字/顺序随 AGENT_CATALOG)
+AGENT_FINGERPRINTS = tuple((entry["name"], entry["tokens"]) for entry in AGENT_CATALOG)
 
 
 def match_agent_name(exe_name):
@@ -34,9 +67,9 @@ def match_agent_name(exe_name):
     if not name:
         return None
 
-    for product, tokens in AGENT_FINGERPRINTS:
-        if any(token in name for token in tokens):
-            return product
+    for entry in AGENT_CATALOG:
+        if any(token.casefold() in name for token in entry["tokens"]):
+            return entry["name"]
 
     return None
 
@@ -94,6 +127,71 @@ def enumerate_process_names(lister=None):
         return []
 
 
+def _install_roots():
+    """已安装检测的常见根目录(不扫盘,只做存在性探测)。"""
+    env = os.environ
+    home = os.path.expanduser("~")
+    roots = [
+        home,
+        env.get("APPDATA") or "",
+        env.get("LOCALAPPDATA") or "",
+        os.path.join(env.get("LOCALAPPDATA") or "", "Programs"),
+        os.path.join(env.get("APPDATA") or "", "npm"),
+    ]
+    return [root for root in roots if root]
+
+
+def _probe_install_paths(entry):
+    """L2:目录内 glob 命中任一即视为已安装(CLI 工具常用家目录/全局 bin)。"""
+    patterns = entry.get("paths") or ()
+    if not patterns:
+        return False
+
+    for root in _install_roots():
+        for pattern in patterns:
+            try:
+                if glob.glob(os.path.join(root, pattern)):
+                    return True
+            except Exception:
+                log_exception("PYAS_Agents._probe_install_paths")
+    return False
+
+
+def _scan_shortcut_names():
+    """L2:开始菜单快捷方式文件名(小写、去扩展)。GUI 产品的通用安装信号。"""
+    bases = [
+        os.path.join(os.environ.get("APPDATA") or "",
+                     "Microsoft", "Windows", "Start Menu", "Programs"),
+        os.path.join(os.environ.get("ALLUSERSPROFILE", r"C:\ProgramData"),
+                     "Microsoft", "Windows", "Start Menu", "Programs"),
+    ]
+    names = []
+    for base in bases:
+        if not os.path.isdir(base):
+            continue
+        for dirpath, _dirs, files in os.walk(base):
+            for filename in files:
+                if filename.lower().endswith(".lnk"):
+                    names.append(os.path.splitext(filename)[0].casefold())
+            if len(names) >= 800:
+                return names
+    return names
+
+
+def _scan_npm_bin_names():
+    """L2:npm 全局 bin 的文件名(小写、去扩展)。CLI 产品的通用安装信号。"""
+    npm_dir = os.path.join(os.environ.get("APPDATA") or "", "npm")
+    if not os.path.isdir(npm_dir):
+        return []
+    try:
+        return [os.path.splitext(name)[0].casefold()
+                for name in os.listdir(npm_dir)
+                if os.path.isfile(os.path.join(npm_dir, name))]
+    except OSError:
+        log_exception("PYAS_Agents._scan_npm_bin_names")
+        return []
+
+
 class AgentMonitorMixin:
     # 同一产品的重复 sightings 最多 10 分钟记一条审计,防止刷日志
     SIGHTING_LOG_INTERVAL = 600
@@ -137,6 +235,54 @@ class AgentMonitorMixin:
 
     def get_agent_activity(self):
         return list(getattr(self, "_agent_sightings", {}).values())
+
+    def list_installed_agents(self):
+        """本机已安装的智能体(按 AGENT_CATALOG 顺序),供图标带过滤。
+
+        分层信号:L1 正在运行的进程(最强)> L2 开始菜单快捷方式 /
+        npm 全局 bin 的文件名匹配 > L2 安装位置 glob 存在性。
+        只读探测,不扫盘、不启动任何进程。
+        """
+        origin = {}
+
+        for exe_name, _pid in enumerate_process_names():
+            name = match_agent_name(exe_name)
+
+            if name and name not in origin:
+                origin[name] = "process"
+
+        try:
+            shortcuts = _scan_shortcut_names()
+        except Exception:
+            log_exception("PYAS_Agents.list_installed_agents.shortcuts")
+            shortcuts = []
+
+        try:
+            npm_bin = _scan_npm_bin_names()
+        except Exception:
+            log_exception("PYAS_Agents.list_installed_agents.npm")
+            npm_bin = []
+
+        for entry in AGENT_CATALOG:
+            name = entry["name"]
+
+            if name in origin:
+                continue
+
+            tokens = tuple(token.casefold() for token in entry["tokens"])
+
+            if any(any(token in name_item for token in tokens) for name_item in shortcuts):
+                origin[name] = "shortcut"
+            elif any(any(token in name_item for token in tokens) for name_item in npm_bin):
+                origin[name] = "npm"
+            elif _probe_install_paths(entry):
+                origin[name] = "path"
+
+        return [
+            {"name": entry["name"], "logo": entry["logo"], "letter": entry["letter"],
+             "color": entry["color"], "via": origin[entry["name"]]}
+            for entry in AGENT_CATALOG if entry["name"] in origin
+        ]
 
     def note_agent_for_path(self, path):
         """防护事件来源命中智能体指纹时写一条审计(供 AI 分析与人工裁决参考)。"""

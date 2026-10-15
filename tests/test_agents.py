@@ -28,7 +28,9 @@ class MatchTests(unittest.TestCase):
         self.assertIsNone(match_agent_name(None))
 
     def test_word_containment_is_case_insensitive(self):
-        self.assertEqual(match_agent_name('MyAutoBotHelper.exe'), 'AutoBot')
+        # AutoBot 是早期笔误,产品实为 AutoClaw(界面图标同名)
+        self.assertEqual(match_agent_name('MyAutoClawHelper.exe'), 'AutoClaw')
+        self.assertEqual(match_agent_name('AUTOCLAW.EXE'), 'AutoClaw')
 
 
 class ScanTests(unittest.TestCase):
@@ -60,6 +62,53 @@ class ScanTests(unittest.TestCase):
         self.assertTrue(self.owner.note_agent_for_path('C:\\tools\\ZCode\\zcode.exe'))
         self.assertFalse(self.owner.note_agent_for_path('C:\\Windows\\notepad.exe'))
         self.assertEqual(len(self.owner.logs), 1)
+
+
+class InstalledAgentsTests(unittest.TestCase):
+    """已安装过滤:L1 进程 > L2 快捷方式/npm > 安装位置,按目录顺序返回。"""
+
+    def _list(self, processes=(), shortcuts=(), npm=(), paths=()):
+        with patch('PYAS_Agents.enumerate_process_names', return_value=list(processes)), \
+             patch('PYAS_Agents._scan_shortcut_names', return_value=list(shortcuts)), \
+             patch('PYAS_Agents._scan_npm_bin_names', return_value=list(npm)), \
+             patch('PYAS_Agents._probe_install_paths',
+                   side_effect=lambda entry: entry['name'] in set(paths)):
+            return Owner().list_installed_agents()
+
+    def test_process_signal_is_strongest(self):
+        result = self._list(processes=[('ZCode.exe', 1), ('explorer.exe', 2)])
+        self.assertEqual([item['name'] for item in result], ['ZCode'])
+        self.assertEqual(result[0]['via'], 'process')
+        self.assertEqual(result[0]['logo'], 'zcode.png')
+        self.assertEqual(result[0]['letter'], 'Z')
+        self.assertTrue(result[0]['color'].startswith('#'))
+
+    def test_shortcut_and_npm_signals(self):
+        result = self._list(shortcuts=['trae cn'], npm=['kimi-code'])
+        by_name = {item['name']: item['via'] for item in result}
+        self.assertEqual(by_name.get('Trae'), 'shortcut')
+        self.assertEqual(by_name.get('Kimi Code'), 'npm')
+
+    def test_path_signal_fallback(self):
+        result = self._list(paths=['Cursor'])
+        self.assertEqual([item['name'] for item in result], ['Cursor'])
+        self.assertEqual(result[0]['via'], 'path')
+
+    def test_empty_machine_returns_empty(self):
+        self.assertEqual(self._list(), [])
+
+    def test_results_follow_catalog_order(self):
+        result = self._list(paths=['Cursor', 'ZCode', 'Aider'])
+        names = [item['name'] for item in result]
+        from PYAS_Agents import AGENT_CATALOG
+        expect = [e['name'] for e in AGENT_CATALOG if e['name'] in {'Cursor', 'ZCode', 'Aider'}]
+        self.assertEqual(names, expect)
+
+    def test_logoless_entry_keeps_letter_badge_fields(self):
+        result = self._list(paths=['Aider'])
+        self.assertEqual(result[0]['name'], 'Aider')
+        self.assertIsNone(result[0]['logo'])
+        self.assertEqual(result[0]['letter'], 'Ai')
 
 
 if __name__ == '__main__':

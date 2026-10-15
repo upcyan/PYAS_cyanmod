@@ -1213,25 +1213,57 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshIconButtonLabels = applyIconButtonLabels;
 
     // 输入框右侧「圆形 + 叉号」清空按钮:统一注入,避免在每处 HTML 里重复写
+    const attachClearButton = (container, input) => {
+        if (container.querySelector('.search-clear')) return;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'search-clear';
+        button.setAttribute('aria-label', getMsg('btn_clear_input'));
+        button.title = getMsg('btn_clear_input');
+        button.innerHTML = '<svg aria-hidden="true" focusable="false"><use href="#i-close"/></svg>';
+        button.addEventListener('click', () => {
+            input.value = '';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            input.focus();
+        });
+        container.appendChild(button);
+        const sync = () => container.classList.toggle('has-value', input.value.length > 0);
+        input.addEventListener('input', sync);
+        input.addEventListener('change', sync);
+        sync();
+    };
+
+    // 配置回填是 .value = 直接赋值,不触发 input/change,has-value 永远不会加上。
+    // 这里显式按当前值重算一次,保证预填值的输入框也有清空按钮。
+    const syncClearButtons = () => {
+        document.querySelectorAll('.search-box, .input-clearable').forEach(box => {
+            const input = box.querySelector('input');
+            if (input) box.classList.toggle('has-value', input.value.length > 0);
+        });
+        const modelInput = document.getElementById('ai_model_input');
+        const modelClear = document.getElementById('ai_model_clear');
+        if (modelInput && modelClear) modelClear.hidden = !modelInput.value.length;
+    };
+
     const initSearchClearButtons = () => {
         document.querySelectorAll('.search-box').forEach(box => {
             const input = box.querySelector('input');
-            if (!input || box.querySelector('.search-clear')) return;
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'search-clear';
-            button.innerHTML = '<svg aria-hidden="true" focusable="false"><use href="#i-close"/></svg>';
-            button.addEventListener('click', () => {
-                input.value = '';
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-                input.focus();
-            });
-            box.appendChild(button);
-            const sync = () => box.classList.toggle('has-value', input.value.length > 0);
-            input.addEventListener('input', sync);
-            input.addEventListener('change', sync);
-            sync();
+            if (input) attachClearButton(box, input);
+        });
+
+        // 裸输入框:包一层 .input-clearable,按钮绝对定位在右侧。
+        // #ai_model_input 已有自己的 model-combo-clear,跳过以免双按钮。
+        document.querySelectorAll('input[type="text"], input[type="password"], input[type="number"]').forEach(input => {
+            if (input.closest('.search-box') || input.closest('.input-clearable')) return;
+            if (input.id === 'ai_model_input') return;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'input-clearable';
+            input.parentNode.insertBefore(wrapper, input);
+            wrapper.appendChild(input);
+            // 数字框右侧有原生步进箭头,清空按钮左移避开
+            if (input.type === 'number') wrapper.classList.add('has-spinner');
+            attachClearButton(wrapper, input);
         });
     };
 
@@ -1366,7 +1398,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const api = window.pywebview?.api;
         if (!api || aiPageLoaded) return;
         aiPageLoaded = true;
-        await Promise.all([renderSuppressionRules(), renderDrafts(), renderAgentActivity()]);
+        // 进页面即扫一次进程(原「扫描本机」按钮的职责),再渲染活动列表与已安装图标
+        try { await api.scan_agent_processes?.(); } catch (error) { console.error('Agent scan failed', error); }
+        await Promise.all([renderSuppressionRules(), renderDrafts(), renderAgentActivity(), renderAgentIcons()]);
     };
 
     const renderSuppressionRules = async () => {
@@ -1430,6 +1464,37 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) { console.error('Drafts load failed', error); }
     };
 
+    // 智能体图标带:只显示本机已安装的(后端 L1 运行中 + L2 快捷方式/npm/安装路径)
+    const renderAgentIcons = async () => {
+        const box = document.getElementById('ai_agent_icons');
+        const empty = document.getElementById('ai_agent_none');
+        if (!box) return;
+        let installed = [];
+        try {
+            installed = (await window.pywebview?.api.list_installed_agents?.()) || [];
+        } catch (error) { console.error('Installed agents load failed', error); }
+        if (empty) empty.hidden = installed.length > 0;
+        box.replaceChildren(...installed.map(agent => {
+            const chip = document.createElement('span');
+            chip.className = 'ai-chip';
+            chip.title = agent.name;
+            if (agent.logo) {
+                const img = document.createElement('img');
+                img.className = 'ai-chip-logo';
+                img.src = `/static/img/logos/${agent.logo}`;
+                img.alt = agent.name;
+                img.dataset.letter = agent.letter || '?';
+                img.dataset.color = agent.color || '#888';
+                chip.appendChild(img);
+            } else {
+                // 没有方形图标(如 Aider 只有横版文字标):直接渲染字母徽标
+                chip.innerHTML = agentBadge(agent.letter, agent.color);
+            }
+            return chip;
+        }));
+        bindChipLogoFallbacks();
+    };
+
     const renderAgentActivity = async () => {
         const box = document.getElementById('ai_agent_results');
         const wrap = document.getElementById('ai_agent_results_item');
@@ -1457,29 +1522,168 @@ document.addEventListener('DOMContentLoaded', () => {
                 res?.error === 'no_data' ? getMsg('draft_no_data') : getMsg('draft_failed'), 'warning');
         } catch (error) { console.error('Draft generation failed', error); }
     });
-    document.getElementById('ai_agent_scan')?.addEventListener('click', async () => {
-        await window.pywebview?.api.scan_agent_processes?.();
-        await renderAgentActivity();
-    });
-    document.getElementById('ai_models_scan')?.addEventListener('click', async () => {
+    // 模型名稱下拉组合框:首次聚焦时自动扫描,扫描结果缓存,点击输入框弹下拉选择
+    const modelCombo = {
+        models: null,   // null = 未扫描,[] = 扫描过但没找到
+        scanning: false,
+    };
+
+    const renderModelMenu = (models) => {
+        const menu = document.getElementById('ai_model_menu');
+        const input = document.getElementById('ai_model_input');
+        if (!menu || !input) return;
+        menu.replaceChildren(...models.map(name => {
+            const li = document.createElement('li');
+            li.className = 'model-combo-option' + (name === input.value ? ' selected' : '');
+            li.setAttribute('role', 'option');
+            li.textContent = name;
+            li.addEventListener('click', () => {
+                // _selecting 阻止下方 focus() 重新触发 openModelMenu 导致下拉再次弹出
+                modelCombo._selecting = true;
+                input.value = name;   // 覆盖而非追加
+                input.dispatchEvent(new Event('change'));
+                closeModelMenu();
+                modelCombo._selecting = false;
+            });
+            return li;
+        }));
+    };
+
+    // 菜单相对输入框向上还是向下展开:排序方向与定位共用这一套判据
+    const menuOpensUp = (input) => {
+        const rect = input.getBoundingClientRect();
+        const spaceBelow = window.innerHeight - rect.bottom - 8;
+        const spaceAbove = rect.top - 8;
+        return spaceBelow < 200 && spaceAbove > spaceBelow;
+    };
+
+    // 向下展开:倒序(新版本在上,离输入框最近);向上展开:正序(新版本在下,同样离输入框最近)
+    const renderOrderedMenu = (matched, input) => {
+        renderModelMenu(menuOpensUp(input) ? matched : [...matched].reverse());
+    };
+
+    const showModelMenu = (menu, input) => {
+        // position: fixed 不受父级 overflow 裁剪;打开时按视口剩余空间决定向上/向下,
+        // 并把 left/top/maxHeight 全部夹进视口,避免任何方向被裁切
+        menu.classList.add('open');
+        menu.hidden = false;
+        const rect = input.getBoundingClientRect();
+        const menuWidth = Math.min(Math.max(rect.width, 160), 320);
+        const openUp = menuOpensUp(input);
+        const spaceBelow = window.innerHeight - rect.bottom - 8;
+        const spaceAbove = rect.top - 8;
+        const avail = Math.max(120, openUp ? spaceAbove : spaceBelow);
+        const height = Math.min(240, avail);
+        let left = rect.right - menuWidth;
+        left = Math.max(8, Math.min(left, window.innerWidth - menuWidth - 8));
+        menu.style.width = menuWidth + 'px';
+        menu.style.maxHeight = height + 'px';
+        menu.style.left = left + 'px';
+        if (openUp) {
+            menu.style.top = 'auto';
+            menu.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+        } else {
+            menu.style.bottom = 'auto';
+            menu.style.top = (rect.bottom + 4) + 'px';
+        }
+        const inputEl = input || document.getElementById('ai_model_input');
+        if (inputEl) inputEl.setAttribute('aria-expanded', 'true');
+        // fixed 定位在打开期间不跟随滚动:一滚/一改窗口就关掉,避免坐标漂移悬空
+        window.addEventListener('scroll', closeModelMenu, { capture: true, passive: true, once: true });
+        window.addEventListener('resize', closeModelMenu, { passive: true, once: true });
+    };
+
+    const closeModelMenu = () => {
+        const menu = document.getElementById('ai_model_menu');
+        const input = document.getElementById('ai_model_input');
+        if (!menu) return;
+        menu.classList.remove('open');
+        menu.hidden = true;
+        if (input) input.setAttribute('aria-expanded', 'false');
+    };
+
+    const scanModels = async () => {
         const api = window.pywebview?.api;
+        if (!api || modelCombo.scanning) return;
+        modelCombo.scanning = true;
         const hint = document.getElementById('ai_models_hint');
-        if (!api || !hint) return;
-        hint.textContent = '…';
+        if (hint) hint.textContent = '…';
         try {
             const res = await api.scan_local_ai_models();
-            if (!res?.ok || !res.models?.length) { hint.textContent = getMsg('ollama_none'); return; }
-            hint.replaceChildren(...res.models.slice(0, 8).map(name => {
-                const chip = document.createElement('span');
-                chip.className = 'ai-chip';
-                chip.textContent = name;
-                chip.addEventListener('click', () => {
-                    const input = document.getElementById('ai_model_input');
-                    if (input) { input.value = name; input.dispatchEvent(new Event('change')); }
-                });
-                return chip;
-            }));
-        } catch (error) { console.error('Model scan failed', error); hint.textContent = getMsg('ollama_none'); }
+            // 升序存储为规范序;展示方向由菜单相对输入框的位置决定(renderOrderedMenu)
+            modelCombo.models = res?.ok && res.models?.length ? [...res.models].sort() : [];
+            if (hint) {
+                if (modelCombo.models.length) {
+                    // 提示行固定倒序,新版本排最前
+                    hint.textContent = [...modelCombo.models].reverse().join(', ');
+                } else {
+                    hint.textContent = getMsg('ollama_none');
+                }
+            }
+        } catch (error) {
+            console.error('Model scan failed', error);
+            modelCombo.models = [];
+            if (hint) hint.textContent = getMsg('ollama_none');
+        } finally {
+            modelCombo.scanning = false;
+        }
+    };
+
+    const openModelMenu = async () => {
+        const menu = document.getElementById('ai_model_menu');
+        const input = document.getElementById('ai_model_input');
+        if (!menu || !input) return;
+        if (!modelCombo.models) {
+            await scanModels();
+        }
+        if (!modelCombo.models?.length) return;
+        renderOrderedMenu(filterModels(input.value), input);
+        showModelMenu(menu, input);
+    };
+
+    // 输入内容 → 下拉列表同步筛选(子串匹配,大小写不敏感)
+    const filterModels = (query) => {
+        if (!modelCombo.models) return [];
+        const q = String(query || '').trim().toLowerCase();
+        if (!q) return modelCombo.models;
+        return modelCombo.models.filter(m => m.toLowerCase().includes(q));
+    };
+
+    const input = document.getElementById('ai_model_input');
+    const clear = document.getElementById('ai_model_clear');
+    if (input) {
+        input.addEventListener('focus', () => { if (!modelCombo._selecting) openModelMenu(); });
+        input.addEventListener('click', () => { if (!modelCombo._selecting) openModelMenu(); });
+        // 输入时同步筛选:无匹配则收起,避免空盒子悬着
+        input.addEventListener('input', () => {
+            if (!modelCombo.models) return;
+            const matched = filterModels(input.value);
+            const menu = document.getElementById('ai_model_menu');
+            if (!menu) return;
+            if (!matched.length) { closeModelMenu(); return; }
+            renderOrderedMenu(matched, input);
+            if (!menu.classList.contains('open')) showModelMenu(menu, input);
+        });
+    }
+    if (clear) {
+        const syncClear = () => { clear.hidden = !(input && input.value.length > 0); };
+        input?.addEventListener('input', syncClear);
+        input?.addEventListener('change', syncClear);
+        clear.addEventListener('click', () => {
+            if (!input) return;
+            input.value = '';
+            input.dispatchEvent(new Event('change'));
+            input.focus();
+            syncClear();
+        });
+    }
+    // 点击菜单外或按 Esc 关闭下拉
+    document.addEventListener('click', (e) => {
+        const combo = e.target.closest('.model-combo');
+        if (!combo) closeModelMenu();
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeModelMenu();
     });
 
 
@@ -2037,8 +2241,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     document.getElementById('close_button')?.addEventListener('click', () => window.pywebview?.api.hide_window());
 
+    // 字母徽标(图标加载失败或本身没有方形图标时使用)
+    const agentBadge = (letter, color) =>
+        `<svg class="ai-chip-logo ai-chip-badge" viewBox="0 0 16 16" aria-hidden="true">` +
+        `<rect width="16" height="16" rx="4" fill="${color || '#888'}"/>` +
+        `<text x="8" y="11.5" text-anchor="middle" font-size="9" font-weight="700" fill="#fff" font-family="inherit">${letter || '?'}</text></svg>`;
+
     const bindChipLogoFallbacks = () => {
         document.querySelectorAll('.ai-chip-logo[data-letter]').forEach(img => {
+            if (img.dataset.bound) return;   // 动态渲染会重复调用:避免重复绑定
+            img.dataset.bound = '1';
             const fallback = () => {
                 if (img.dataset.failed) return;
                 img.dataset.failed = '1';
@@ -2788,6 +3000,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 fillTimeout('ai_auto_timeout_input', 'ai_auto_execute_timeout', 60, 5, 600);
                 fillTimeout('ai_delay_seconds_input', 'ai_delay_seconds', 3, 1, 30);
                 syncInteractiveTimeoutState();
+                // 回填完成后再按实际值刷新清空按钮(赋值不发事件,按钮默认隐藏)
+                syncClearButtons();
                 stage = 'init_ui_ready';
                 await window.pywebview.api.init_ui_ready();
                 backfillHomeLogs();

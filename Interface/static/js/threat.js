@@ -71,6 +71,16 @@ document.addEventListener('DOMContentLoaded', () => {
         setText('threat_platform', e.platform || unknown);
         setText('threat_family', e.generic ? message(lang, 'evidence_generic') : (e.family || unknown));
         setText('threat_raw_label', e.raw_label || unknown);
+        // 空态时把 dd 折成一行(label 用 ::before 内联),有真实值时恢复上下堆叠
+        for (const id of ['threat_category', 'threat_engine', 'threat_platform', 'threat_family']) {
+            const dd = byId(id);
+            const label = document.getElementById(id.replace('threat_', 'evidence_') + '_label');
+            const raw = (dd.textContent || '').trim();
+            const empty = !raw || raw === unknown || raw === '—';
+            dd.classList.toggle('is-empty', empty);
+            if (empty && label) dd.setAttribute('data-label', label.textContent);
+            else dd.removeAttribute('data-label');
+        }
         const rules = Array.isArray(e.rules) ? e.rules : [];
         byId('threat_rules_row').hidden = !rules.length;
         setText('threat_rules', rules.join(' · '));
@@ -176,6 +186,12 @@ document.addEventListener('DOMContentLoaded', () => {
             document.documentElement.lang = window.AppI18n.langMap[data.language] || 'en';
             document.documentElement.dir = data.language === 'arabic_switch' ? 'rtl' : 'ltr';
             const messages = window.AppI18n.dict[data.language] || window.AppI18n.dict.english_switch;
+            const closeButton = byId('threat_close');
+            if (closeButton) {
+                const closeLabel = messages.btn_close || 'Close';
+                closeButton.setAttribute('aria-label', closeLabel);
+                closeButton.title = closeLabel;
+            }
             const pendingLabel = messages.pending_threats || 'Pending alerts';
             setText('queue_heading', pendingLabel);
             setText('queue_count', String(data.count ?? data.events.length));
@@ -276,6 +292,30 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     allow.addEventListener('click', () => decide('allow'));
     block.addEventListener('click', () => decide('block'));
+    // 误报备注框右侧清空按钮:threat.html 不加载 main.js,需在此单独注入
+    (() => {
+        const note = byId('threat_fp_note');
+        if (!note || note.closest('.input-clearable')) return;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'input-clearable';
+        note.parentNode.insertBefore(wrapper, note);
+        wrapper.appendChild(note);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'search-clear';
+        button.setAttribute('aria-label', message(latestLanguage, 'btn_clear_input'));
+        button.title = message(latestLanguage, 'btn_clear_input');
+        button.innerHTML = '<svg aria-hidden="true" focusable="false"><use href="#i-close"/></svg>';
+        button.addEventListener('click', () => {
+            note.value = '';
+            note.dispatchEvent(new Event('input', { bubbles: true }));
+            note.focus();
+        });
+        wrapper.appendChild(button);
+        const sync = () => wrapper.classList.toggle('has-value', note.value.length > 0);
+        note.addEventListener('input', sync);
+        sync();
+    })();
     fpButton.addEventListener('click', openFpPanel);
     byId('threat_fp_cancel').addEventListener('click', hideFpPanel);
     byId('threat_fp_submit').addEventListener('click', async () => {
@@ -305,7 +345,12 @@ document.addEventListener('DOMContentLoaded', () => {
     byId('threat_confirm').addEventListener('click', () => {
         if (confirmationId === currentId) decide('permanent');
     });
-    const minimize = () => window.pywebview?.api.minimize().catch(console.error);
+    // × 按钮与 Escape 走同一条出口:pywebview 桥丢失时静默失败,不能抛错把弹窗锁死
+    const minimize = () => {
+        try { Promise.resolve(window.pywebview?.api?.minimize?.()).catch(console.error); }
+        catch (error) { console.error(error); }
+    };
+    byId('threat_close')?.addEventListener('click', minimize);
     document.addEventListener('keydown', event => {
         if (event.key === 'Escape') { event.preventDefault(); minimize(); }
     });

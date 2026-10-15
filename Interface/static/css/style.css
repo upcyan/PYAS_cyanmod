@@ -462,8 +462,15 @@ body {
     padding-left: 88px;
 }
 
+/* 三级带图标行:图标列整体再进 32px,让文字起点落在 32+32+40+16=120px,
+   与无图标三级行(32+88)对齐;否则图标留在 32px 列、文字落在 88px,
+   和二级行完全同位,看起来同级却用更小字号(延迟时间/超时时间即此问题) */
+.settings-child-2:has(.item-icon) {
+    padding-left: calc(var(--space-6) + 32px);
+}
+
 .settings-child-2 > .item-info h2 {
-    font-size: var(--text-md);
+    font-size: var(--text-xl);
 }
 
 .item-info .setting-status {
@@ -515,11 +522,14 @@ body {
     white-space: nowrap; 
 }
 
-.item-info p { 
+.item-info p {
     font-size: var(--text-sm);
-    color: var(--text-secondary); 
+    color: var(--text-secondary);
     margin-top: var(--space-1);
-    white-space: nowrap; 
+    /* 说明文字自动换行:此前 nowrap 把长说明(如清除告警决定的括号长句)压成
+       单行,只能靠横向滚动条看全,窄窗口下直接截断 */
+    white-space: normal;
+    overflow-wrap: break-word;
 }
 
 .toggle-switch {
@@ -653,10 +663,34 @@ body {
     border-radius: var(--radius-circle);
     transition: color var(--dur-fast), background-color var(--dur-fast);
 }
-.search-box.has-value .search-clear { display: flex; }
+.search-box.has-value .search-clear,
+.input-clearable.has-value .search-clear { display: flex; }
 .search-clear:hover { color: var(--text-primary); }
 .search-clear:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
 .search-clear svg { width: 16px; height: 16px; }
+
+/* 裸输入框(text/password/number)的清空按钮:包一层 relative 容器,按钮绝对定位在右侧 */
+.input-clearable {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+.input-clearable > .modern-input,
+.input-clearable > .fp-note {
+    width: 100%;
+    min-width: 0;
+    padding-right: 28px;
+}
+.input-clearable > .search-clear {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    margin-left: 0;
+}
+/* 数字框右侧有原生步进箭头,清空按钮左移避开重叠 */
+.input-clearable.has-spinner > .modern-input { padding-right: 48px; }
+.input-clearable.has-spinner > .search-clear { right: 24px; }
 
 .flex-grow {
     flex-grow: 1;
@@ -1095,7 +1129,7 @@ body.resizing-active * {
     --setting-control-height: 40px;
 }
 
-#setting_window .list-item > :is(.modern-btn, .modern-input, .custom-select-wrapper) {
+#setting_window .list-item > :is(.modern-btn, .modern-input, .custom-select-wrapper, .input-clearable) {
     width: var(--setting-control-width);
     min-width: var(--setting-control-width);
     max-width: var(--setting-control-width);
@@ -1125,6 +1159,112 @@ body.resizing-active * {
 .modern-input:disabled {
     opacity: 0.45;
     cursor: not-allowed;
+}
+
+/* 模型名稱下拉组合框:扫描结果不再用 chip 排列,改为点击输入框弹下拉逐条选择 */
+#setting_window .list-item > .model-combo {
+    width: var(--setting-control-width);
+    min-width: var(--setting-control-width);
+    max-width: var(--setting-control-width);
+    flex: 0 0 var(--setting-control-width);
+}
+
+.model-combo {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.model-combo-field {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.model-combo-field .modern-input {
+    width: 100%;
+    min-width: 0;
+    padding-right: 26px;
+}
+
+/* 清空按钮:复用 .search-clear 的圆形叉号视觉,去掉 .search-box.has-value 的显示门槛 */
+.model-combo-clear {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: var(--radius-circle);
+    transition: color var(--dur-fast), background-color var(--dur-fast);
+}
+.model-combo-clear[hidden] { display: none !important; }
+.model-combo-clear:not([hidden]) { display: flex; }
+.model-combo-clear:hover { color: var(--text-primary); }
+.model-combo-clear:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
+.model-combo-clear svg { width: 14px; height: 14px; }
+
+/* 下拉菜单:固定定位,不撑开布局,内部可滚动(单条模型名超长用省略号) */
+/* absolute 锚定在 .model-combo 内:页面滚动时自动跟随,不依赖打开瞬间的视口坐标 */
+.model-combo-menu {
+    position: fixed;
+    display: none;
+    width: max-content;
+    min-width: 160px;
+    max-width: min(320px, calc(100vw - 32px));
+    max-height: 240px;
+    background-color: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-control);
+    box-shadow: var(--shadow-2);
+    z-index: 1000;
+    list-style: none;
+    margin: 0;
+    padding: var(--space-2);
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+}
+.model-combo-menu.open { display: block; }
+.model-combo-option {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-control);
+    cursor: pointer;
+    font-size: var(--text-md);
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 320px;
+    transition: background-color var(--dur-fast);
+    text-align: left;
+}
+.model-combo-option:hover,
+.model-combo-option.active {
+    background-color: var(--bg-hover);
+}
+.model-combo-option.selected {
+    background-color: var(--accent-alpha);
+    color: var(--accent-color);
+    font-weight: 600;
+}
+
+/* 扫描结果提示:单行省略,不换行不滚动 */
+#ai_models_hint {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
 }
 
 .modal-overlay {
@@ -1815,7 +1955,7 @@ body.resizing-active * {
     padding: var(--space-3) var(--space-6);
 }
 
-#ai_window .list-item > .modern-input {
+#ai_window .list-item > :is(.modern-input, .input-clearable) {
     width: clamp(220px, 36%, 380px);
     text-align: left;
     flex: 0 1 auto;
@@ -1858,7 +1998,7 @@ body.resizing-active * {
     .item-info p { white-space: normal; overflow-wrap: anywhere; }
     .item-info .setting-status { overflow-wrap: anywhere; }
     #setting_window { --setting-control-width: 120px; }
-    #ai_window .list-item > .modern-input { width: clamp(160px, 34%, 300px); }
+    #ai_window .list-item > :is(.modern-input, .input-clearable) { width: clamp(160px, 34%, 300px); }
     .quick-item { padding: var(--space-2) var(--space-3); }
     .header-group h2, .state-title, .sub-header-toolbar h2 { font-size: var(--text-4xl); }
 }

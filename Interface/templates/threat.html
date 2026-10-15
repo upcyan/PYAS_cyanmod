@@ -114,6 +114,11 @@
     <div class="app-container">
         <header class="navigate-window pywebview-drag-region">
             <div class="navigate-title">PYAS Security Cyanmod</div>
+            <div class="window-controls">
+                <button class="ctrl-btn" id="threat_close" aria-label="Close" title="Close">
+                    <svg class="theme-svg"><use href="#i-close"/></svg>
+                </button>
+            </div>
         </header>
         <main class="threat-layout">
             <aside class="threat-queue" aria-labelledby="queue_heading">
@@ -132,10 +137,10 @@
                     </div>
                     <div id="threat_score_track" class="score-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden><div id="threat_score_fill"></div></div>
                     <dl class="detection-grid">
-                        <div><dt id="evidence_category_label">Category</dt><dd id="threat_category">—</dd></div>
-                        <div><dt id="evidence_engine_label">Detection engine</dt><dd id="threat_engine">—</dd></div>
-                        <div><dt id="evidence_platform_label">Platform</dt><dd id="threat_platform">—</dd></div>
-                        <div><dt id="evidence_family_label">Family</dt><dd id="threat_family">—</dd></div>
+                        <div><dt id="evidence_category_label">Category</dt><dd id="threat_category" class="is-empty" data-label="">—</dd></div>
+                        <div><dt id="evidence_engine_label">Detection engine</dt><dd id="threat_engine" class="is-empty" data-label="">—</dd></div>
+                        <div><dt id="evidence_platform_label">Platform</dt><dd id="threat_platform" class="is-empty" data-label="">—</dd></div>
+                        <div><dt id="evidence_family_label">Family</dt><dd id="threat_family" class="is-empty" data-label="">—</dd></div>
                     </dl>
                     <div class="detection-raw"><span id="evidence_raw_label">Raw finding</span><code id="threat_raw_label" dir="ltr">—</code></div>
                     <div id="threat_rules_row" class="detection-rules" hidden><span id="evidence_rules_label">Matched rules</span><code id="threat_rules" dir="ltr"></code></div>

@@ -36,7 +36,7 @@ const assert = require('node:assert/strict');
         page.on('pageerror', error => errors.push(String(error)));
         await page.addInitScript(() => {
             window.fixture = {
-                blank: false, fail: false, decisions: [], focus: [], hold: false,
+                blank: false, fail: false, decisions: [], focus: [], hold: false, minimizes: 0,
                 data: {
                     id: 'r1', title: '文件防护', summary: '检测到可疑文件，等待您决定是否拦截。',
                     message: '示例告警（测试数据）\n来源: C:/Downloads/sample.exe', count: 1,
@@ -69,7 +69,7 @@ const assert = require('node:assert/strict');
                 },
                 decide: async (id, choice) => { window.fixture.decisions.push({ id, choice }); return true; },
                 set_focus: async state => { window.fixture.focus.push(state); return true; },
-                minimize: async () => true,
+                minimize: async () => { window.fixture.minimizes += 1; return true; },
             } };
         });
         await page.goto('http://127.0.0.1:' + server.address().port + '/templates/threat.html');
@@ -211,6 +211,8 @@ const assert = require('node:assert/strict');
                 await page.waitForFunction(code => document.documentElement.lang === code, code);
                 const text = await page.locator('#evidence_heading').textContent();
                 assert.ok(text && !text.startsWith('evidence_'), language);
+                const closeLabel = await page.locator('#threat_close').getAttribute('aria-label');
+                assert.ok(closeLabel && !closeLabel.startsWith('btn_'), language);
             }
             await patch({ language: 'simplified_switch' });
         });
@@ -255,6 +257,28 @@ const assert = require('node:assert/strict');
             assert.equal(await page.locator('#threat_raw_label').textContent(), '未提供');
             assert.equal(await page.locator('#threat_file_path').textContent(), '');
         });
+        await check('empty evidence labels are not duplicated above collapsed rows', async () => {
+            // 空态:dd.is-empty 时 label 由 ::before 内联,dt 必须隐藏,同一 label 只出现一次
+            for (const id of ['threat_category', 'threat_engine', 'threat_platform', 'threat_family']) {
+                const state = await page.evaluate(id => ({
+                    empty: document.getElementById(id).classList.contains('is-empty'),
+                    dtDisplay: getComputedStyle(document.getElementById(id.replace('threat_', 'evidence_') + '_label')).display,
+                }), id);
+                assert.equal(state.empty, true, id);
+                assert.equal(state.dtDisplay, 'none', id + ' dt must hide in empty state');
+            }
+            // 恢复真实证据后 dt 必须重新显示
+            await page.evaluate(() => { window.fixture.blank = false; });
+            await page.waitForFunction(() => document.getElementById('threat_score').textContent === '92');
+            for (const id of ['threat_category', 'threat_engine', 'threat_platform', 'threat_family']) {
+                const state = await page.evaluate(id => ({
+                    empty: document.getElementById(id).classList.contains('is-empty'),
+                    dtDisplay: getComputedStyle(document.getElementById(id.replace('threat_', 'evidence_') + '_label')).display,
+                }), id);
+                assert.equal(state.empty, false, id);
+                assert.ok(state.dtDisplay !== 'none', id + ' dt must stay visible with real values');
+            }
+        });
         await check('failed snapshot pauses actions and recovers without stale decisions', async () => {
             await page.evaluate(() => { window.fixture.blank = false; window.fixture.fail = true; });
             await page.waitForFunction(() => document.getElementById('threat_status').textContent.includes('数据暂不可用'));
@@ -278,6 +302,20 @@ const assert = require('node:assert/strict');
             await page.waitForFunction(() => document.getElementById('threat_status').textContent.includes('数据暂不可用'));
             await waitStopped();
             assert.equal(await page.locator('#threat_block').isDisabled(), true);
+            await page.evaluate(() => { window.pywebview = window.savedBridge; });
+            await page.waitForFunction(() => !document.getElementById('threat_block').disabled);
+        });
+        await check('title-bar close button exits via minimize and survives lost bridge', async () => {
+            assert.equal(await page.locator('#threat_close').isVisible(), true);
+            const before = await page.evaluate(() => window.fixture.minimizes);
+            await page.locator('#threat_close').click();
+            await page.waitForFunction(before => window.fixture.minimizes === before + 1, before);
+            // 桥断开(按钮全禁的卡死态)时点击 × 不能抛错,恢复桥后弹窗继续工作
+            await page.evaluate(() => { window.savedBridge = window.pywebview; window.pywebview = null; });
+            await page.waitForFunction(() => document.getElementById('threat_status').textContent.includes('数据暂不可用'));
+            await page.locator('#threat_close').click();
+            await page.waitForTimeout(50);
+            assert.deepEqual(errors, []);
             await page.evaluate(() => { window.pywebview = window.savedBridge; });
             await page.waitForFunction(() => !document.getElementById('threat_block').disabled);
         });

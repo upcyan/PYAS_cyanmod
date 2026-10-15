@@ -22,6 +22,16 @@ from PYAS_WinAPI import (
     PYAS_PROCESS_SCAN_ACCESS,
 )
 
+# 全量重扫的三种触发共用一个动作,但含义与级别不同(此前文案硬编码,
+# 队列慢/OS 丢事件/读失败无法区分)。两次全量重扫之间至少间隔 RECOVERY_MIN_INTERVAL,
+# 持续高压下背靠背重扫会把仅有的 4 个扫描 worker 长期占死。
+RECOVERY_MIN_INTERVAL = 300
+RECOVERY_REASONS = {
+    "queue_full": ("INFO", "Pending task capacity reached; recovering by rescan"),
+    "buffer_lost": ("WARN", "Directory change buffer overflowed (events lost); recovering by rescan"),
+    "watcher_error": ("WARN", "Watcher read failed; recovering by rescan"),
+}
+
 
 class RealtimeMixin:
     def protect_proc_thread(self):
@@ -281,7 +291,9 @@ class RealtimeMixin:
             self.h_dir_file = hDir
 
         try:
-            buffer = ctypes.create_string_buffer(262144)
+            # 同步模式(无 OVERLAPPED)允许大缓冲;1MB 吃住突发写入,
+            # 把 overflowed 从「一次截图就可能触发」压回罕见路径
+            buffer = ctypes.create_string_buffer(1048576)
             temp_prefix = os.path.normcase(self.path_temp)
 
             if not temp_prefix.endswith(os.sep):
@@ -309,10 +321,16 @@ class RealtimeMixin:
                         raise OSError(ctypes.get_last_error(), "Directory watcher read failed")
 
                     if bytes_returned.value == 0:
-                        self._schedule_file_task(
-                            "recovery", self.path_user, lambda _: self._recover_file_tasks(), 0
-                        )
+                        # 内核说缓冲区溢出、事件已丢失:必须重扫,且这是 WARN 级信号
+                        self._schedule_recovery("buffer_lost")
                         continue
+
+                    # 后缀过滤配置按「批」读取一次:原先每个文件事件都拿一次全局
+                    # lock_config,配置写盘持锁时 watcher 停止消费,内核缓冲区一涨满
+                    # 就报 buffer overflowed(截图等突发写入最易触发),只能靠重扫兜底
+                    with self.lock_config:
+                        ext_filter = self.pyas_config.get("suffix_switch", True)
+                        suffix = self.pyas_config.get("suffix", [])
 
                     for action, raw_filename in iter_file_notifications(
                         buffer, bytes_returned.value
@@ -329,10 +347,6 @@ class RealtimeMixin:
                                     norm_path.startswith(temp_prefix)
                                     and norm_path[len(temp_prefix) :].startswith("_mei")
                                 ):
-                                    with self.lock_config:
-                                        ext_filter = self.pyas_config.get("suffix_switch", True)
-                                        suffix = self.pyas_config.get("suffix", [])
-
                                     if (
                                         not ext_filter
                                         or os.path.splitext(file_path)[-1].lower() in suffix
@@ -348,9 +362,7 @@ class RealtimeMixin:
                     if not enabled or self.closing:
                         break
 
-                    self._schedule_file_task(
-                        "recovery", self.path_user, lambda _: self._recover_file_tasks(), 0
-                    )
+                    self._schedule_recovery("watcher_error")
                     time.sleep(0.25)
         finally:
             with self.lock_file_ops:
@@ -397,48 +409,80 @@ class RealtimeMixin:
             critical=task_name in ("delete", "lock", "verify"),
         )
 
-    def _recover_file_tasks(self):
+    def _recover_file_tasks(self, reason="queue_full"):
+        level, detail = RECOVERY_REASONS.get(reason, RECOVERY_REASONS["queue_full"])
         self.write_log(
-            "WARN",
+            level,
             "File Event Recovery",
-            detail="Pending task capacity reached; recovering by rescan",
-            success=False,
+            detail=detail,
+            success=(level == "INFO"),
         )
 
-        with self.lock_config:
-            quarantined = list(self.pyas_config.get("quarantine", []))
-
-        for entry in quarantined:
-            if self.closing:
-                return
-
-            path = entry.get("file") if isinstance(entry, dict) else entry
-
-            if path:
-                self.lock_file(path, True, quiet=True)
-
-        for file_path, _ in self.yield_files(self.path_user):
+        try:
             with self.lock_config:
-                enabled = self.pyas_config.get("document_switch", False)
-                ext_filter = self.pyas_config.get("suffix_switch", True)
-                suffix = self.pyas_config.get("suffix", [])
+                quarantined = list(self.pyas_config.get("quarantine", []))
 
-            if self.closing or not enabled:
-                break
+            for entry in quarantined:
+                if self.closing:
+                    return
 
-            if self.is_in_whitelist(file_path):
-                continue
+                path = entry.get("file") if isinstance(entry, dict) else entry
 
-            norm_path = os.path.normcase(file_path)
-            temp_prefix = os.path.normcase(self.path_temp).rstrip(os.sep) + os.sep
+                if path:
+                    self.lock_file(path, True, quiet=True)
 
-            if norm_path.startswith(temp_prefix) and norm_path[len(temp_prefix) :].startswith(
-                "_mei"
-            ):
-                continue
+            for file_path, _ in self.yield_files(self.path_user):
+                with self.lock_config:
+                    enabled = self.pyas_config.get("document_switch", False)
+                    ext_filter = self.pyas_config.get("suffix_switch", True)
+                    suffix = self.pyas_config.get("suffix", [])
 
-            if not ext_filter or os.path.splitext(norm_path)[-1] in suffix:
-                self.handle_new_file(file_path)
+                if self.closing or not enabled:
+                    break
+
+                if self.is_in_whitelist(file_path):
+                    continue
+
+                norm_path = os.path.normcase(file_path)
+                temp_prefix = os.path.normcase(self.path_temp).rstrip(os.sep) + os.sep
+
+                if norm_path.startswith(temp_prefix) and norm_path[len(temp_prefix) :].startswith(
+                    "_mei"
+                ):
+                    continue
+
+                if not ext_filter or os.path.splitext(norm_path)[-1] in suffix:
+                    self.handle_new_file(file_path)
+        finally:
+            # 冷却锚点在"跑完"而不是"开始":跑很久期间的新触发已在 _schedule_recovery
+            # 里被合并,跑完后才重新计时
+            with self.lock_file_ops:
+                self._recovery_scheduled = False
+                self._recovery_last_done = time.monotonic()
+
+    def _schedule_recovery(self, reason):
+        """合并 + 冷却地调度一次全量重扫。
+
+        - 已有重扫排队(键相同,调度器本来也会合并)→ 直接跳过,不重置到期时间;
+        - 距上次跑完不足 RECOVERY_MIN_INTERVAL → 延后到间隔满再跑,避免背靠背。
+        """
+        with self.lock_file_ops:
+            if getattr(self, "_recovery_scheduled", False):
+                return False
+
+            self._recovery_scheduled = True
+            last_done = getattr(self, "_recovery_last_done", 0.0)
+            delay = max(0.0, RECOVERY_MIN_INTERVAL - (time.monotonic() - last_done))
+
+        if not self._schedule_file_task(
+            "recovery", self.path_user, lambda _: self._recover_file_tasks(reason), delay
+        ):
+            with self.lock_file_ops:
+                self._recovery_scheduled = False
+
+            return False
+
+        return True
 
     def _queue_file_scan(self, file_path, delay=FILE_SCAN_DEBOUNCE_SECONDS):
         self._schedule_file_task("scan", file_path, self.handle_new_file, delay)

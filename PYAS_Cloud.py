@@ -263,6 +263,11 @@ class CloudQueueMixin:
     def perform_cloud_scan(self, file_path, cancel_event=None):
         was_locked = False
 
+        # 熔断冷却期内直接跳过:此时每个文件必然失败,继续只会白白做哈希
+        # 并逐文件刷 Cloud API Failed 日志(端点不可达时的刷屏源头)
+        if time.time() < getattr(self.cloud, "cooldown_until", 0.0):
+            return False
+
         try:
             with self.lock_config:
                 if not self.pyas_config.get("cloud_switch", False):

@@ -284,6 +284,7 @@ if ($Legacy -and (Resolve-Sid $Legacy.Definition.Principal.UserId) -eq $Sid -and
             self.write_log(
                 "INFO",
                 "manage_autostart",
+                source=state["taskName"],
                 detail=f"Verified {self.autostart_mode}: {state['taskName']}",
                 success=True,
             )

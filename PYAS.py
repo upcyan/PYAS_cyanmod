@@ -1575,7 +1575,9 @@ def start_ui():
                 return
 
             webview_completed.set()
-            logger.error("Startup failed: %s", reason)
+            # 失败必带可执行文件路径:缺 UI 资源这类错误只列相对路径时,
+            # 无法区分「安装版缺文件」和「误运行了 dist 下的裸 exe」
+            logger.error("Startup failed (exe=%s): %s", sys.executable, reason)
 
             if js_api:
                 js_api.write_log("WARN", "WebView2", detail=reason, success=False)
@@ -1591,6 +1593,7 @@ def start_ui():
             if not hide_on_start:
                 show_startup_error(
                     f"PYAS could not initialize its interface.\n\n{reason}\n\n"
+                    f"Executable: {sys.executable}\n"
                     f"Diagnostic log: {STARTUP_LOG_PATH or 'unavailable'}"
                 )
 

@@ -161,6 +161,26 @@
 .detection-grid > div { min-width: 0; }
 .detection-grid dt, .detection-raw > span, .detection-rules > span, .file-heading > span, .file-hash > span { font-size: var(--text-xs); color: var(--text-secondary); }
 .detection-grid dd { font-size: var(--text-sm); font-weight: 600; margin: 2px 0 0; overflow-wrap: anywhere; }
+/* 空值折叠成一行:label+value 并排,把 .detection-grid 从 6 行压到 3 行。
+   只在"证据不可用/未评分"的空态生效,有真实值时保持原有上下堆叠。 */
+.detection-grid dd.is-empty {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin: 0;
+    font-weight: 400;
+    color: var(--text-secondary);
+}
+.detection-grid dd.is-empty::before {
+    content: attr(data-label);
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+/* 空态 label 已由 dd::before 内联,隐藏上面的 dt,否则同一 label 显示两遍 */
+.detection-grid > div:has(> dd.is-empty) dt { display: none; }
+/* 关闭按钮悬停红底,与主窗口 #close_button 一致 */
+#threat_close:hover { background-color: var(--color-danger); color: var(--text-on-accent); }
 .detection-raw, .detection-rules { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; }
 .detection-card code, .file-hash code { font-family: Consolas, ui-monospace, monospace; font-size: var(--text-xs); line-height: 1.5; overflow-wrap: anywhere; user-select: text; }
 .evidence-note { margin-top: 8px; font-size: var(--text-xs); line-height: 1.55; color: var(--text-secondary); overflow-wrap: anywhere; }
