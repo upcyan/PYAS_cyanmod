@@ -16,7 +16,7 @@
 - **误报抑制**：一键标记误报，支持 SHA-256 内容锚定、路径范围、签名级等档位，90 天过期、命中留审计，附独立规则管理页。
 - **智能体加固**：识别 aider / Claude Code / Cline / Cursor / Copilot 等编程智能体的敏感操作，提权与权限跳变审计、事件智能体标注，可整体开关。
 - **交互告警重做**：证据分行展示、来源区分（驱动 / 实时 / 云）、免打扰模式、告警防洪（详见 [docs/alert-policy.md](docs/alert-policy.md)）。
-- **界面重绘**：52 枚重绘图标整套实装、AI 模型接入引导、窗口与输入框细节修正，11 种语言同步。
+- **界面重绘**：图标整套重绘、改为统一 sprite 引用，AI 模型接入引导、窗口与输入框细节修正，11 种语言同步。
 - **可靠性修复**：告警弹窗崩溃导致的静默拦截、拦截日志漏记、云端熔断冷却期跳过等底层问题。
 
 设计细节见 [docs/behavior-defense.md](docs/behavior-defense.md)、[docs/threat-evidence-and-ai.md](docs/threat-evidence-and-ai.md)。
