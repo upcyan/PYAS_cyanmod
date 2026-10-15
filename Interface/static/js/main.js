@@ -1509,15 +1509,23 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const activity = await window.pywebview.api.get_agent_activity();
             wrap?.classList.toggle('hidden', !agentDetails.open || activity.length === 0);
-            box.replaceChildren(...activity.map(item => {
+            box.replaceChildren(...activity.flatMap(item => {
                 const p = document.createElement('p');
                 p.className = 'ai-hint';
-                // admin×N=提权进程数;✓=主程序签名已验证(无标记=仅名字匹配)。
-                // 数据行缀非 i18n 键,与「 pid」同风格
+                // admin×N=提权进程数;✓=签名已验证;evt×N=相关拦截事件数。
+                // 行缀是数据非 i18n 键,与「 pid」同风格
                 p.textContent = `${item.name} · ${item.exe} · ${item.count} pid`
                     + (item.elevated ? ` · admin×${item.elevated}` : '')
-                    + (item.verified ? ' · ✓' : '');
-                return p;
+                    + (item.verified ? ' · ✓' : '')
+                    + (item.events ? ` · evt×${item.events}` : '');
+                // 行为审计:本轮连接快照(端点行缩进排在产品行下)
+                const net = (item.connections || []).map(c => {
+                    const e = document.createElement('p');
+                    e.className = 'ai-hint agent-net';
+                    e.textContent = `↳ ${c.endpoint}`;
+                    return e;
+                });
+                return [p, ...net];
             }));
         } catch (error) { console.error('Agent activity load failed', error); }
     };

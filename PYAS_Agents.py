@@ -8,6 +8,8 @@
 import ctypes
 import glob
 import os
+import socket
+import struct
 import time
 
 from PYAS_Diagnostics import log_exception
@@ -156,6 +158,59 @@ def _process_image_path(pid):
         return ""
     finally:
         ctypes.windll.kernel32.CloseHandle(handle)
+
+
+def _query_tcp_rows():
+    """枚举本机 TCP 连接(owner PID)。只读系统连接表,不拦截不改状态。
+
+    返回 [(远端IP, 远端端口, PID)];表读取失败返回空列表。
+    """
+    try:
+        iphlpapi = ctypes.windll.iphlpapi
+        af_inet = 2
+        tcp_table_owner_pid_all = 5
+        size = ctypes.c_ulong(0)
+
+        # 首次调用拿所需缓冲区大小(返回 122 = ERROR_INSUFFICIENT_BUFFER)
+        iphlpapi.GetExtendedTcpTable(
+            None, ctypes.byref(size), False, af_inet, tcp_table_owner_pid_all, 0)
+
+        if not size.value:
+            return []
+
+        buf = ctypes.create_string_buffer(size.value)
+
+        if iphlpapi.GetExtendedTcpTable(
+                buf, ctypes.byref(size), False, af_inet, tcp_table_owner_pid_all, 0) != 0:
+            return []
+
+        count = ctypes.cast(buf, ctypes.POINTER(ctypes.c_ulong)).contents.value
+        rows = []
+        base = ctypes.sizeof(ctypes.c_ulong)
+
+        for i in range(min(count, 4096)):
+            state, _la, _lp, ra, rp, pid = struct.unpack_from("<6I", buf, base + i * 24)
+
+            if rp:
+                rows.append((socket.inet_ntoa(struct.pack("<I", ra)), socket.ntohs(rp), pid))
+
+        return rows
+    except Exception:
+        log_exception("PYAS_Agents._query_tcp_rows")
+        return []
+
+
+def _match_agent_connections(rows, pid_product):
+    """纯函数:TCP 行里挑出属于智能体进程的远程端点,返回 [(产品名, 'ip:port')]。"""
+    matched = []
+
+    for remote_ip, remote_port, pid in rows:
+        product = pid_product.get(int(pid))
+
+        if product:
+            matched.append((product, f"{remote_ip}:{remote_port}"))
+
+    return matched
 
 
 def verify_agent_identity(exe_path):
@@ -371,6 +426,27 @@ class AgentMonitorMixin:
         if getattr(self, "_agent_sightings", None) is None:
             self._agent_sightings = {}
 
+        # 行为审计(网络):本轮 pid→产品映射,匹配系统 TCP 表提取智能体端点。
+        # 只读连接表做快照,短命连接会漏采样——审计用途足够,不做拦截依据
+        enabled = self._agent_feature_enabled()
+        pid_product = {}
+
+        for item in activity:
+            for pid in item["pids"]:
+                pid_product[int(pid)] = item["name"]
+
+        conns_by_product = {}
+
+        for product, endpoint in _match_agent_connections(_query_tcp_rows(), pid_product):
+            conns_by_product.setdefault(product, []).append(endpoint)
+
+        behavior = getattr(self, "_agent_behavior", None)
+        if behavior is None:
+            behavior = self._agent_behavior = {}
+        seen_eps = getattr(self, "_agent_seen_endpoints", None)
+        if seen_eps is None:
+            seen_eps = self._agent_seen_endpoints = {}
+
         for item in activity:
             # 权限审计:逐进程查提权状态,0→>0 跳变才告警,稳态不重复刷
             elevated = 0
@@ -397,10 +473,31 @@ class AgentMonitorMixin:
             except Exception:
                 item["verified"] = False
 
+            # 行为审计:连接快照(每产品最多 8 条)入明细,首见端点落网络审计
+            conns = conns_by_product.get(item["name"], [])
+            item["connections"] = [{"endpoint": endpoint} for endpoint in conns[:8]]
+            behavior.setdefault(item["name"], {})["connections"] = item["connections"]
+
+            known_eps = seen_eps.setdefault(item["name"], set())
+            fresh = [endpoint for endpoint in conns if endpoint not in known_eps]
+
+            if enabled and hasattr(self, "write_log"):
+                for endpoint in fresh[:4]:  # 每轮最多记 4 条新端点,防端口翻动刷屏
+                    self.write_log("INFO", "Agent Network",
+                        source=item["exe"],
+                        detail=f"{item['name']} → {endpoint}")
+
+            if fresh:
+                known_eps.update(fresh)
+
+                if len(known_eps) > 128:  # 防膨胀:重置重学
+                    seen_eps[item["name"]] = set(fresh)
+
+            item["events"] = getattr(self, "_agent_event_counts", {}).get(item["name"], 0)
+
             known = self._agent_sightings.get(item["name"])
             last_logged = (known or {}).get("last_logged", 0)
-            # 功能开关只关「监控+审计」:页面内浏览明细不受影响
-            enabled = self._agent_feature_enabled()
+            # 功能开关只关「监控+审计」:页面内浏览明细不受影响(enabled 已在循环外取)
             detected_text, elevated_first_text, elevated_transition_text = self._audit_texts()
 
             if (enabled and hasattr(self, "write_log")
@@ -428,7 +525,13 @@ class AgentMonitorMixin:
         return activity
 
     def get_agent_activity(self):
-        return list(getattr(self, "_agent_sightings", {}).values())
+        activity = list(getattr(self, "_agent_sightings", {}).values())
+        counts = getattr(self, "_agent_event_counts", {})
+
+        for item in activity:
+            item["events"] = counts.get(item["name"], 0)
+
+        return activity
 
     def _agent_feature_enabled(self):
         """智能体加固总开关(agent_switch):关=不监控、不写审计、不做事件标注。"""
@@ -520,6 +623,11 @@ class AgentMonitorMixin:
         if not product or not self._agent_feature_enabled():
             return None
 
+        counts = getattr(self, "_agent_event_counts", None)
+        if counts is None:
+            counts = self._agent_event_counts = {}
+        counts[product] = counts.get(product, 0) + 1
+
         if hasattr(self, "write_log"):
             self.write_log("INFO", "Agent Related Event", source=str(path), detail=product)
 
@@ -545,6 +653,11 @@ class AgentMonitorMixin:
 
             if hasattr(self, "write_log"):
                 self.write_log("INFO", "Agent Related Event", source=str(candidate), detail=product)
+
+            counts = getattr(self, "_agent_event_counts", None)
+            if counts is None:
+                counts = self._agent_event_counts = {}
+            counts[product] = counts.get(product, 0) + 1
 
             try:
                 return product, verify_agent_identity(candidate)

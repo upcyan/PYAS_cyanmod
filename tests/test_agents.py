@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from PYAS_Agents import AgentMonitorMixin, match_agent_name
+from PYAS_Agents import AgentMonitorMixin, _match_agent_connections, match_agent_name
 
 
 class Owner(AgentMonitorMixin):
@@ -130,6 +130,43 @@ class ScanTests(unittest.TestCase):
         self.owner.pyas_config = {"agent_switch": False}
         self.assertEqual(
             self.owner.identify_agent_for_event('C:\\tools\\ZCode\\zcode.exe', ''), (None, False))
+
+    def test_behavior_network_snapshot_and_first_seen(self):
+        rows = [('1.2.3.4', 443, 1), ('127.0.0.1', 11434, 2), ('8.8.8.8', 53, 99)]
+        pid_product = {1: 'Claude Code', 2: 'Kimi Code'}
+        # 纯函数:只留智能体 pid 的端点
+        self.assertEqual(_match_agent_connections(rows, pid_product),
+                         [('Claude Code', '1.2.3.4:443'), ('Kimi Code', '127.0.0.1:11434')])
+
+        def scan():
+            with patch('PYAS_Agents._query_tcp_rows', return_value=rows), \
+                 patch('PYAS_Agents._process_image_path', return_value=''), \
+                 patch('PYAS_Agents._process_is_elevated', return_value=False), \
+                 patch('PYAS_Agents.verify_agent_identity', return_value=False):
+                return self.owner.scan_agent_processes(
+                    lister=lambda: [('claude.exe', 1), ('kimi.exe', 2)])
+
+        activity = scan()
+        conns = {item['name']: item['connections'] for item in activity}
+        self.assertEqual(conns['Claude Code'], [{'endpoint': '1.2.3.4:443'}])
+        nets = [args for (args, _kw) in self.owner.logs if args[1] == 'Agent Network']
+        self.assertEqual(len(nets), 2)  # 两个产品各一条首见端点
+
+        scan()  # 同端点第二轮不重复记
+        nets = [args for (args, _kw) in self.owner.logs if args[1] == 'Agent Network']
+        self.assertEqual(len(nets), 2)
+
+    def test_event_counter_accumulates_into_activity(self):
+        self.assertTrue(self.owner.note_agent_for_path('C:\\a\\zcode.exe'))
+        self.assertTrue(self.owner.note_agent_for_path('C:\\b\\zcode.exe'))
+
+        with patch('PYAS_Agents._process_image_path', return_value=''), \
+             patch('PYAS_Agents._process_is_elevated', return_value=False), \
+             patch('PYAS_Agents.verify_agent_identity', return_value=False), \
+             patch('PYAS_Agents._query_tcp_rows', return_value=[]):
+            activity = self.owner.scan_agent_processes(lister=lambda: [('zcode.exe', 1)])
+
+        self.assertEqual(activity[0]['events'], 2)
 
 
 class InstalledAgentsTests(unittest.TestCase):
