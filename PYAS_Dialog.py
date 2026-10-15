@@ -981,8 +981,9 @@ class _WebDecisionAPI:
                     # 则 ai_deadline_choice 返回 None → 撤销倒计时交回人工决策。
                     if ai_phase in ("ready", "failed"):
                         request.deadline = time.monotonic() + request.timeout
-                elif ai_phase is None:
-                    # 经典自动拦截模式(无 AI 建议参与):界面就绪即起表,保持原语义
+                elif ai_phase in (None, "unavailable"):
+                    # 经典自动拦截模式(AI 未参与:未启用/未配置都置 unavailable,
+                    # 此前只认 None 导致 AI 关闭的用户超时拦截永不生效):界面就绪即起表
                     request.deadline = time.monotonic() + request.timeout
             remaining = max(0, math.ceil(request.deadline - time.monotonic())) if request.deadline else None
             events = session.queue.describe()
@@ -1191,11 +1192,21 @@ class _WebThreatDialogSession:
                             revived = True
                         if request.deadline and request.deadline <= time.monotonic():
                             verdict = ai_deadline_choice(request)
+
                             if verdict is None:
-                                # AI 没给出结论:不代替用户决定,撤销倒计时交回用户自主决策
-                                request.timeout_consumed = True
-                                request.deadline = None
-                                continue
+                                state = request.ai if isinstance(request.ai, dict) else {}
+
+                                if state.get("state") in ("delay", "analyzing", "failed"):
+                                    # AI 参与中/参与过但到点仍无结论:不代用户决定,
+                                    # 撤销倒计时交回用户自主决策
+                                    request.timeout_consumed = True
+                                    request.deadline = None
+                                    continue
+
+                                # 经典模式(AI 未参与,起表时即 unavailable/None):
+                                # 超时本身就是用户配置的裁决,到点拦截
+                                verdict = "block"
+
                             if verdict != "block":
                                 try:
                                     self.owner.write_log(
