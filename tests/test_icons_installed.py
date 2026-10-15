@@ -136,7 +136,7 @@ class IconInstallTests(unittest.TestCase):
         """预览页内嵌 symbol 与 sprite.svg 同源(评审对照不失真)"""
         pv = symbols_of(read(PREVIEW))
         self.assertEqual(pv, self.sprite_symbols)
-        for iid in ('i-plug', 'i-sliders', 'i-clock', 'i-reset', 'i-file-check'):
+        for iid in ('i-plug', 'i-custom-shield', 'i-clock', 'i-reset', 'i-file-check'):
             self.assertIn(iid, pv)
 
 

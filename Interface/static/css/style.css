@@ -495,12 +495,13 @@ body {
     pointer-events: none;
 }
 
+/* 缩放用 transform 会连带把描边一起缩了(物理线宽会变成 2.25px),
+   所以按缩放比反向补 --icon-stroke,让列表内所有图标的物理线宽都回到 2.5px。
+   注:曾经还有个 .item-icon-repair(scale 1.1)用来把偏小的扳手撑大,
+   现在扳手几何已经补到 18x18,该补丁类已删除。 */
 .item-icon-compact {
     transform: scale(0.9);
-}
-
-.item-icon-repair {
-    transform: translateX(2px) scale(1.1);
+    --icon-stroke: 1.667;
 }
 
 .item-icon ~ :is(.toggle-switch, .icon-action-btn) {
@@ -1905,7 +1906,7 @@ body.resizing-active * {
     padding: 0;
     border: none;
     background: transparent;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     opacity: 0.92;
     vertical-align: middle;
     cursor: default;
@@ -1919,14 +1920,14 @@ body.resizing-active * {
     width: 22px;
     height: 22px;
     flex-shrink: 0;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     object-fit: cover;
     display: block;
     background-color: var(--bg-panel);
 }
 
 .ai-chip-badge {
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     overflow: hidden;
 }
 
