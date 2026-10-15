@@ -56,7 +56,7 @@ THREAT_WINDOW_IDLE_GRACE = 20
 # 两处,只改 create_window 不改锚位,窗口会按旧高度算右下角坐标、底部出屏。
 # 高度按「检测证据+AI 决策+操作区同屏」取值,1080p 与 768 高度的机器都放得下。
 THREAT_WINDOW_WIDTH = 720
-THREAT_WINDOW_HEIGHT = 680
+THREAT_WINDOW_HEIGHT = 720
 THREAT_WINDOW_MIN_SIZE = (560, 520)
 
 SPI_GETWORKAREA = 0x0030

@@ -140,25 +140,25 @@
 }
 
 /* Evidence-first layout. Facts remain selectable and long paths never widen the window. */
-.threat-layout { grid-template-columns: 162px minmax(0, 1fr); gap: 14px; padding: 16px; }
-.threat-detail { padding: 16px; gap: 12px; min-width: 0; overflow-y: auto; }
+.threat-layout { grid-template-columns: 162px minmax(0, 1fr); gap: 10px; padding: 12px; }
+.threat-detail { padding: 12px; gap: 8px; min-width: 0; overflow-y: auto; }
 .threat-detail > * { flex-shrink: 0; }
 .threat-summary { align-items: flex-start; gap: 10px; }
 .threat-summary > div { min-width: 0; }
-.threat-summary svg { width: 30px; height: 30px; }
-.threat-summary h1 { font-size: 21px; line-height: 1.35; }
+.threat-summary svg { width: 26px; height: 26px; }
+.threat-summary h1 { font-size: 18px; line-height: 1.35; }
 .threat-context { margin-top: 3px; font-size: var(--text-sm); line-height: 1.5; color: var(--text-secondary); overflow-wrap: anywhere; }
-.detection-card { padding: 12px 14px; background: var(--bg-hover); border: 1px solid var(--border-color); border-radius: var(--radius-panel); }
+.detection-card { padding: 8px 12px; background: var(--bg-hover); border: 1px solid var(--border-color); border-radius: var(--radius-panel); }
 .detection-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .detection-head h2 { font-size: var(--text-sm); font-weight: 600; }
 .detection-score { display: flex; align-items: baseline; gap: 5px; }
 .detection-score > span:first-child { font-size: var(--text-xs); color: var(--text-secondary); margin-inline-end: 6px; }
-.detection-score strong { font-size: 28px; font-weight: 700; line-height: 1.2; color: var(--color-danger-strong); }
+.detection-score strong { font-size: 22px; font-weight: 700; line-height: 1.2; color: var(--color-danger-strong); }
 .detection-score.is-unscored strong { font-size: var(--text-sm); color: var(--text-primary); }
 #threat_score_scale { font-size: var(--text-xs); color: var(--text-secondary); }
-.score-track { height: 4px; background: var(--border-color); border-radius: 4px; margin-top: 9px; overflow: hidden; }
+.score-track { height: 4px; background: var(--border-color); border-radius: 4px; margin-top: 6px; overflow: hidden; }
 #threat_score_fill { height: 100%; width: 0; background: var(--color-danger-strong); border-radius: inherit; }
-.detection-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 9px 16px; margin: 12px 0; }
+.detection-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px 14px; margin: 8px 0; }
 .detection-grid > div { min-width: 0; }
 .detection-grid dt, .detection-raw > span, .detection-rules > span, .file-heading > span, .file-hash > span { font-size: var(--text-xs); color: var(--text-secondary); }
 .detection-grid dd { font-size: var(--text-sm); font-weight: 600; margin: 2px 0 0; overflow-wrap: anywhere; }
@@ -182,23 +182,28 @@
 .detection-grid > div:has(> dd.is-empty) dt { display: none; }
 /* 关闭按钮悬停红底,与主窗口 #close_button 一致 */
 #threat_close:hover { background-color: var(--color-danger); color: var(--text-on-accent); }
-.detection-raw, .detection-rules { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; }
+.detection-raw, .detection-rules { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
 .detection-card code, .file-hash code { font-family: Consolas, ui-monospace, monospace; font-size: var(--text-xs); line-height: 1.5; overflow-wrap: anywhere; user-select: text; }
-.evidence-note { margin-top: 8px; font-size: var(--text-xs); line-height: 1.55; color: var(--text-secondary); overflow-wrap: anywhere; }
+.evidence-note { margin-top: 6px; font-size: var(--text-xs); line-height: 1.55; color: var(--text-secondary); overflow-wrap: anywhere; }
 .threat-file { min-width: 0; }
 .file-heading { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: var(--text-sm); overflow-wrap: anywhere; }
 .file-path { font-family: Consolas, ui-monospace, monospace; font-size: var(--text-xs); line-height: 1.6; color: var(--text-secondary); overflow-wrap: anywhere; user-select: text; margin-top: 3px; }
 .threat-process { margin: 0; }
-.ai-result { padding: 10px 12px; background: var(--accent-alpha); }
+.ai-result { padding: 8px 12px; background: var(--accent-alpha); }
 .ai-result-head { flex-wrap: wrap; }
 .ai-result-verdict { margin-inline-start: auto; margin-left: 0; max-width: 100%; overflow-wrap: anywhere; }
-.ai-result-reason { margin-top: 5px; max-height: none; }
+.ai-result-reason {
+  margin-top: 4px;
+  /* 滚动上限:AI 理由长度不可控,放任撑高会把证据/详情区挤出去(整列滚动) */
+  max-height: 64px;
+  overflow-y: auto;
+}
 .event-details { font-size: var(--text-xs); color: var(--text-secondary); }
 .event-details summary { cursor: pointer; padding: 4px 0; }
 .event-details summary:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 3px; }
-.file-hash { display: flex; flex-direction: column; gap: 3px; margin: 8px 0; }
-.threat-message { max-height: 160px; font-size: var(--text-sm); flex: none; }
-.threat-footer { padding: 0 16px 14px; max-height: 54vh; overflow-y: auto; }
+.file-hash { display: flex; flex-direction: column; gap: 3px; margin: 6px 0; }
+.threat-message { max-height: 88px; font-size: var(--text-sm); flex: none; }
+.threat-footer { padding: 0 12px 12px; max-height: 54vh; overflow-y: auto; }
 .threat-status { padding: 9px 0; border-top: 1px solid var(--border-color); font-weight: 500; }
 .threat-meta { margin-bottom: 10px; }
 .threat-actions { align-items: center; }
