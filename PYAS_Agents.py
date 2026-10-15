@@ -60,30 +60,43 @@ AGENT_CATALOG = (
 AGENT_FINGERPRINTS = tuple((entry["name"], entry["tokens"]) for entry in AGENT_CATALOG)
 
 # 审计详情写入时就地取 UI 语言的模板(日志落盘后不会再翻译)。
-# detected: {0}=产品名 {1}=进程数;elevated: {0}=产品名 {1}=提权数 {2}=总进程数
+# detected: {0}=产品名 {1}=进程数;elevated 两款: {0}=产品名 {1}=提权数 {2}=总进程数。
+# elevated_first=首次扫到该产品即处于提权态(提权动作可能发生在很久以前);
+# elevated_transition=上一轮扫过且当时无提权进程,本轮出现了→两次扫描间真提权了。
 _AUDIT_TEXTS = {
     "traditional_switch": ("{0} / {1} 個處理程序執行中",
+        "{0}：{1}/{2} 個處理程序取得管理員令牌（首次發現即提權）",
         "{0}：{1}/{2} 個處理程序取得管理員令牌（從未提權轉為提權）"),
     "simplified_switch": ("{0} / {1} 个进程运行中",
+        "{0}：{1}/{2} 个进程拥有管理员令牌（首次发现即提权）",
         "{0}：{1}/{2} 个进程拥有管理员令牌（从未提权变为提权）"),
     "english_switch": ("{0} / {1} process(es) running",
-        "{0}: {1}/{2} process(es) obtained an administrator token (newly elevated)"),
+        "{0}: {1}/{2} process(es) with an administrator token (first seen elevated)",
+        "{0}: {1}/{2} process(es) elevated since the last scan"),
     "japanese_switch": ("{0} / {1} 個のプロセスが実行中",
-        "{0}: {1}/{2} 個のプロセスが管理者トークンを取得（新たに昇格）"),
+        "{0}: {1}/{2} 個のプロセスが管理者トークンを取得（初回検出時に昇格済み）",
+        "{0}: {1}/{2} 個のプロセスが管理者トークンを取得（前回スキャン後に昇格）"),
     "korean_switch": ("{0} / {1}개 프로세스 실행 중",
-        "{0}: {1}/{2}개 프로세스가 관리자 토큰 보유(새로 권한 상승)"),
+        "{0}: {1}/{2}개 프로세스가 관리자 토큰 보유(첫 발견 시 이미 상승)",
+        "{0}: {1}/{2}개 프로세스가 관리자 토큰 보유(마지막 검사 이후 상승)"),
     "french_switch": ("{0} / {1} processus en cours",
-        "{0} : {1}/{2} processus avec jeton administrateur (nouvelle élévation)"),
+        "{0} : {1}/{2} processus avec jeton administrateur (déjà élevé à la première détection)",
+        "{0} : {1}/{2} processus élevés depuis la dernière analyse"),
     "spanish_switch": ("{0} / {1} proceso(s) en ejecución",
-        "{0}: {1}/{2} proceso(s) con token de administrador (nueva elevación)"),
+        "{0}: {1}/{2} proceso(s) con token de administrador (ya elevado al detectarse)",
+        "{0}: {1}/{2} proceso(s) elevados desde el último análisis"),
     "hindi_switch": ("{0} / {1} प्रक्रियाएँ चल रही हैं",
-        "{0}: {1}/{2} प्रक्रियाओं के पास व्यवस्थापक टोकन (नई विशेषाधिकार वृद्धि)"),
+        "{0}: {1}/{2} प्रक्रियाओं के पास व्यवस्थापक टोकन (पहली बार में ही विशेषाधिकार प्राप्त)",
+        "{0}: {1}/{2} प्रक्रियाएँ अंतिम स्कैन के बाद विशेषाधिकार प्राप्त"),
     "arabic_switch": ("{0} / {1} عملية قيد التشغيل",
-        "{0}: {1}/{2} عملية لها رمز مسؤول (ترقية جديدة)"),
+        "{0}: {1}/{2} عملية لها رمز مسؤول (مرتفعة منذ أول اكتشاف)",
+        "{0}: {1}/{2} عملية ارتفعت صلاحياتها منذ الفحص السابق"),
     "russian_switch": ("{0} / {1} процес(ов) запущено",
-        "{0}: {1}/{2} процесс(ов) с токеном администратора (новое повышение)"),
+        "{0}: {1}/{2} процесс(ов) с токеном администратора (уже повышены при первом обнаружении)",
+        "{0}: {1}/{2} процесс(ов) повышены с последнего сканирования"),
     "slovenian_switch": ("{0} / {1} procesov teče",
-        "{0}: {1}/{2} procesov ima skrbniški žeton (novo povišanje)"),
+        "{0}: {1}/{2} procesov ima skrbniški žeton (že povišano ob prvi zaznambi)",
+        "{0}: {1}/{2} procesov povišanih od zadnjega pregleda"),
 }
 
 
@@ -297,7 +310,7 @@ class AgentMonitorMixin:
             last_logged = (known or {}).get("last_logged", 0)
             # 功能开关只关「监控+审计」:页面内浏览明细不受影响
             enabled = self._agent_feature_enabled()
-            detected_text, elevated_text = self._audit_texts()
+            detected_text, elevated_first_text, elevated_transition_text = self._audit_texts()
 
             if (enabled and hasattr(self, "write_log")
                     and time.time() - last_logged >= self.SIGHTING_LOG_INTERVAL):
@@ -313,9 +326,12 @@ class AgentMonitorMixin:
 
             if (enabled and item["elevated"] > 0 and not was_elevated
                     and hasattr(self, "write_log")):
+                # known 为 None=首次扫到即提权(提权动作可能发生在很久以前);
+                # 有记录且此前无提权进程=两次扫描之间真的发生了提权。文案区分这两种情况
+                text = elevated_first_text if known is None else elevated_transition_text
                 # 不带 source:日志列表的明细列优先显示 source,文案要在第一眼看到
                 self.write_log("WARN", "Agent Elevated",
-                    detail=elevated_text.format(item["name"], item["elevated"], item["count"]))
+                    detail=text.format(item["name"], item["elevated"], item["count"]))
 
         self._agent_sightings = {item["name"]: item for item in activity}
         return activity
