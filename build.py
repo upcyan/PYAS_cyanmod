@@ -39,6 +39,9 @@ PAYLOAD_DIR = ROOT / "Payload"
 REDIST_DIR = ROOT / "Redist"
 SETUP_RES_DIR = ROOT / "SetupResources"
 OUTPUT_DIR = ROOT / "Output"
+# 每次发布的说明正文。抬头由 read_release_notes 按版本号生成,文件里只写条目。
+# 缺失或为空直接阻断发布:宁可发不出去,也不要沿用上一版的说明。
+RELEASE_NOTES_FILE = ROOT / "RELEASE_NOTES.md"
 DIST_DIR = ROOT / "dist"
 ICON_FILE = ROOT / "Interface" / "static" / "img" / "icon.ico"
 # 构建渠道：本地构建 = 开发者模式（多查上游、提示跟进），发布构建 = 普通模式。
@@ -556,6 +559,24 @@ def run_iscc(iscc_path):
     return target
 
 
+def read_release_notes(version):
+    """拼出本次 Release 的说明全文。
+
+    正文在 RELEASE_NOTES.md(UTF-8,直接列条目),抬头统一为
+    「PYAS Security Cyanmod v<版本>」由本函数生成,避免逐次手改导致格式漂移。
+    文件里若已写了抬头(复制上一版时常见),会被剥掉后重新按当前版本生成。
+    """
+    if not RELEASE_NOTES_FILE.is_file():
+        die(f"缺少 {RELEASE_NOTES_FILE.name}", "发布前请把本版本的说明写进仓库根目录的该文件")
+    body = RELEASE_NOTES_FILE.read_text(encoding="utf-8").strip()
+    if not body:
+        die(f"{RELEASE_NOTES_FILE.name} 是空的", "至少列出本版本改了什么")
+    title = f"PYAS Security Cyanmod v{version}"
+    # 复制上一版时容易把抬头一起留在文件里,那会在正文中间留下一个过期版本号
+    body = re.sub(r"^PYAS Security Cyanmod v\S*[ \t]*\n?", "", body, count=1).strip()
+    return f"{title}\n\n{body}"
+
+
 def create_release_gh(asset, version):
     tag = f"v{version}"
     check = run(["gh", "release", "view", tag, "--repo", GITHUB_REPO], capture_output=True)
@@ -571,7 +592,7 @@ def create_release_gh(asset, version):
             "请先运行: gh auth login  (或设置 GITHUB_TOKEN 环境变量使用 API 方式)",
         )
 
-    notes = f"PYAS Security Cyanmod {tag}\n\n- Win11 右键菜单扫描兼容:新增经典右键菜单开关,恢复 Win10 样式菜单使扫描入口直出(需重启资源管理器)\n- 首页日志独立列表:排序/筛选/跳转隔离区,状态指示灯、悬浮滚动条、最大化按钮与窗口缩放节流\n- SAC 状态检测改为多信源交叉,注册表仅在确定开启时报告;弹窗中性文案兜底\n- 检查更新改用 releases 列表,连字符 tag 不会被 latest 端点跳过\n- 移除窗口边缘拖动缩放"
+    notes = read_release_notes(version)
     result = run(
         [
             "gh",
@@ -615,7 +636,7 @@ def create_release_api(asset, version):
         {
             "tag_name": tag,
             "name": f"PYAS Security Cyanmod {tag}",
-            "body": f"PYAS Security Cyanmod {tag}",
+            "body": read_release_notes(version),
         }
     ).encode()
     request = urllib.request.Request(

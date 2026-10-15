@@ -436,9 +436,16 @@
                         <div class="list-item">
                             <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-bell"/></svg>
                             <div class="item-info">
-                                <h2 data-i18n>免打擾模式</h2><p data-i18n>系統忙碌、全螢幕或演示時,攔截彈窗靜默排隊不彈出</p>
+                                <h2 data-i18n>免打擾模式</h2><p data-i18n="dnd_desc">系統忙碌、全螢幕或演示時,攔截彈窗靜默排隊不彈出</p>
                             </div>
                             <label class="toggle-switch"><input type="checkbox" data-config-key="dnd_switch"><span class="slider"></span></label>
+                        </div>
+                        <div class="list-item">
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-shield-check"/></svg>
+                            <div class="item-info">
+                                <h2 data-i18n="driver_alert_exempt">驅動防護狀態不納入警報</h2><p data-i18n="driver_alert_exempt_desc">開啟後驅動防護未開啟不影響首頁防護狀態</p>
+                            </div>
+                            <label class="toggle-switch"><input type="checkbox" checked data-config-key="driver_alert_exempt"><span class="slider"></span></label>
                         </div>
                         <div class="list-item">
                             <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-monitor-power"/></svg>
@@ -650,7 +657,7 @@
                     <div class="settings-group">
                         <div class="list-item">
                             <div class="item-info">
-                                <h2 data-i18n>誤報抑制規則</h2><p data-i18n>內容或簽名錨定的誤報豁免,90 天自動過期</p>
+                                <h2 data-i18n>誤報抑制規則</h2><p data-i18n="suppress_mgmt_desc">內容或簽名錨定的誤報豁免,90 天自動過期</p>
                             </div>
                             <button class="modern-btn" id="suppress_refresh" data-i18n>重新整理</button>
                         </div>
@@ -662,12 +669,12 @@
                     <div class="settings-group">
                         <div class="list-item">
                             <div class="item-info">
-                                <h2 data-i18n>AI 規則草稿</h2><p data-i18n>從放行記錄歸納候選抑制規則,須逐條審核</p>
+                                <h2 data-i18n>AI 規則草稿</h2><p data-i18n="draft_desc">從放行記錄歸納候選抑制規則,須逐條審核</p>
                             </div>
                             <button class="modern-btn" id="drafts_generate" data-i18n>產生草稿</button>
                         </div>
                         <div class="list-item" id="drafts_empty">
-                            <div class="item-info"><p class="ai-hint" data-i18n>暫無草稿;產生後在此逐條批准或拒絕</p></div>
+                            <div class="item-info"><p class="ai-hint" data-i18n="draft_empty">暫無草稿;產生後在此逐條批准或拒絕</p></div>
                         </div>
                         <div id="drafts_list"></div>
                     </div>

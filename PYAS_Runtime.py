@@ -156,6 +156,9 @@ class RuntimeMixin:
             "document_switch": False,
             "system_switch": False,
             "driver_switch": False,
+            # 驱动防护只影响「首页是否算作已受防护」的判断,不影响驱动本身;
+            # 内核驱动装不上的机器不该永远挂着「防护未完全开启」,故默认开
+            "driver_alert_exempt": True,
             "network_switch": False,
             "extension_switch": False,
             "sensitive_switch": False,

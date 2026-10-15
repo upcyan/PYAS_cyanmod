@@ -12,7 +12,10 @@
    4. 控件高度统一走 --control-height
       .modern-btn 原来靠 padding 撑出 37px,设置页里被写成固定 40px,同一组件两个来源。
    5. 快捷卡片的缩放补偿
-      卡片尺寸乘 --quick-scale,描边变量必须反向除回去,否则卡片变窄时图标一起变细。 */
+      卡片尺寸乘 --quick-scale,描边变量必须反向除回去,否则卡片变窄时图标一起变细。
+   6. 驱动防护豁免(driver_alert_exempt,设置页开关,默认开)
+      内核驱动装不上的机器不该永远挂着「防护未完全开启」:开着豁免时驱动灯仍如实显示,
+      只是不参与总述判断;关掉后回到五灯口径。 */
 const { chromium } = require('playwright');
 const http = require('node:http');
 const fs = require('node:fs');
@@ -27,6 +30,8 @@ const baseCfg = (overrides) => Object.assign({
     ai_assist_switch: false, ai_delay_switch: true, ai_delay_seconds: 3, ai_auto_execute: false,
     process_switch: false, document_switch: false, system_switch: false,
     network_switch: false, driver_switch: false,
+    // 真机上 get_config 给的是 pyas_default 合并用户配置后的结果,默认含这一项且为开
+    driver_alert_exempt: true,
 }, overrides);
 
 (async () => {
@@ -199,8 +204,56 @@ const baseCfg = (overrides) => Object.assign({
             'Realtime Protection is Off', '切英文后总述必须跟着翻译');
         await langPage.close();
 
+        // ---------- 7. 驱动防护豁免(默认开的设置页开关) ----------
+        const fourOn = { process_switch: true, document_switch: true, system_switch: true, network_switch: true };
+        const toggleSel = 'label.toggle-switch:has([data-config-key="driver_alert_exempt"]) .slider';
+        const readBrand = (page) => page.evaluate(() => {
+            const brand = document.querySelector('.status-brand');
+            return {
+                title: brand.querySelector('.state-title').textContent,
+                warn: brand.classList.contains('state-warn'),
+                glyph: brand.querySelector('.state-icon use').getAttribute('href'),
+                driverLight: document.getElementById('light_driver').classList.contains('on'),
+                onLights: document.querySelectorAll('.protect-light.on').length,
+            };
+        });
+
+        // 7a 开着豁免:四项开、驱动关 —— 首页照样说「已受到防护」,但驱动灯仍是灰的(不撒谎)
+        const exemptPage = await openPage(baseCfg(fourOn));
+        assert.equal(await exemptPage.locator('input[data-config-key="driver_alert_exempt"]').isChecked(), true,
+            '7a: 设置页开关默认应为开(跟随配置)');
+        let brand = await readBrand(exemptPage);
+        assert.equal(brand.title, '此设备已受到防护', '7a: 豁免开启时驱动未开也算防护完整');
+        assert.equal(brand.warn, false, '7a: 豁免开启时不该给警示色');
+        assert.equal(brand.glyph, '#i-shield-check', '7a: 豁免开启时应是带对勾的盾');
+        assert.equal(brand.driverLight, false, '7a: 驱动灯必须仍如实反映驱动未开启');
+        assert.equal(brand.onLights, 4, '7a: 亮灯数应为 4(驱动那盏不亮)');
+
+        // 7b 在界面上关掉豁免:总述要立刻回到五灯口径,不用重启
+        //     (开关在设置页,非当前页元素不可点,先切过去)
+        await exemptPage.click('.nav-btn[data-target="setting_window"]');
+        await exemptPage.waitForFunction(() => document.getElementById('setting_window').classList.contains('active'));
+        await exemptPage.locator(toggleSel).click();
+        await exemptPage.waitForFunction(() =>
+            document.querySelector('.status-brand .state-title').textContent === '防护未完全开启');
+        brand = await readBrand(exemptPage);
+        assert.equal(brand.warn, true, '7b: 关掉豁免后应回到警示态');
+        assert.equal(brand.glyph, '#i-shield', '7b: 关掉豁免后应换回素盾');
+        // 再打开又回到「已受到防护」
+        await exemptPage.locator(toggleSel).click();
+        await exemptPage.waitForFunction(() =>
+            document.querySelector('.status-brand .state-title').textContent === '此设备已受到防护');
+        await exemptPage.close();
+
+        // 7c 配置里豁免为关(老配置被显式关闭):四项开、驱动关 = 未完全开启
+        const strictPage = await openPage(baseCfg(Object.assign({}, fourOn, { driver_alert_exempt: false })));
+        brand = await readBrand(strictPage);
+        assert.equal(brand.title, '防护未完全开启', '7c: 豁免关闭时驱动未开必须算作防护不完整');
+        assert.equal(brand.glyph, '#i-shield', '7c: 豁免关闭时应是素盾');
+        await strictPage.close();
+
         assert.deepEqual(errors, []);
-        console.log('Home status UI: PASS (三态总述/换素盾/空态两种文案/图标按钮同口径/控件高度/缩放补偿/切换语言)');
+        console.log('Home status UI: PASS (三态总述/换素盾/空态两种文案/图标按钮同口径/控件高度/缩放补偿/切换语言/驱动豁免)');
     } finally {
         if (browser) await browser.close();
         await new Promise(resolve => server.close(resolve));

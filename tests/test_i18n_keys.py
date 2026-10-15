@@ -17,6 +17,7 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 I18N = os.path.join(ROOT, 'Interface', 'static', 'js', 'i18n.js')
+HTML = os.path.join(ROOT, 'Interface', 'templates', 'index.html')
 
 # 语言段头:`        "traditional_switch": {`(8 空格缩进 + 引号名)
 SECTION = re.compile(r'^ {8}"([a-z]+)_switch":\s*\{\s*$', re.M)
@@ -27,8 +28,10 @@ EXPECTED_SECTIONS = 11
 BASE = 'traditional'
 
 # 首屏/首页空态依赖的 key:缺一个就会在界面上露出内部标识
+# (driver_alert_exempt 属于设置页而非首屏,但同属本轮新增、同样必须 11 段齐平且非空)
 REQUIRED = ('status_protected', 'status_partial', 'status_off',
-            'log_realtime', 'log_empty', 'log_filter_empty')
+            'log_realtime', 'log_empty', 'log_filter_empty',
+            'driver_alert_exempt', 'driver_alert_exempt_desc')
 
 
 def read(path):
@@ -87,6 +90,26 @@ class I18nKeyTests(unittest.TestCase):
             t = re.search(r'"%s":\s*"(.*)",' % key, self.sections[BASE]).group(1)
             s = re.search(r'"%s":\s*"(.*)",' % key, self.sections['simplified']).group(1)
             self.assertNotEqual(t, s, '%s 的繁简文案相同,疑似漏翻译' % key)
+
+    def test_html_keyless_text_reverse_lookup(self):
+        """HTML 里 `data-i18n` 不带值的元素,靠「文本反查繁体字典」定位 key。
+
+        文本与字典值只要差一个标点(半角 `,` vs 全角 `，`),反查就失败 ——
+        main.js 里 `reverseI18nMap[text] || text` 会把**原文本身**当 key,
+        于是简中/其它语言界面直接显示繁体原文。2026-10-15 有 4 处栽在这上面
+        (`dnd_desc` / `suppress_mgmt_desc` / `draft_desc` / `draft_empty`,
+        全是说明文案里的半角逗号/分号),而且**只有切到简中才看得见**。
+        构建期 lint(build.py 的 lint_i18n)也会拦,这里是最早的一道闸。
+        """
+        # 注意别锚定行首:i18n.js 里存在「一行两个键」的写法
+        # (如第 10 行的 ai_decision_hint / ai_model),锚行首会漏掉后者。
+        vals = set(v for _, v in re.findall(
+            r'"((?:[^"]|\\.)+)": "((?:[^"]|\\.)*)"', self.sections[BASE]))
+        pat = re.compile(r'<(?:h2|p|span|button|div|option)[^>]*data-i18n(?!=)[^>]*>([^<]{1,80})<')
+        bad = [m.group(1).strip() for m in pat.finditer(read(HTML))
+               if m.group(1).strip() and m.group(1).strip() not in vals]
+        self.assertEqual(bad, [], '这些无键 data-i18n 文本反查不到繁体字典'
+                                  '(简中界面会显示繁体): %s' % bad)
 
 
 if __name__ == '__main__':

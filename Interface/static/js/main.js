@@ -2313,22 +2313,26 @@ document.addEventListener('DOMContentLoaded', () => {
     // 总述文案必须跟着灯走:全开才是「已受到防护」,否则说「未完全开启 / 未开启」。
     // 原来文案写死在模板的 data-i18n 上,新装默认五个模块全关时会出现
     // 「一边写『此装置已受到防护』、一边五个灰点」的自相矛盾。
+    // driver_alert_exempt(默认开,设置页可关)把驱动防护从总述判断里摘出去:
+    // 灯仍如实显示驱动状态,只是内核驱动装不上的机器不该永远挂着「未完全开启」。
     const PROTECT_LIGHT_KEYS = ['process', 'document', 'system', 'network', 'driver'];
     const updateProtectionLights = (cfg) => {
-        let onCount = 0;
         PROTECT_LIGHT_KEYS.forEach((key) => {
             const enabled = !!(cfg && cfg[key + '_switch']);
-            if (enabled) onCount += 1;
             document.getElementById('light_' + key)?.classList.toggle('on', enabled);
         });
         const brand = document.querySelector('.status-brand');
         if (!brand) return;
-        const full = onCount === PROTECT_LIGHT_KEYS.length;
+        const judged = (cfg && cfg.driver_alert_exempt)
+            ? PROTECT_LIGHT_KEYS.filter((key) => key !== 'driver')
+            : PROTECT_LIGHT_KEYS;
+        const judgedOn = judged.filter((key) => !!(cfg && cfg[key + '_switch'])).length;
+        const full = judgedOn === judged.length;
         brand.classList.toggle('state-warn', !full);
         const title = brand.querySelector('.state-title');
         if (title) {
             // 全开时与模板初始文案一致;否则换文案,由本函数独占维护(translateText 之后会再调一次)
-            title.textContent = getMsg(full ? 'status_protected' : (onCount ? 'status_partial' : 'status_off'));
+            title.textContent = getMsg(full ? 'status_protected' : (judgedOn ? 'status_partial' : 'status_off'));
         }
         // 带对勾的盾 + 「防护未完全开启」同样自相矛盾,未全开时换素盾
         brand.querySelector('.state-icon use')?.setAttribute('href', full ? '#i-shield-check' : '#i-shield');
@@ -3043,7 +3047,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 document.querySelectorAll('.toggle-switch input').forEach((toggle, index) => {
                     if (appState.firstLaunch) {
-                        toggle.checked = false;
+                        // 首启时防护开关一律置灰等引擎就绪;「驱动防护不纳入警报」是纯界面偏好(默认开),
+                        // 不依赖引擎,置灰成关会让界面与新装默认值对不上
+                        toggle.checked = toggle.dataset.configKey === 'driver_alert_exempt'
+                            ? !!cfg.driver_alert_exempt
+                            : false;
                         toggle.disabled = true;
                     } else if (toggle.dataset.configKey) {
                         toggle.checked = !!cfg[toggle.dataset.configKey];
