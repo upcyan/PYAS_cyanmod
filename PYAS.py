@@ -944,6 +944,13 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin, AIMixin, Age
         ]:
             return
 
+        # 智能体关联审计:自动拦截来源命中智能体指纹时留痕(交互告警由
+        # request_block_decision 落同款审计,两条路径合起来全覆盖)
+        try:
+            self.note_agent_for_path(source)
+        except Exception:
+            log_exception("PYAS.trigger_block_notification.agent_audit")
+
         path = source or ""
         messages = {
             "traditional_switch": f"已自動攔截: {path}",

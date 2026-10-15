@@ -224,7 +224,11 @@ body {
 .page.active {
     opacity: 1;
     visibility: visible;
-    transform: translateY(0);
+    /* 必须是 none 而非 translateY(0):祖先带非 none 的 transform 会把 position:fixed
+       子孙的包含块从视口变成 .page,视口坐标按错坐标系解释——模型候选框、自定义
+       select 下拉等 fixed 浮层会飞到页面其他位置。none 同样参与过渡(按恒等矩阵插值),
+       入场动画不受影响 */
+    transform: none;
 }
 
 .state-widget {
@@ -1963,6 +1967,8 @@ body.resizing-active * {
 
 #ai_window .item-info .ai-chips {
     margin-top: 8px;
+    /* 图标带是明细卡片的展开/收起开关 */
+    cursor: pointer;
 }
 
 /* AI+ 管理(抑制规则/草稿/智能体) */

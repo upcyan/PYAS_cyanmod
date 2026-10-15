@@ -211,7 +211,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const proc = data.process;
                 if (proc && proc.name) {
                     const label = data.process_label || 'Process';
-                    procLine.textContent = `${label}: ${proc.name}`;
+                    // agent 是名字级弱证据的产品名(专有名词,不做翻译)
+                    procLine.textContent = data.agent
+                        ? `${label}: ${proc.name} · ${data.agent}`
+                        : `${label}: ${proc.name}`;
                     procLine.title = proc.path || '';
                     procLine.classList.remove('hidden');
                 } else {

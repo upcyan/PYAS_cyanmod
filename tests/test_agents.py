@@ -63,6 +63,40 @@ class ScanTests(unittest.TestCase):
         self.assertFalse(self.owner.note_agent_for_path('C:\\Windows\\notepad.exe'))
         self.assertEqual(len(self.owner.logs), 1)
 
+    def test_elevation_counts_are_recorded(self):
+        with patch('PYAS_Agents._process_is_elevated', side_effect=[True, False, True]):
+            activity = self.owner.scan_agent_processes(
+                lister=lambda: [('claude.exe', 1), ('claude.exe', 2), ('codex.exe', 3)])
+        elevated = {item['name']: item['elevated'] for item in activity}
+        self.assertEqual(elevated, {'Claude Code': 1, 'ChatGPT': 1})
+
+    def test_elevation_transition_warns_once(self):
+        # 首次出现提权 → WARN;稳态复扫不重复;回落再升 → 再 WARN
+        with patch('PYAS_Agents._process_is_elevated', return_value=True):
+            self.owner.scan_agent_processes(lister=lambda: [('claude.exe', 1)])
+        warns = [args for (args, _kw) in self.owner.logs if args[1] == 'Agent Elevated']
+        self.assertEqual(len(warns), 1)
+
+        with patch('PYAS_Agents._process_is_elevated', return_value=True):
+            self.owner.scan_agent_processes(lister=lambda: [('claude.exe', 1)])
+        warns = [args for (args, _kw) in self.owner.logs if args[1] == 'Agent Elevated']
+        self.assertEqual(len(warns), 1)
+
+        with patch('PYAS_Agents._process_is_elevated', return_value=False):
+            self.owner.scan_agent_processes(lister=lambda: [('claude.exe', 1)])
+        warns = [args for (args, _kw) in self.owner.logs if args[1] == 'Agent Elevated']
+        self.assertEqual(len(warns), 1)  # 回落到未提权:静默
+
+        with patch('PYAS_Agents._process_is_elevated', side_effect=[False, True]):
+            self.owner.scan_agent_processes(lister=lambda: [('claude.exe', 1), ('claude.exe', 2)])
+        warns = [args for (args, _kw) in self.owner.logs if args[1] == 'Agent Elevated']
+        self.assertEqual(len(warns), 2)  # 回落后再升 → 再 WARN
+
+    def test_elevation_query_failure_counts_as_none(self):
+        with patch('PYAS_Agents._process_is_elevated', side_effect=OSError('denied')):
+            activity = self.owner.scan_agent_processes(lister=lambda: [('claude.exe', 1)])
+        self.assertEqual(activity[0]['elevated'], 0)
+
 
 class InstalledAgentsTests(unittest.TestCase):
     """已安装过滤:L1 进程 > L2 快捷方式/npm > 安装位置,按目录顺序返回。"""

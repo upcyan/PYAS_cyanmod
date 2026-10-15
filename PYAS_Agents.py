@@ -74,6 +74,44 @@ def match_agent_name(exe_name):
     return None
 
 
+def _process_is_elevated(pid):
+    """查询进程令牌是否已提权(TokenElevation)。
+
+    权限审计的最小实现:只读令牌属性,不改权限、不注入。
+    查询失败一律按未提权处理——审计宁可少报,不可误报。
+    """
+    kernel32 = ctypes.windll.kernel32
+    advapi32 = ctypes.windll.advapi32
+    TOKEN_QUERY = 0x0008
+    TOKEN_ELEVATION = 20
+
+    for access in (0x1000, 0x0400):  # PROCESS_QUERY_LIMITED_INFORMATION, QUERY_INFORMATION
+        handle = kernel32.OpenProcess(access, False, int(pid))
+
+        if not handle:
+            continue
+
+        try:
+            token = ctypes.c_void_p()
+
+            if not advapi32.OpenProcessToken(handle, TOKEN_QUERY, ctypes.byref(token)):
+                continue
+
+            try:
+                elevation = ctypes.c_ulong()
+                returned = ctypes.c_ulong()
+
+                if advapi32.GetTokenInformation(token, TOKEN_ELEVATION, ctypes.byref(elevation),
+                        ctypes.sizeof(elevation), ctypes.byref(returned)):
+                    return bool(elevation.value)
+            finally:
+                kernel32.CloseHandle(token)
+        finally:
+            kernel32.CloseHandle(handle)
+
+    return False
+
+
 def enumerate_process_names(lister=None):
     """返回 [(exe_name, pid), ...];非 Windows 或失败返回空列表。"""
     if lister is not None:
@@ -218,6 +256,16 @@ class AgentMonitorMixin:
             self._agent_sightings = {}
 
         for item in activity:
+            # 权限审计:逐进程查提权状态,0→>0 跳变才告警,稳态不重复刷
+            elevated = 0
+
+            for pid in item["pids"]:
+                try:
+                    elevated += 1 if _process_is_elevated(pid) else 0
+                except Exception:
+                    pass
+
+            item["elevated"] = elevated
             known = self._agent_sightings.get(item["name"])
             last_logged = (known or {}).get("last_logged", 0)
 
@@ -230,11 +278,40 @@ class AgentMonitorMixin:
             if known:
                 item["last_logged"] = max(known.get("last_logged", 0), item.get("last_logged", 0))
 
+            was_elevated = (known or {}).get("elevated", 0)
+
+            if item["elevated"] > 0 and not was_elevated and hasattr(self, "write_log"):
+                self.write_log("WARN", "Agent Elevated",
+                    source=item["exe"],
+                    detail=(f"{item['name']}: {item['elevated']}/{item['count']} "
+                            "process(es) with administrator token"))
+
         self._agent_sightings = {item["name"]: item for item in activity}
         return activity
 
     def get_agent_activity(self):
         return list(getattr(self, "_agent_sightings", {}).values())
+
+    # 后台监控间隔:周期枚举进程,「检测到智能体」不再依赖用户进 AI+ 页
+    MONITOR_INTERVAL = 300
+
+    def agent_monitor_thread(self, interval=MONITOR_INTERVAL):
+        """持续监控:周期扫描智能体进程,维护快照并落「检测到」审计。
+
+        扫描本身毫秒级;审计受 SIGHTING_LOG_INTERVAL 限频,常驻不会刷日志。
+        小步睡眠保证 closing 置位后约一秒内退出。
+        """
+        while not getattr(self, "closing", False):
+            try:
+                self.scan_agent_processes()
+            except Exception:
+                log_exception("PYAS_Agents.agent_monitor_thread")
+
+            for _ in range(max(1, int(interval))):
+                if getattr(self, "closing", False):
+                    return
+
+                time.sleep(1)
 
     def list_installed_agents(self):
         """本机已安装的智能体(按 AGENT_CATALOG 顺序),供图标带过滤。

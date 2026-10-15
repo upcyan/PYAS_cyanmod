@@ -1465,6 +1465,9 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // 智能体图标带:只显示本机已安装的(后端 L1 运行中 + L2 快捷方式/npm/安装路径)
+    // 明细卡片默认收起,点图标带展开/收起;展开期间随刷新周期活更新
+    const agentDetails = { open: false };
+
     const renderAgentIcons = async () => {
         const box = document.getElementById('ai_agent_icons');
         const empty = document.getElementById('ai_agent_none');
@@ -1501,15 +1504,23 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!box) return;
         try {
             const activity = await window.pywebview.api.get_agent_activity();
-            wrap?.classList.toggle('hidden', activity.length === 0);
+            wrap?.classList.toggle('hidden', !agentDetails.open || activity.length === 0);
             box.replaceChildren(...activity.map(item => {
                 const p = document.createElement('p');
                 p.className = 'ai-hint';
-                p.textContent = `${item.name} · ${item.exe} · ${item.count} pid`;
+                // elevated>0 时追加提权进程数(数据行缀,非 i18n 键,与「 pid」同风格)
+                p.textContent = `${item.name} · ${item.exe} · ${item.count} pid`
+                    + (item.elevated ? ` · admin×${item.elevated}` : '');
                 return p;
             }));
         } catch (error) { console.error('Agent activity load failed', error); }
     };
+
+    document.getElementById('ai_agent_icons')?.addEventListener('click', () => {
+        agentDetails.open = !agentDetails.open;
+        if (agentDetails.open) renderAgentActivity();
+        else document.getElementById('ai_agent_results_item')?.classList.add('hidden');
+    });
 
     document.getElementById('suppress_refresh')?.addEventListener('click', renderSuppressionRules);
     document.getElementById('drafts_generate')?.addEventListener('click', async () => {
@@ -1602,6 +1613,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (input) input.setAttribute('aria-expanded', 'false');
     };
 
+    // 候选框搬到 body 下:fixed 定位只要祖先带 transform/filter,包含块就会从视口
+    // 变成那个祖先,视口坐标按错坐标系解释、菜单飞到页面别处;body 无 transform 最稳
+    const modelMenuHost = document.getElementById('ai_model_menu');
+    if (modelMenuHost && modelMenuHost.parentElement !== document.body) {
+        document.body.appendChild(modelMenuHost);
+    }
+
     const scanModels = async () => {
         const api = window.pywebview?.api;
         if (!api || modelCombo.scanning) return;
@@ -1677,9 +1695,9 @@ document.addEventListener('DOMContentLoaded', () => {
             syncClear();
         });
     }
-    // 点击菜单外或按 Esc 关闭下拉
+    // 点击菜单外或按 Esc 关闭下拉(菜单本体已挂 body,要一并豁免)
     document.addEventListener('click', (e) => {
-        const combo = e.target.closest('.model-combo');
+        const combo = e.target.closest('.model-combo, .model-combo-menu');
         if (!combo) closeModelMenu();
     });
     document.addEventListener('keydown', (e) => {

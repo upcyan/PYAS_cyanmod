@@ -201,6 +201,9 @@ class RuntimeMixin:
         for _ in range(2):
             self.start_daemon_thread(self.cloud_worker)
 
+        # 智能体持续监控:进 AI+ 页之外也能积累「检测到智能体」审计
+        self.start_daemon_thread(self.agent_monitor_thread)
+
     def ui_dispatcher_thread(self):
         while not getattr(self, "closing", False):
             if getattr(self, "_window_interacting", False):

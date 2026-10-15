@@ -76,6 +76,14 @@ const assert = require('node:assert/strict');
         const activity = await page.textContent('#ai_agent_results_item');
         assert.ok(activity.includes('AutoClaw'), `活动列表应显示自动扫描结果,实际: ${activity}`);
 
+        // 3a. 明细卡片默认收起,点图标带展开/再点收起
+        assert.equal(await page.locator('#ai_agent_results_item').isHidden(), true, '明细卡片应默认收起');
+        await page.click('#ai_agent_icons');
+        await page.waitForFunction(() => !document.getElementById('ai_agent_results_item')?.classList.contains('hidden'), null, { timeout: 3000 });
+        assert.ok((await page.textContent('#ai_agent_results_item')).includes('AutoClaw'), '展开后应显示进程明细');
+        await page.click('#ai_agent_icons');
+        await page.waitForFunction(() => document.getElementById('ai_agent_results_item')?.classList.contains('hidden'), null, { timeout: 3000 });
+
         // 4. 空态:第二台「什么都没装」的机器,走真实进页路径
         const page2 = await browser.newPage({ viewport: { width: 1280, height: 900 } });
         page2.on('pageerror', error => errors.push(String(error).slice(0, 200)));
