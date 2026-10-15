@@ -93,7 +93,10 @@ Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent runascurrentuser; Check: CanLaunchApp
+; 用原始(未提权)用户令牌启动应用:PyInstaller 6.22+ 的 onefile 防篡改校验
+; 只对提权进程生效,提权 postinstall 启动存在祖先进程退出时序竞态,会弹
+; "Security validation failure: invalid originating onefile parent process"
+Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent runasoriginaluser; Check: CanLaunchApp
 
 [CustomMessages]
 english.InstallingVCRuntime=Installing Microsoft Visual C++ Runtime...
