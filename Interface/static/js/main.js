@@ -462,6 +462,8 @@ document.addEventListener('DOMContentLoaded', () => {
         renderMenuStatus();
         refreshAiTokenUsage();
         refreshIconButtonLabels();
+        // 首页总述不是固定文案(跟着防护灯走),translateText 刚把它重置成了默认值,这里重算
+        if (appState.configCache) updateProtectionLights(appState.configCache);
     };
 
     const applyTheme = (theme) => {
@@ -1031,6 +1033,16 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     window.fetchPendingThreatQueue = fetchPendingThreatQueue;
 
+    // 空面板文案,两种情况分开说:一条日志都没有(新装首启的常态) vs 当前筛选没命中(换筛选就有)。
+    // 前者原来直接写空字符串,整块圆角面板是一片空白,看不出是没数据还是加载失败。
+    // 单独抽出来是因为 startup 的 backfill 空分支也要用它 —— 那里不能走 renderHomeLogs(见下方注释)。
+    const paintHomeLogEmpty = () => {
+        const listUl = document.getElementById('home_log_list');
+        if (!listUl || homeLogFilter === 'pending') return;  // 待处理告警有自己的空态
+        listUl.innerHTML = '<li class="home-log-empty">'
+            + escapeHtml(getMsg(homeLogs.length ? 'log_filter_empty' : 'log_empty')) + '</li>';
+    };
+
     const backfillHomeLogs = () => {
         if (!window.pywebview || homeLogBackfillInFlight) return;
         homeLogBackfillInFlight = true;
@@ -1039,7 +1051,8 @@ document.addEventListener('DOMContentLoaded', () => {
             window.pywebview.api.report_ui_error('home-log-backfill', 'received ' + (logs ? logs.length : 'null') + ' entries');
             // 无历史日志时直接返回:绝不再回调 renderHomeLogs——
             // 空列表会再次触发 backfill,形成互递归把主线程微任务饿死(新装首启零日志即假死)
-            if (!logs || !logs.length) { return; }
+            // 但面板本身要有话说,否则新装首启是一整块空白,故在这里直接落空态文案。
+            if (!logs || !logs.length) { paintHomeLogEmpty(); return; }
             const merged = [...logs];
             homeLogs.forEach(l => { if (!merged.some(m => m.id === l.id)) merged.push(l); });
             homeLogs.length = 0;
@@ -1075,9 +1088,7 @@ document.addEventListener('DOMContentLoaded', () => {
             .sort((a, b) => (homeLogSortDesc ? -1 : 1) * String(a.time_str || '').localeCompare(String(b.time_str || '')));
 
         if (!data.length) {
-            listUl.innerHTML = homeLogs.length
-                ? '<li class="home-log-empty">' + escapeHtml(getMsg('changelog_empty')) + '</li>'
-                : '';
+            paintHomeLogEmpty();
             if (!homeLogs.length) backfillHomeLogs();
             return;
         }
@@ -2298,12 +2309,29 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     bindChipLogoFallbacks();
 
+    // 首页五个防护灯 = 五个实时防护模块的开关(config 里对应的 *_switch,后端按实际线程状态写回)。
+    // 总述文案必须跟着灯走:全开才是「已受到防护」,否则说「未完全开启 / 未开启」。
+    // 原来文案写死在模板的 data-i18n 上,新装默认五个模块全关时会出现
+    // 「一边写『此装置已受到防护』、一边五个灰点」的自相矛盾。
+    const PROTECT_LIGHT_KEYS = ['process', 'document', 'system', 'network', 'driver'];
     const updateProtectionLights = (cfg) => {
-        const map = { process: 'light_process', document: 'light_document', system: 'light_system', network: 'light_network', driver: 'light_driver' };
-        Object.entries(map).forEach(([key, id]) => {
-            const el = document.getElementById(id);
-            if (el) el.classList.toggle('on', !!(cfg && cfg[key + '_switch']));
+        let onCount = 0;
+        PROTECT_LIGHT_KEYS.forEach((key) => {
+            const enabled = !!(cfg && cfg[key + '_switch']);
+            if (enabled) onCount += 1;
+            document.getElementById('light_' + key)?.classList.toggle('on', enabled);
         });
+        const brand = document.querySelector('.status-brand');
+        if (!brand) return;
+        const full = onCount === PROTECT_LIGHT_KEYS.length;
+        brand.classList.toggle('state-warn', !full);
+        const title = brand.querySelector('.state-title');
+        if (title) {
+            // 全开时与模板初始文案一致;否则换文案,由本函数独占维护(translateText 之后会再调一次)
+            title.textContent = getMsg(full ? 'status_protected' : (onCount ? 'status_partial' : 'status_off'));
+        }
+        // 带对勾的盾 + 「防护未完全开启」同样自相矛盾,未全开时换素盾
+        brand.querySelector('.state-icon use')?.setAttribute('href', full ? '#i-shield-check' : '#i-shield');
     };
 
     // 待处理告警 chip 现在是筛选器(同其他日志筛选):点击展示当前弹窗队列;

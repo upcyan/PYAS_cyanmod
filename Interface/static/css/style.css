@@ -65,6 +65,9 @@
     --radius-pill: 999px;
     --radius-circle: 50%;
 
+    /* ===== 控件高度:按钮/输入框/选择器同一档,避免各语境各算一个高度 ===== */
+    --control-height: 40px;
+
     /* ===== 阴影:三级高度体系 ===== */
     --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.1);
     --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.14);
@@ -327,6 +330,7 @@ body {
     color: var(--text-primary);
     font-size: var(--text-md);
     font-weight: 500;
+    min-height: var(--control-height);
     cursor: pointer;
     transition: background-color var(--dur-base) var(--ease-standard), border-color var(--dur-base) var(--ease-standard), color var(--dur-base) var(--ease-standard), transform var(--dur-fast) var(--ease-standard);
 }
@@ -339,15 +343,14 @@ body {
     border: none;
     box-shadow: 0 2px 4px var(--accent-shadow);
 }
+/* 主按钮:悬停只抬阴影(不位移、不改透明度),按下才给位移反馈。
+   位移+阴影+透明三处同时变会显得用力,且文字在透明度下发虚。 */
 .primary-btn:hover {
     box-shadow: 0 4px 8px var(--accent-hover);
-    transform: translateY(-1px);
-    background-color: var(--accent-color);
-    opacity: 0.95;
 }
 .primary-btn:active {
-    transform: translateY(0);
-    opacity: 0.8;
+    transform: translateY(1px);
+    box-shadow: 0 1px 2px var(--accent-shadow);
 }
 
 .danger-btn { color: var(--color-danger-strong); border-color: var(--color-danger); }
@@ -473,8 +476,11 @@ body {
     padding-left: calc(var(--space-6) + 32px);
 }
 
+/* 三级行标题必须比二级小一档:底色 + 缩进只管「位置」,字号才管「层级」。
+   这里原写了 var(--text-xl),与 .item-info h2 的基准字号完全相同 —— 等于没写,
+   三级行只剩底色可辨识(tests/test_ai_delay_ui.cjs 一直在报这一条)。 */
 .settings-child-2 > .item-info h2 {
-    font-size: var(--text-xl);
+    font-size: var(--text-lg);
 }
 
 .item-info .setting-status {
@@ -569,6 +575,12 @@ body {
     transform: translateX(22px);
 }
 
+/* 图标按钮统一口径:命中区一律 32x32,画形一律 20px(描边 2 变量 -> 物理 1.667px)。
+   两个类不按尺寸区分,按「职责」区分,且二者从不同屏共现:
+     .icon-action-btn  列表行右侧前进箭头,行内可达性提示(纯装饰,不可聚焦)
+     .icon-btn         子页面标题行左侧返回箭头,页面级控件
+   —— 曾把 .icon-btn 的画形写成 24(比例 0.75,比 .nav-btn 44/24、.ctrl-btn 32/16 都密),
+   同一标题行里还有 18px 放大镜、20px 清除按钮,故一并收到 20。 */
 .icon-action-btn {
     width: 32px; height: 32px;
     border-radius: var(--radius-control);
@@ -598,17 +610,18 @@ body {
 }
 
 .icon-btn {
+    width: 32px; height: 32px;
+    padding: 0;
     background: transparent;
     border: none;
     color: var(--text-secondary);
     cursor: pointer;
-    padding: var(--space-1);
     border-radius: var(--radius-control);
     display: flex; align-items: center; justify-content: center;
     transition: background-color 0.2s;
 }
 .icon-btn:hover { background-color: var(--bg-hover); color: var(--text-primary); }
-.icon-btn svg { width: 24px; height: 24px; }
+.icon-btn svg { width: 20px; height: 20px; }
 
 .search-box {
     display: flex;
@@ -1134,7 +1147,7 @@ body.resizing-active * {
 
 #setting_window {
     --setting-control-width: 144px;
-    --setting-control-height: 40px;
+    --setting-control-height: var(--control-height);
 }
 
 #setting_window .list-item > :is(.modern-btn, .modern-input, .custom-select-wrapper, .input-clearable) {
@@ -1412,6 +1425,13 @@ body.resizing-active * {
     color: var(--accent-color);
 }
 
+/* 首页总述与右侧五个防护灯必须说同一件事:灯是五个实时防护模块的开关,
+   全开时才是「已受到防护」。未全开时由 main.js 挂 .state-warn,
+   图标换成不带对勾的素盾 + 警示色 —— 带勾的盾配「未完全开启」会自相矛盾。 */
+.status-brand.state-warn .state-icon {
+    color: var(--color-warning);
+}
+
 .protection-lights {
     display: flex;
     gap: var(--space-5);
@@ -1652,15 +1672,21 @@ body.resizing-active * {
     font-size: calc(15px * var(--quick-scale, 1));
 }
 
+/* 快捷卡片整体随宽度缩放(--quick-scale 由 main.js 给,0.68~1)。
+   尺寸乘了 scale,描边就必须反向除回去:物理描边 = 变量 x (渲染px / 24),
+   尺寸乘 scale 而不补变量,卡片变窄时图标会一起变细(实测 38px 的 2.375px 掉到 25.8px 的 1.614px)。
+   目标值取「不缩放时的物理描边」:.item-icon 是 1.5 变量 -> 2.375px,.icon-action-btn 是 2 变量 -> 1.667px。 */
 .quick-item .item-icon {
     width: calc(38px * var(--quick-scale, 1));
     height: calc(38px * var(--quick-scale, 1));
     flex: 0 0 calc(38px * var(--quick-scale, 1));
+    --icon-stroke: calc(1.5 / var(--quick-scale, 1));
 }
 
 .quick-item .icon-action-btn {
     width: calc(32px * var(--quick-scale, 1));
     height: calc(32px * var(--quick-scale, 1));
+    --icon-stroke: calc(2 / var(--quick-scale, 1));
 }
 
 .quick-item .icon-action-btn svg {
@@ -1860,21 +1886,6 @@ body.resizing-active * {
         > .icon-action-btn:not(:disabled) > svg {
         transform: scale(0.92);
         transition-duration: 100ms;
-    }
-
-    .app-container.fade-in #home_window.active .state-icon > polyline {
-        animation: pyas-check-draw 300ms ease-in backwards;
-    }
-
-    @keyframes pyas-check-draw {
-        from {
-            stroke-dasharray: 12 12;
-            stroke-dashoffset: 12;
-        }
-        to {
-            stroke-dasharray: 12 12;
-            stroke-dashoffset: 0;
-        }
     }
 }
 

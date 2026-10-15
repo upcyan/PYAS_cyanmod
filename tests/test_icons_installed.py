@@ -132,6 +132,22 @@ class IconInstallTests(unittest.TestCase):
         self.assertIn('--icon-stroke: 1.5', style, '.item-icon 需用变量把描边传进 shadow')
         self.assertNotIn('stroke-width: 1.5', style, '对 use 无效的旧写法应已移除')
 
+    def test_no_css_reaching_into_use_shadow(self):
+        """外层 CSS 进不了 <use> 的 shadow:指向形状元素的选择器一律是死规则。
+
+        sprite 化之前图标是同文档内联几何,筛 `polyline` / `path` 是有效的;sprite 化之后
+        这些几何搬进了 symbol,外层样式再也选不中,规则会静默失效(不报错、不生效)。
+        已踩过两次:
+          - `.spinner .path`            旧加载动画的描画(已删,改用 i-spinner 自播 SMIL)
+          - `.state-icon > polyline`    首页对勾的描画动画(已删,同样永远匹配不到)
+        保留这类规则会让后来人以为动效还在,所以直接锁死。
+        """
+        style = re.sub(r'/\*[\s\S]*?\*/', '', read(STYLE))  # 先去掉注释,免得注释里提到标签名就误判
+        pattern = re.compile(r'(^|[ >,+~])(path|polyline|polygon|circle|rect|line|ellipse|use)([ .:>,+~{]|$)')
+        offenders = ['%d: %s' % (n, ln.strip())
+                     for n, ln in enumerate(style.split('\n'), 1) if pattern.search(ln)]
+        self.assertEqual(offenders, [], 'CSS 里存在指向 <use> 内部形状的选择器(死规则): %s' % offenders)
+
     def test_preview_symbols_match_sprite(self):
         """预览页内嵌 symbol 与 sprite.svg 同源(评审对照不失真)"""
         pv = symbols_of(read(PREVIEW))
