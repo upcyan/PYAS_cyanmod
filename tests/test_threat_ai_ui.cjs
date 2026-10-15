@@ -149,9 +149,14 @@ const assert = require('node:assert/strict');
             await page.waitForFunction(value => getComputedStyle(document.getElementById('ai_window_glow'), '::before').transform !== value, before);
         });
         if (output) await page.screenshot({ path: path.join(output, 'threat-evidence-light.png') });
-        await check('reduced motion preserves static state without animation', async () => {
+        // 流光是「AI 分析中」唯一的活动指示,已被有意豁免 reduced-motion(threat.css 有说明:
+        // 办公机常关系统动画,命中的是 reduced-motion,之前的 animation:none 让流光变纯静态,
+        // 被用户当成故障上报)。所以这里锁的是「豁免成立 + 过渡仍尊重系统设置」,
+        // 而不是「一律不动画」——后者会把当初的修复判成回归。
+        await check('reduced motion keeps the spectrum, drops transitions', async () => {
             await page.emulateMedia({ reducedMotion: 'reduce' });
-            assert.equal(await glow.evaluate(el => getComputedStyle(el, '::before').animationName), 'none');
+            assert.equal(await glow.evaluate(el => getComputedStyle(el, '::before').animationName), 'ai-window-spectrum');
+            assert.equal(await glow.evaluate(el => getComputedStyle(el).transitionDuration), '0s');
             await page.emulateMedia({ reducedMotion: 'no-preference' });
         });
         await check('delay has text but no active-analysis glow', async () => {
