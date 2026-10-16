@@ -8,11 +8,10 @@
     py -3 selftest.py --only X    只跑名字含 X 的项(脚本化用)
 
 适用:源码目录(py -3 直接跑)或已安装机器(把本脚本和 selftest.bat 放任意目录)。
-本脚本只读系统状态、只创建/清理自己的测试文件,不修改 PYAS 配置,不拦截不注入。
-
-说明:内置检测规则(YARA)不含 EICAR 等合成样本,「文件防护的检测能力」无法用
-自造文件安全触发——这一项以状态检查 + 手动步骤指引代替;「智能体加固」提供
-端到端自动测试(启动一个仿真名进程,验证后台监控真的在记录)。
+本脚本只读系统状态、只创建/清理自己的测试文件,不修改 PYAS 配置。「智能体加固」
+提供端到端自动测试(启动仿真名进程,验证后台监控真的在记录);「交互弹窗(端到端)」
+往数据目录写一个测试请求哨兵,由运行中的应用弹出标题带 [Self Test] 的真实裁决窗,
+用户点允许/阻止后脚本轮询日志验证整条链路(决策只记日志,不触发任何引擎动作)。
 """
 import ctypes
 import ctypes.wintypes
@@ -42,6 +41,11 @@ WAIT_FOR_AGENT = AUTO and not FAST
 
 RESULTS = []
 CHECKS = []
+
+# 「交互弹窗(端到端)」的测试请求哨兵:应用侧(DialogMixin.selftest_threat_watchdog)
+# 检测到就弹一个标题带 [Self Test] 的真实裁决窗,决策只记日志不触发引擎动作
+SELFTEST_SENTINEL = os.path.join(PROGRAM_DATA, "PYAS", "selftest_threat.json")
+DIALOG_WAIT_SECONDS = 180  # 用户留看点弹窗的时间
 
 
 def out(text):
@@ -327,16 +331,63 @@ def check_realtime(cfg, cfg_err):
                     "与隔离区;无样本时以智能扫描全盘不出错为准")
 
 
-@check("交互弹窗(指引)")
+@check("交互弹窗(端到端)", hint="需应用运行中+交互模式开启;会弹一个真实的测试裁决窗")
 def check_interactive(cfg, cfg_err):
     if cfg_err:
         return "SKIP", cfg_err
 
+    if not pyas_running():
+        return "SKIP", "PYAS 未运行——先启动应用再跑本项"
+
     if not cfg.get("interactive_switch"):
         return "SKIP", "交互模式未开启(设置→防护→交互模式)"
 
-    return "INFO", ("已开启:拦截事件会弹出裁决窗(如有 AI 也会给出建议)。"
-                    "配合真实样本或历史拦截验证;误报可用弹窗的误报入口登记")
+    if cfg.get("dnd_switch"):
+        out("    提示:免打扰模式开着,弹窗可能被静默排队,处理完同样会记录")
+
+    nonce = os.urandom(8).hex()
+    payload = {
+        "nonce": nonce,
+        "title": "交互弹窗端到端自测",
+        "message": ("这是 selftest 发起的测试告警,不是真实拦截。\r\n"
+                    "点「允许」或「阻止」任意一个即可完成测试"
+                    "(「永久允许」「误报」对本测试无效)。"),
+    }
+    os.makedirs(os.path.dirname(SELFTEST_SENTINEL), exist_ok=True)
+
+    try:
+        with open(SELFTEST_SENTINEL, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+    except OSError as exc:
+        return "SKIP", f"写不进数据目录({exc})——检查 {os.path.dirname(SELFTEST_SENTINEL)} 权限"
+
+    out("    测试裁决窗应已弹出(标题带 [Self Test]),点「允许」或「阻止」任意一个…")
+
+    deadline = time.time() + DIALOG_WAIT_SECONDS
+
+    while time.time() < deadline:
+        time.sleep(2)
+        entries, err = load_report()
+
+        if err:
+            continue
+
+        for entry in reversed(entries):
+            detail = str(entry.get("detail", ""))
+
+            if entry.get("action") == "Selftest Dialog" and nonce in detail:
+                choice = "允许" if "decision=allow" in detail else "阻止"
+                return "PASS", (f"弹窗弹出且裁决已落盘:你点了{choice}"
+                                "(桥接→弹窗→裁决→日志整条链路都通)")
+
+    # 超时清掉哨兵,避免升级新版后残留的请求突然弹出来
+    try:
+        os.remove(SELFTEST_SENTINEL)
+    except OSError:
+        pass
+
+    return "FAIL", ("180 秒内没等到裁决记录——弹窗没弹出(应用可能是旧版本,"
+                    "重装新包后重跑)或一直没有点")
 
 
 def run_checks(selection):

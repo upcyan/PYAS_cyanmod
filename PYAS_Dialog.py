@@ -1892,6 +1892,44 @@ class DialogMixin(AlertPolicyMixin):
         # Explicit application shutdown resolves outstanding protection calls.
         self._get_threat_queue().close()
 
+    # ---------------------------------------------------------------- 自测哨兵
+    # selftest.bat 的「交互弹窗」端到端项:它往数据目录写 selftest_threat.json,
+    # 这里检测到就弹一个真实裁决窗(标题强制带 [Self Test] 标记),用户裁决后把
+    # 结果写进日志,selftest 轮询日志验证「桥接→弹窗→裁决→落盘」整条链路。
+    # 决策只记日志,不触发任何引擎动作;哨兵文件先删再弹,不会死循环重弹。
+    def selftest_threat_watchdog(self, interval=1.0):
+        sentinel = os.path.join(self.path_config, "PYAS", "selftest_threat.json")
+
+        while not getattr(self, "closing", False):
+            try:
+                if os.path.isfile(sentinel):
+                    self._handle_selftest_threat(sentinel)
+            except Exception:
+                log_exception("PYAS_Dialog.DialogMixin.selftest_threat_watchdog")
+
+            time.sleep(interval)
+
+    def _handle_selftest_threat(self, sentinel):
+        with open(sentinel, encoding="utf-8") as handle:
+            payload = json.load(handle)
+
+        # 先删文件再弹窗:用户放着不裁决也不会重弹
+        try:
+            os.remove(sentinel)
+        except OSError:
+            pass
+
+        nonce = str(payload.get("nonce", ""))[:64]
+        title = "[Self Test] " + str(payload.get("title", "Selftest dialog"))[:120]
+        message = str(payload.get("message", ""))[:2000]
+        request = _DecisionRequest(
+            self.get_interactive_lang(), title, message, None, category="selftest"
+        )
+        choice = self._get_threat_queue().submit(request)
+
+        if hasattr(self, "write_log"):
+            self.write_log("INFO", "Selftest Dialog", detail=f"nonce={nonce} decision={choice}")
+
     def _ai_auto_execute_enabled(self):
         with self.lock_config:
             return bool(
@@ -1937,6 +1975,11 @@ class DialogMixin(AlertPolicyMixin):
         这是省 token 的主要手段(未发出的请求不会被计费)。
         """
         queue = self._threat_queue
+
+        # 自测弹窗是假告警,不给它发 AI 请求(白烧 token,还会污染统计)
+        if getattr(request, "category", "") == "selftest":
+            queue.set_ai_state(request, {"state": "unavailable", "verdict": "", "reason": ""})
+            return
 
         with self.lock_config:
             enabled = bool(self.pyas_config.get("ai_assist_switch", False))

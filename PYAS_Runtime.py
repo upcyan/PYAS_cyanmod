@@ -209,6 +209,9 @@ class RuntimeMixin:
         # 智能体持续监控:进 AI+ 页之外也能积累「检测到智能体」审计
         self.start_daemon_thread(self.agent_monitor_thread)
 
+        # selftest.bat 的弹窗端到端自测:轮询数据目录的测试请求哨兵
+        self.start_daemon_thread(self.selftest_threat_watchdog)
+
     def ui_dispatcher_thread(self):
         while not getattr(self, "closing", False):
             if getattr(self, "_window_interacting", False):
