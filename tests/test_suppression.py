@@ -145,6 +145,7 @@ class SuppressionTests(unittest.TestCase):
         queue.take_next()
         session = _WebThreatDialogSession('en', 't', 'm', None, str, queue, self.owner)
         self.assertIsNone(session.api.snapshot()['fp'], 'memory alert must not offer false positive reporting')
+        queue.complete('block')
         queue.take_next()
         queue.worker = object()
         snapshot = session.api.snapshot()

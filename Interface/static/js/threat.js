@@ -14,6 +14,59 @@ document.addEventListener('DOMContentLoaded', () => {
         repeat.disabled = true;
         glow.classList.remove('is-analyzing');
     };
+    const BRIDGE_TIMEOUT_MS = 5000;
+    const bridgeWaits = new Set();
+    const bridgeError = code => Object.assign(new Error(code), { code });
+    const waitForBridge = promise => new Promise((resolve, reject) => {
+        let settled = false;
+        let timer;
+        const finish = (callback, value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            bridgeWaits.delete(cancel);
+            callback(value);
+        };
+        const cancel = () => finish(reject, bridgeError('BRIDGE_CANCELLED'));
+        timer = setTimeout(() => finish(reject, bridgeError('BRIDGE_TIMEOUT')), BRIDGE_TIMEOUT_MS);
+        bridgeWaits.add(cancel);
+        Promise.resolve(promise).then(value => finish(resolve, value), error => finish(reject, error));
+    });
+    let snapshotFlight = null;
+    const readSnapshot = async api => {
+        // Reuse one stalled call rather than creating another native thread every poll.
+        if (snapshotFlight?.api === api && snapshotFlight.expired) {
+            if (!snapshotFlight.settled) throw Object.assign(bridgeError('BRIDGE_TIMEOUT'), { deferred: true });
+            snapshotFlight = null;  // Discard a late snapshot; obtain current server state.
+        }
+        if (!snapshotFlight || snapshotFlight.api !== api) {
+            const flight = { api, settled: false, expired: false };
+            flight.promise = Promise.resolve().then(() => api.snapshot());
+            flight.promise.then(() => { flight.settled = true; }, () => { flight.settled = true; });
+            snapshotFlight = flight;
+        }
+        const flight = snapshotFlight;
+        try {
+            const data = await waitForBridge(flight.promise);
+            if (snapshotFlight === flight) snapshotFlight = null;
+            if (flight.expired) throw bridgeError('BRIDGE_EXPIRED');
+            return data;
+        } catch (error) {
+            if (error.code === 'BRIDGE_TIMEOUT') flight.expired = true;
+            else if (snapshotFlight === flight) snapshotFlight = null;
+            throw error;
+        }
+    };
+    const decisionText = kind => {
+        const labels = {
+            simplified_switch: { timeout: '操作响应超时，未自动重试；请核对当前告警后再选择。', pending: '正在处理此决定，请勿重复提交。' },
+            traditional_switch: { timeout: '操作回應逾時，未自動重試；請核對目前告警後再選擇。', pending: '正在處理此決定，請勿重複提交。' },
+            english_switch: { timeout: 'The response timed out. No automatic retry was sent; check the current alert before deciding again.', pending: 'Processing this decision. Do not submit it again.' },
+        };
+        return (labels[latestLanguage] || labels.english_switch)[kind];
+    };
+    let actionRevision = 0;
+    let decisionTimeoutId = null;
     let confirmationId = null;
     let fpTexts = null;
     const hideFpPanel = () => fpPanel.classList.add('hidden');
@@ -171,12 +224,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const requestRevision = ++revision;
         try {
             const api = window.pywebview?.api;
-            if (!api) { clearActive(true); return; }
-            const data = await api.snapshot();
+            if (!api) { snapshotFlight = null; clearActive(true); return; }
+            const data = await readSnapshot(api);
             if (requestRevision !== revision) return;
             if (!data) { clearActive(); return; }
             const changed = currentId !== data.id;
             currentId = data.id;
+            if (decisionTimeoutId !== currentId) decisionTimeoutId = null;
             latestTheme = data.theme;
             latestLanguage = data.language;
             if (document.body.dataset.appliedTheme !== latestTheme) {
@@ -226,6 +280,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.duplicates > 1) status += /^zh/.test(document.documentElement.lang)
                 ? ` 此决定同时处理 ${data.duplicates} 个完全相同的重复告警。`
                 : ` This decision covers ${data.duplicates} identical duplicate alerts.`;
+            if (data.resolving) status = decisionText('pending');
+            else if (decisionTimeoutId === data.id) status = decisionText('timeout');
             setText('threat_status', status);
             setText('threat_permanent', localized[0]);
             setText('threat_repeat_text', localized[1]);
@@ -273,25 +329,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 byId('threat_message').scrollTop = 0;
                 block.focus({ preventScroll: true });
             }
-            if (!initialized) { await api.ready(); initialized = true; }
+            if (!initialized) { await waitForBridge(api.ready()); initialized = true; }
         } catch (error) {
             if (disposed || requestRevision !== revision) return;
-            console.error('Threat UI refresh failed', error);
+            if (!error.deferred) console.error('Threat UI refresh failed', error);
             clearActive(true);
         } finally {
             if (!disposed && requestRevision === revision) nextTimer = setTimeout(refresh, 400);
         }
     };
-    const decide = async choice => {
+    const runAction = async operation => {
         if (busy || !currentId) return;
+        const id = currentId;
+        const action = ++actionRevision;
+        decisionTimeoutId = null;
+        if (snapshotFlight) snapshotFlight.expired = true;
         busy = true;
         revision += 1;
         clearTimeout(nextTimer);
         disable();
         byId('threat_confirmation').classList.add('hidden');
-        try { await window.pywebview.api.decide(currentId, choice, choice !== 'permanent' && repeat.checked); }
-        catch (error) { console.error('Threat decision failed', error); }
-        finally { busy = false; await refresh(); }
+        try { await waitForBridge(operation(id)); }
+        catch (error) {
+            if (disposed || action !== actionRevision) return;
+            if (error.code === 'BRIDGE_TIMEOUT') decisionTimeoutId = id;
+            else if (error.code !== 'BRIDGE_CANCELLED') console.error('Threat decision failed', error);
+        } finally {
+            if (!disposed && action === actionRevision) { busy = false; await refresh(); }
+        }
+    };
+    const decide = choice => {
+        const remember = choice !== 'permanent' && repeat.checked;
+        return runAction(id => window.pywebview.api.decide(id, choice, remember));
     };
     allow.addEventListener('click', () => decide('allow'));
     block.addEventListener('click', () => decide('block'));
@@ -326,14 +395,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const scope = document.querySelector('input[name="fp_scope"]:checked')?.value || 'file_rule';
         const reason = byId('threat_fp_reason').value || 'other';
         const note = byId('threat_fp_note').value || '';
-        busy = true;
-        revision += 1;
-        clearTimeout(nextTimer);
-        disable();
         hideFpPanel();
-        try { await window.pywebview.api.report_false_positive(currentId, reason, note, scope); }
-        catch (error) { console.error('False positive report failed', error); }
-        finally { busy = false; await refresh(); }
+        await runAction(id => window.pywebview.api.report_false_positive(id, reason, note, scope));
     });
     permanent.addEventListener('click', () => {
         confirmationId = currentId;
@@ -369,7 +432,11 @@ document.addEventListener('DOMContentLoaded', () => {
     reportFocus(document.hasFocus());
 
     window.addEventListener('pagehide', () => {
-        disposed = true; revision += 1; clearTimeout(nextTimer); clearActive();
+        disposed = true; revision += 1; actionRevision += 1;
+        clearTimeout(nextTimer);
+        for (const cancel of [...bridgeWaits]) cancel();
+        snapshotFlight = null; busy = false; decisionTimeoutId = null;
+        clearActive();
     });
     window.addEventListener('pageshow', () => {
         if (disposed) { disposed = false; refresh(); }

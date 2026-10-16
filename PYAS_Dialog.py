@@ -344,12 +344,12 @@ DIALOG_TEXTS.update({
         "slovenian_switch": "Vsaka zaznanja za to datoteko",
     },
     "fp_scope_signer": {
-        "simplified_switch": "同一签名者的任何已签名文件", "traditional_switch": "同一簽名者的任何已簽名檔案",
-        "english_switch": "Any signed file by this signer", "japanese_switch": "この署名者による署名済みファイル",
-        "korean_switch": "이 서명자의 서명된 파일", "french_switch": "Tout fichier signé par ce signataire",
-        "spanish_switch": "Cualquier archivo firmado por este firmante", "hindi_switch": "इस हस्ताक्षरकर्ता की कोई भी हस्ताक्षरित फ़ाइल",
-        "arabic_switch": "أي ملف موقّع من هذا الموقّع", "russian_switch": "Любой файл, подписанный этим подписантом",
-        "slovenian_switch": "Katera koli datoteka tega podpisnika",
+        "simplified_switch": "同一签名者的已签名文件（提交时验证）", "traditional_switch": "同一簽名者的已簽名檔案（提交時驗證）",
+        "english_switch": "Signed files by this signer (verified on submit)", "japanese_switch": "同じ署名者の署名済みファイル（送信時に検証）",
+        "korean_switch": "동일 서명자의 서명된 파일 (제출 시 검증)", "french_switch": "Fichiers du même signataire (vérifiés à l’envoi)",
+        "spanish_switch": "Archivos del mismo firmante (verificados al enviar)", "hindi_switch": "इस हस्ताक्षरकर्ता की हस्ताक्षरित फ़ाइलें (सबमिट करते समय सत्यापन)",
+        "arabic_switch": "ملفات الموقّع نفسه (التحقق عند الإرسال)", "russian_switch": "Файлы этого подписанта (проверка при отправке)",
+        "slovenian_switch": "Datoteke istega podpisnika (preverjanje ob potrditvi)",
     },
     "fp_reason": {
         "simplified_switch": "原因", "traditional_switch": "原因",
@@ -716,6 +716,8 @@ class _ThreatPromptQueue:
                 request.ai = state
 
     def submit(self, request):
+        new_request = False
+        promote = False
         with self.condition:
             self.condition.wait_for(lambda: self.closed or self.count < self.capacity)
             if self.closed:
@@ -725,22 +727,22 @@ class _ThreatPromptQueue:
                 if item and request.dedup_key and item.dedup_key == request.dedup_key and not item.resolving), None)
             if matching:
                 matching.followers.append(request)
-                self.condition.notify_all()
             else:
                 self.pending.append(request)
-                # 入队即异步分析;失败只影响建议可用性,绝不影响裁决本身
-                if self.ai_starter:
-                    try:
-                        self.ai_starter(request)
-                    except Exception:
-                        log_exception("PYAS_Dialog._ThreatPromptQueue.submit.ai_starter")
-                if self.worker is not None and self.active is None:
-                    # 窗口处于空窗保留期:worker 正阻塞在会话里,没人把 pending
-                    # 提升为 active,这里就地提升,否则这条告警永远等不到裁决
-                    self.take_next()
+                new_request = True
+                promote = self.worker is not None and self.active is None
             if self.worker is None:
                 self.worker = threading.Thread(target=self._run, daemon=True, name="PYAS.ThreatQueue")
                 self.worker.start()
+            self.condition.notify_all()
+        # Configuration/network callbacks must not hold the decision queue lock.
+        if new_request and self.ai_starter and not request.done.is_set():
+            try:
+                self.ai_starter(request)
+            except Exception:
+                log_exception("PYAS_Dialog._ThreatPromptQueue.submit.ai_starter")
+        if promote:
+            self.take_next()
         request.done.wait()
         return request.choice
 
@@ -763,17 +765,32 @@ class _ThreatPromptQueue:
             return list(groups.values())
 
     def take_next(self):
-        with self.condition:
-            if self.closed or not self.pending:
-                return None
-            while self.pending:
-                self.active = self.pending.popleft()
-                cached = self.policy_lookup(self.active.rule, 1 + len(self.active.followers)) if self.policy_lookup else None
-                if cached:
-                    self.complete(cached)
-                else:
+        while True:
+            with self.condition:
+                if self.closed:
+                    return None
+                if self.active is not None:
                     return self.active
-            return None
+                if not self.pending:
+                    return None
+                request = self.pending.popleft()
+                self.active = request
+            # Policy lookup may hash files, check certificates or save configuration.
+            # Publish the candidate first, so a manual decision can still take precedence.
+            try:
+                cached = self.policy_lookup(request.rule, 1 + len(request.followers)) if self.policy_lookup else None
+            except Exception:
+                log_exception("PYAS_Dialog._ThreatPromptQueue.take_next.policy")
+                cached = None
+            if cached and self.complete(cached, expected=request, unclaimed=True):
+                continue
+            with self.condition:
+                if self.active is request:
+                    return request
+                if self.active is not None:
+                    return self.active
+                if self.closed:
+                    return None
 
     def cancel_ai(self, request):
         """用户已自主决策(或队列关闭)时,立刻叫停该请求待发/在途的 AI 分析。
@@ -794,30 +811,31 @@ class _ThreatPromptQueue:
             except Exception:
                 log_exception("PYAS_Dialog._ThreatPromptQueue.cancel_ai")
 
-    def complete(self, choice):
-        completed = []
-
+    def complete(self, choice, expected=None, unclaimed=False):
         with self.condition:
-            if self.active is not None:
-                completed = [self.active, *self.active.followers]
-
-                for item in completed:
-                    item.choice = choice
-                    item.done.set()
-
-                self.active = None
-
+            request = self.active
+            if request is None or (expected is not None and request is not expected):
+                return False
+            if unclaimed and request.resolving:
+                return False
+            completed = [request, *request.followers]
+            for item in completed:
+                item.choice = choice
+                item.done.set()
+            self.active = None
             self.condition.notify_all()
-
-        # 锁外叫停 AI:关闭在途连接可能阻塞,不能占着队列锁
+        # No caller may wrap complete() in an outer queue lock: abort can block.
         for item in completed:
             self.cancel_ai(item)
+        return True
 
     def _run(self):
         while True:
+            request = self.take_next()
             with self.condition:
-                request = self.take_next()
                 if request is None:
+                    if self.pending and not self.closed:
+                        continue
                     self.session = None
                     self.worker = None
                     return
@@ -967,6 +985,9 @@ class _WebDecisionAPI:
 
     def snapshot(self):
         session = self._session
+        # Read display/countdown flags without waiting for unrelated config writes.
+        config = getattr(session.owner, "pyas_config", None) or {}
+        auto_execute = bool(config.get("ai_assist_switch") and config.get("ai_auto_execute"))
         with session.queue.condition:
             request = session.queue.active
             if request is None:
@@ -974,7 +995,7 @@ class _WebDecisionAPI:
             if session.ready.is_set() and request.timeout and not request.timeout_consumed and request.deadline is None:
                 state = request.ai if isinstance(request.ai, dict) else {}
                 ai_phase = state.get("state")
-                if session.owner._ai_auto_execute_enabled():
+                if auto_execute:
                     # 自动执行模式:只在 AI 已出结论(就绪/失败)后起表,此时
                     # AI 不会再变,剩余时间才是有意义的「未处理就自动执行」。
                     # 分析中(delay/analyzing)不起表;失败照常起表,到点无结论
@@ -1014,14 +1035,16 @@ class _WebDecisionAPI:
                 "countdown": (
                     loc_dialog_text(
                         request.lang,
-                        "countdown_ai_execute" if session.owner._ai_auto_execute_enabled()
+                        "countdown_ai_execute" if auto_execute
                         else "countdown_auto_block",
                     ).replace("{0}", str(remaining))
                     if remaining is not None else ""
                 ),
                 "ai": ai_snapshot_view(request),
-                "fp": fp_snapshot_view(request,
-                    signer_ok=bool(request.rule and session.owner._rule_signer(request.rule))),
+                # This option requests verification, not a claim of a trusted signer.
+                # _remember_suppression verifies signature + file identity on submit.
+                # Never spawn PowerShell from a 400ms UI refresh.
+                "fp": fp_snapshot_view(request, signer_ok=True),
             }
         # 主题/语言只用于界面显示:直接读配置字典,不进全局配置锁。
         # snapshot 在 pywebview 桥接线程上每 400ms 轮询一次;若在这里等
@@ -1058,9 +1081,10 @@ class _WebDecisionAPI:
                 if session.queue.active is not request or session.queue.closed:
                     return False
                 session.decision_error = False
-                session.queue.complete('allow' if choice == 'permanent' else choice)
-                session.queue.take_next()
-                return True
+            if not session.queue.complete('allow' if choice == 'permanent' else choice, expected=request):
+                return False
+            session.queue.take_next()
+            return True
         finally:
             request.resolving = False
 
@@ -1091,9 +1115,10 @@ class _WebDecisionAPI:
                 if session.queue.active is not request or session.queue.closed:
                     return False
                 session.decision_error = False
-                session.queue.complete('allow')
-                session.queue.take_next()
-                return True
+            if not session.queue.complete('allow', expected=request):
+                return False
+            session.queue.take_next()
+            return True
         finally:
             request.resolving = False
 
@@ -1175,8 +1200,12 @@ class _WebThreatDialogSession:
         idle = False
         try:
             while True:
+                # Advance pending alerts even while an older bridge call is waiting
+                # for best-effort AI cancellation outside the queue lock.
+                self.queue.take_next()
                 entered_idle = False
                 revived = False
+                deadline_decision = None
                 with self.queue.condition:
                     request = self.queue.active
                     if self.queue.closed or not self._should_keep_alive(request):
@@ -1190,7 +1219,8 @@ class _WebThreatDialogSession:
                         if idle:
                             idle = False
                             revived = True
-                        if request.deadline and request.deadline <= time.monotonic():
+                        if (not request.resolving and request.deadline
+                                and request.deadline <= time.monotonic()):
                             verdict = ai_deadline_choice(request)
 
                             if verdict is None:
@@ -1207,18 +1237,20 @@ class _WebThreatDialogSession:
                                 # 超时本身就是用户配置的裁决,到点拦截
                                 verdict = "block"
 
-                            if verdict != "block":
-                                try:
-                                    self.owner.write_log(
-                                        "INFO", "AI Suggestion Applied",
-                                        detail=f"{request.title} / {verdict}",
-                                    )
-                                except Exception:
-                                    pass
-                            self.queue.complete(verdict)
-                            self.queue.take_next()
-                            continue
-                    self.queue.condition.wait(.2)
+                            deadline_decision = (request, verdict)
+                    if deadline_decision is None:
+                        self.queue.condition.wait(.2)
+                if deadline_decision is not None:
+                    timed_request, verdict = deadline_decision
+                    if verdict != "block":
+                        try:
+                            self.owner.write_log("INFO", "AI Suggestion Applied",
+                                detail=f"{timed_request.title} / {verdict}")
+                        except Exception:
+                            pass
+                    if self.queue.complete(verdict, expected=timed_request, unclaimed=True):
+                        self.queue.take_next()
+                    continue
                 if entered_idle:
                     try:
                         # 空窗期用 hide 而非 minimize:最小化仍占任务栏,误点就
