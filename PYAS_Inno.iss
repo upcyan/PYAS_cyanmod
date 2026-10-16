@@ -72,6 +72,13 @@ Source: "Payload\PYAS_Menu.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Payload\Menu\*"; DestDir: "{app}\Menu"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "Payload\Plugins\*"; DestDir: "{app}\Plugins"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[Dirs]
+; 数据目录授予 Users 修改权:不管文件由什么上下文创建(含提权的安装/卸载流程),
+; 都继承可替换 ACL。否则提权进程写下的 Report.json/Config.json 会是 Administrators
+; 所有 + Users 只读,普通身份运行的应用「读得了、删不掉」——atomic_write_json 的
+; os.replace 永久 PermissionError,日志/配置全部静默积压丢失(2026-10-16 实测)。
+Name: "{commonappdata}\PYAS"; Permissions: users-modify
+
 [Run]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Menu\trust_menu.ps1"" -RespectConfig"; Flags: runhidden waituntilterminated; Check: IsModernMenuSupported
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Menu\register_menu.ps1"" -ExternalLocation ""{app}"" -RespectConfig"; Flags: runhidden waituntilterminated runasoriginaluser; Check: IsModernMenuSupported

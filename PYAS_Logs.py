@@ -139,7 +139,33 @@ class LogMixin:
             try:
                 atomic_write_json(self.file_log, self.logs_data)
                 self.logs_dirty = False
+
+                # 恢复通知只发一次:持续失败期间每 5 秒都会走到这里,不刷屏
+                if getattr(self, "_flush_failing", False):
+                    self._flush_failing = False
+                    self.write_log(
+                        "INFO",
+                        "Log Write Failed",
+                        detail="日志落盘已恢复",
+                        ui_visible=True,
+                    )
                 return True
-            except Exception:
+            except Exception as error:
                 log_exception("PYAS_Logs.LogMixin.flush_logs_now:107")
+
+                # 落盘失败必须让用户看见:Exception/WARN 类条目默认不进界面日志页,
+                # 静默吞掉会让「日志不更新、审计丢失」看起来像功能坏了(2026-10-16
+                # 的 ACL 事故:提权进程写下的 Report.json 让普通身份永远替换失败,
+                # 全部日志积压在内存里,界面上却毫无征兆)。状态翻转时只报一次。
+                if not getattr(self, "_flush_failing", False):
+                    self._flush_failing = True
+                    self.write_log(
+                        "WARN",
+                        "Log Write Failed",
+                        detail=(
+                            f"日志落盘失败,新条目暂存内存: {error}"
+                        ),
+                        success=False,
+                        ui_visible=True,
+                    )
                 return False
