@@ -65,8 +65,12 @@ class IconInstallTests(unittest.TestCase):
         self.assertIn('i-spinner', self.sprite_symbols)
 
     def test_every_use_resolves_in_same_document(self):
-        """模板里的 <use> 必须都能在同文档内解析(漏 symbol = 静默空白)"""
-        for path in (INDEX, THREAT, NOTIFY):
+        """文档里的 <use> 必须都能在同文档内解析(漏 symbol = 静默空白)
+
+        必须连 PREVIEW 一起查:评审页的 <use href="#i-sliders"> 曾指向一个不存在的 id
+        (素材源里那条其实叫 i-custom-shield),浏览器不报错、只渲染成空白,一直没人发现。
+        """
+        for path in (INDEX, THREAT, NOTIFY, PREVIEW):
             text = read(path)
             defined = set(symbols_of(text))
             for used in sorted(set(uses_of(text))):

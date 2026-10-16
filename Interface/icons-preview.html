@@ -86,34 +86,6 @@
 
     网格 24x24 / 描边 2 / 圆帽圆角 / 2px 安全边距 / currentColor 自动跟随主题
 
-    【锐利度铁律】描边 2(偶数) 必须配整数坐标:
-      · 整数坐标 → 描边覆盖 [x-1, x+1],边缘正好压在像素边界上 → 目视锐利清晰
-      · x.5 坐标 → 描边覆盖 [x-0.5, x+1.5],正好骑在像素中点 → 抗锯齿发虚
-      · 因此本版直线/矩形/圆一律整数坐标;此前为消除"撑破边距"而加的 scale()
-        等比缩放会把整数坐标乘成小数(齿轮 61 处、垃圾桶 35 处…),已全部移除。
-    【视觉尺寸统一】除天然偏小的 close/chevron(14)、minimize(16)、grid(18) 外,
-      全部对齐到视觉框 20(几何最大维 18),与线上原版观感一致。
-      例外:盾族(i-shield / shield-check / shield-pulse / shield-bot / shield-wifi)
-      保持线上原版盾形 16x20(x4~20 / y2~22) —— 用户明确偏好原版盾,且族内必须同尺寸。
-    命名: i-<语义>; 同族共享词根(shield-*, monitor-*, chevron-*)
-
-    【实装方式】本文件是唯一源文件,整份内联进 index.html / threat.html 的 <body> 开头
-      (display:none),界面各处用 <use> 引用 #i-<语义> 形式的 id。选内联而非外部引用,
-      是因为外部 svg 在 file:// 下会被 CORS 拦掉。改动本文件后需同步重新内联,
-      tests/test_icons_installed.py 会逐字节比对,漏同步会直接测红。
-    【描边取值】symbol 上写 stroke-width="var(--icon-stroke, 2)":
-      外层 CSS 选不中 use 的 shadow 内容,只能靠自定义属性把描边传进去。
-      默认 2;列表图标上下文(style.css 的 .item-icon)给 1.5,保持线上原有观感。
-    【未纳入重绘】关于按钮的信息圆、進程管理的显示器+心电 —— 本集没有对应图元,
-      在 index.html 里保持内联原几何(见该文件内注释)。
-  -->
-
-  <!-- 窗口控制 -->
-    <!--
-    PYAS Cyanmod · 界面图标重绘稿
-
-    网格 24x24 / 描边 2 / 圆帽圆角 / 2px 安全边距 / currentColor 自动跟随主题
-
     【锐利度铁律】描边 2(偶数) 必须配整数坐标 —— 但只对「正交图元」生效:
       · 整数坐标 → 描边覆盖 [x-1, x+1],边缘正好压在像素边界上 → 目视锐利清晰
       · x.5 坐标 → 描边覆盖 [x-0.5, x+1.5],正好骑在像素中点 → 抗锯齿发虚
@@ -145,7 +117,13 @@
   <!-- 窗口控制 -->
   <symbol id="i-minimize" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></symbol>
   <symbol id="i-maximize" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/></symbol>
-  <symbol id="i-restore" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h10a2 2 0 0 1 2 2v10"/><path d="M13 3h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2"/></symbol>
+  <!-- i-restore:回退原版。415c2e6 那轮为「与 i-maximize 拉开混淆度」改成了双层错位框,
+       但那一版是画坏的:前窗路径结尾停在 (15,13) 没有补回右边与右上圆角(未闭合),
+       且前后窗顶边同在 y=3 共线,渲染出来并成一条横线 —— 24 格下整枚读作「一个大开口
+       方框 + 底部一个小钩子」,不是两层窗;该版已随 v3.7.1-8 发出去。
+       原版是「前窗完整 rect + 后窗开口 L」,与 i-copy / i-copy-list 同一画法,
+       16px / 24px 下都能读出两层窗。混淆度要靠几何设计去降,不能拿画坏的形状换。 -->
+  <symbol id="i-restore" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 0 1 2-2h10"/></symbol>
   <symbol id="i-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5 19 19M19 5 5 19"/></symbol>
 
   <!-- 侧栏导航 -->
@@ -172,7 +150,20 @@
   <symbol id="i-monitor-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/><path d="m8 10 3 3 5-5"/></symbol>
   <symbol id="i-shield-wifi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M8 10a6 6 0 0 1 8 0"/><path d="M10 13a3 3 0 0 1 4 0"/><circle cx="12" cy="16" r="0.5"/></symbol>
   <symbol id="i-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/><path d="m8 12 3 3 5-6"/></symbol>
-  <symbol id="i-custom-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M8 10h8M8 15h5"/></symbol>
+  <!-- 自訂防護(敏感目錄過濾):盾牌 + 內部兩道滑塊。
+       位置是量出來的,不是估的。盾內壁 y=5..12 為全寬(x4..20),y=13 起隨盾形收窄
+       (y=15 只剩 x5..19)。舊版兩道等長軌放 y=9/15,下軌四側留白僅 1.0 格、上軌 2.0 格,
+       24px 點陣裡 y=15 那一行與左右盾壁連成一整條 —— 就是「貼邊、不協調」的來源。
+       現版兩軌等長 x8..16,放 y=9 / y=14(間距 5):第一道軌與其旋鈕上移一檔(前一版 10/14),
+       第二道軌停在 y=14 不動 —— 這是使用者指定的。**y=14 是下軌的下限**:它落在內壁
+       x5.75..18.25 上(下排留白 1.50~1.75 格);再下移一檔到 y=15 只剩 x6.25..17.75,
+       會重演貼邊。上軌在 y=9 處內壁仍全寬,留白 2.00~2.25 格。整組中心 y=11.5,
+       比前一版的 12.0 更貼內腔質心 11.3;間距 5 讓兩軌之間留出整行空白(點陣 y=11 全空)。
+       旋鈕照舊用直徑 4 的實心圓(cx 錯開 11 / 13,讀作「兩項各自可調」),**旋鈕必須跟著
+       所在軌一起動**(試過只移線不移鈕:旋鈕掛到線上緣外,且與下軌黏連)。空心圓試過,
+       16px 內洞不可見、40px 下環相對長 8 的軌道過重,已棄;實心點是本檔既有做法
+       (i-palette 色點同款),不改描邊契約。 -->
+  <symbol id="i-custom-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M8 9h8M8 14h8"/><circle cx="11" cy="9" r="2" fill="currentColor" stroke="none"/><circle cx="13" cy="14" r="2" fill="currentColor" stroke="none"/></symbol>
 
   <!-- 工具 -->
   <symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="4"/><path d="M6 7h12v4a6 6 0 0 1-6 6 6 6 0 0 1-6-6V7zM12 17v4"/></symbol>
@@ -217,14 +208,24 @@
 <h1>PYAS 界面图标重绘预览</h1>
 <p class="sub">
   共 <b>52</b> 个功能图标全部重绘，统一规范：<code>24×24 网格</code> <code>描边 2</code> <code>圆帽圆角</code> <code>2px 安全边距</code> <code>currentColor 自动跟主题</code>。
-  左列是当前线上版本，后三列是重绘稿在 16/24/32px 的效果。<b>本页仅供确认，未改动任何现有代码</b>；AI 品牌 logo（12 个）不属重绘范围。
+  左列是<b>重绘前的原版几何</b>（作对照基准，不随线上后续微调回填），后三列是重绘稿在 24/16/32px 的效果。<b>本页仅供确认，未改动任何现有代码</b>；AI 品牌 logo（12 个）不属重绘范围。
 </p>
 
 
 <div class="passlog">
-  <div class="pl-title">七轮进展（可对照下面的「现状 / 重绘」两列核验）</div>
+  <div class="pl-title">十二轮进展（可对照下面的「现状 / 重绘」两列核验）</div>
   <ol>
-    <li><b>v7 插头上部改方框（本轮）</b>：<code>i-plug</code> 的两根竖插针换成闭合方框 <code>rect x8 y3 w8 h4</code>——插针在 24px 下像两根悬空天线，方框更像「插头壳体」，也与下方半圆插座形成清晰分件；插座、垂线不动。</li>
+    <li><b>v12 自訂防護·第一道轨上移一档（本轮）</b>：v11 整组下移后组中心 y=12.0 偏下。按要求<b>只把第一道轨与其旋钮上移一档、第二道轨原地不动</b>：<code>M8 10h8M8 14h8</code> → <code>M8 9h8M8 14h8</code>，旋钮 <code>(11,10)</code> → <code>(11,9)</code>（<code>(13,14)</code> 不动）。两轨间距由 4 拉开到 5，24px 点阵里 <code>y=11</code> 整行空白，两轨不再靠在一起；组中心回到 <code>y=11.5</code>，比 v11 的 12.0 更贴内腔质心 11.3。上轨在 y=9 处盾内壁仍全宽、留白 2.00~2.25 格，下轨维持 v11 的 1.50~1.75 格（y=14 仍是下轨下限）。旋钮必须跟着所在轨一起动 —— 只移线不移钮的话旋钮会挂在线上缘外并与下轨黏连（已实测）。</li>
+    <li><b>v11 自訂防護·整组下移一档</b>：v10 的组中心在 <code>y=11.0</code>，视觉上偏上；两轨与两旋钮一起 <code>y+1</code> —— 轨 <code>M8 10h8M8 14h8</code>、旋钮 <code>(11,10)/(13,14)</code>，组中心落到 <code>y=12.0</code>。代价是下轨进入盾壁收窄区（<code>y=14</code> 内壁 <code>x5.75..18.25</code>），下排留白由 2.00 收到 <b>1.50~1.75 格</b>（上排 2.00~2.25）。<b><code>y=14</code> 是下轨下限</b>——再下移一档到 <code>y=15</code> 只剩 <code>x6.25..17.75</code>，会重演 v8 的贴边。</li>
+    <li><b>v10 自訂防護·两轨紧缩并等长</b>：v9 为对齐上下留白把下轨收窄成 <code>x9..15</code>，与上轨 <code>x8..16</code>（长 8）不等长，读着像「长短腿」。本版两轨统一<b>等长 <code>x8..16</code></b>，y 间距由 6 紧到 <b>4</b>（<code>M8 9h8M8 13h8</code>）：下轨落在盾内壁仍有 <code>x5.25..18.75</code> 的 <code>y=13</code> 上，<b>四侧留白实测均为 2.00 格</b>（与上轨完全相同），整组中心 <code>y=11.0</code> 仍对齐内腔质心 11.3。间距缩到 4 后两枚 <code>r=2</code> 旋钮实测仍在 <code>y=11</code> 分离，不黏连。</li>
+    <li><b>v9 自訂防護·滑块位置按内腔重排</b>：把盾牌内腔量了一遍 —— 内壁 <code>y=5..12</code> 为全宽 <code>x4..20</code>，<code>y=13</code> 起随盾形收窄（y=15 只剩 <code>x5..19</code>）。v8 的两道<b>等长</b>轨放在 y=9 / y=15，下排四侧留白只剩 <b>1.0 格</b>（上排 2.0 格），24px 点阵里 y=15 那一行与左右盾壁<b>连成一整条</b>——这就是「贴边、不协调」的来源。现两轨各上移一档（y=8 / y=14），下轨按盾形收窄为 <code>M9 14h6</code>，四侧留白都落到 2 格；整组纵中心 y=11.0，对齐内腔质心 11.3（旧版 12.0，偏下）。</li>
+    <li><b>v8 还原图标回退 + 自訂防護换盾</b>
+      <ul>
+        <li><b>i-restore · 回退原版（修复画坏的形状）</b>：后一轮整改为「与 i-maximize 拉开混淆度」把它改成了双层错位框，但那一版是<b>画坏的</b>——前窗路径结尾停在 <code>(15,13)</code>、没补回右边与右上圆角（未闭合），且前后窗顶边同在 <code>y=3</code> 共线。24 格渲染出来是「一个大开口方框 + 底部一个小钩子」，不是两层窗，16px 下更糊；该版已随 v3.7.1-8 发出。现回退原版「前窗完整 rect + 后窗开口 L」（与 <code>i-copy</code> / <code>i-copy-list</code> 同一画法），本行左右两列随之相同。教训：混淆度要靠几何设计去降，不能拿画坏的形状换。</li>
+        <li><b>i-custom-shield · 更正 id 并换形</b>：换「盾牌 + 内部两道等长滑轨 + 两个实心圆旋钮」。素材源里这一条的 id 一直是 <code>i-custom-shield</code>，本页早先写作 <code>i-sliders</code>（旧名），同行的 <code>&lt;use&gt;</code> 也因此指向不存在的 <code>#i-sliders</code>、在「重绘稿」列渲染成空白；已按源文件更正。</li>
+      </ul>
+    </li>
+    <li><b>v7 插头上部改方框</b>：<code>i-plug</code> 的两根竖插针换成闭合方框 <code>rect x8 y3 w8 h4</code>——插针在 24px 下像两根悬空天线，方框更像「插头壳体」，也与下方半圆插座形成清晰分件；插座、垂线不动。</li>
     <li><b>v1 初版重绘</b>：52 个图标按 24 网格重画，统一描边、圆帽圆角、语义化命名；含 6 处语义/几何修正（隔离区、扩展引擎、产品密钥、云上传、齿轮、夹板勾）。</li>
     <li><b>v2 复审回退</b>：逐个体放大比对后，<b>i-gear</b>（糊成太阳）与 <b>i-wrench</b>（钳口发虚）判定不如原版，回退原版几何。</li>
     <li><b>v3 全量体检修正（本轮）</b>
@@ -240,7 +241,7 @@
       <ul>
         <li><b>i-maximize / i-restore · 回退原版</b>：最大化自绘放大到 3–21(18×18) 偏大、顶到标题栏留白，还原同受影响；一并回退原版 16×16 / 12×12。</li>
         <li><b>i-file-check · 横线改勾</b>：横线版上半片与 i-folder 撞形且 check 语义丢失；保留文件本体，横线换成大勾 <code>m8 14 3 3 5-6</code>。</li>
-        <li><b>i-sliders · 滑块放大</b>：r=2 内洞 16px 下几乎不可见；r=2→<b>r=3</b>（内洞直径 4），线端缩短贴住滑块边缘。</li>
+        <li><b>i-custom-shield（旧名 i-sliders）</b>：本页早先把它写作 <code>i-sliders</code>、<code>&lt;use&gt;</code> 指向了不存在的 <code>#i-sliders</code>，在「重绘稿」列渲染成空白；改名的经过与现图形见顶部 v8 条。</li>
         <li><b>i-plug · 真插头</b>：方框+接口块仍读作芯片；改为两插针+半圆插座+垂线，与 i-power 电源符号彻底分开。</li>
         <li><b>i-search-window · 补内容行</b>：放大镜右移让位，加回正文行 <code>M7 11h3</code>，窗口「有内容」。</li>
       </ul>
@@ -326,7 +327,7 @@ body.dark .passlog code { background: rgba(255,255,255,.1); }
   <div class="row"><div class="meta"><b>i-restore</b><span>标题栏 · 还原</span></div>
     <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"></rect><path d="M4 16V6a2 2 0 0 1 2-2h10"></path></svg></div>
     <div class="cell new"><svg class="ic"><use href="#i-restore"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-restore"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-restore"/></svg></div>
-    <div class="note"><b>v5 回退原版</b>：前窗随最大化一起放大到 13×13、后窗轮廓展到 x3–19，整枚变重；恢复原版前窗 12×12 + <code>M4 16V6…h10</code>，与最大化图标同尺寸</div></div>
+    <div class="note"><b>v5 回退原版</b>：前窗随最大化一起放大到 13×13、后窗轮廓展到 x3–19，整枚变重；恢复原版前窗 12×12 + <code>M4 16V6…h10</code>，与最大化图标同尺寸。<br><b>v8 再回退一次</b>：后一轮整改改成「双层错位框」，但前窗路径未闭合、两窗顶边共线，渲染成「一个大开口方框 + 小钩子」（详见顶部 v8 条）。现左右两列一致。</div></div>
 
   <div class="row"><div class="meta"><b>i-close</b><span>标题栏 · 关闭</span></div>
     <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
@@ -443,10 +444,10 @@ body.dark .passlog code { background: rgba(255,255,255,.1); }
     <div class="cell new"><svg class="ic"><use href="#i-cpu"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-cpu"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-cpu"/></svg></div>
     <div class="note">终稿·去盾 + 纯芯片优化：外框 12×12→<b>14×14</b>(5~19) 更饱满，8 引脚由长 4 收到<b>长 3</b>(2~5 / 19~22，与 i-chip 同规格)，中心勾放大到 <code>m8 12 3 3 5-6</code> 撑住框心；盾+芯片版在 16px 糊团，已弃</div></div>
 
-  <div class="row"><div class="meta"><b>i-sliders</b><span>敏感目录过滤</span></div>
+  <div class="row"><div class="meta"><b>i-custom-shield</b><span>敏感目录过滤</span></div>
     <div class="cell cur"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h3m4 0h9M4 12h9m4 0h3M4 18h3m4 0h9"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="9" cy="18" r="2"/></svg></div>
-    <div class="cell new"><svg class="ic"><use href="#i-sliders"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-sliders"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-sliders"/></svg></div>
-    <div class="note"><b>v5 优化·换图案</b>：三线三滑块表达的是「参数可调」，读不出「目录」；改成文件夹 + 内部清单线（<code>M7 12h10M7 16h6</code>）= 目录与其下的规则条目。该条在界面里是 <code>custom_protect_window</code>「自訂防護」清单页入口，与同组各「XX 防护」的盾族保持区分（此条强调「目录/清单」而非盾）</div></div>
+    <div class="cell new"><svg class="ic"><use href="#i-custom-shield"/></svg></div><div class="cell new"><svg class="ic16"><use href="#i-custom-shield"/></svg></div><div class="cell new"><svg class="ic32"><use href="#i-custom-shield"/></svg></div>
+    <div class="note"><b>v8 → v12 定稿·盾牌 + 内部滑块</b>：原版是三线三滑块，读作「参数可调」却没读出「防护」。保留原版盾形（与同组盾族同尺寸 16×20），内部换成<b>两道横轨 + 实心圆旋钮</b>（cx 错开 11 / 13 表示两项各自可调）。旋钮试过空心圆：16px 下内洞不可见、40px 下直径 6 的环比长 8 的轨道还粗，故用实心点（与 <code>i-palette</code> 的色点同款）。<br><b>v9 位置重排</b>：v8 两轨等长放在 y=9 / y=15，但盾内壁 y=13 起收窄，下排留白只剩 1.0 格、24px 下与盾壁连成一条。改为 <code>M8 8h8M9 14h6</code>——上轨 y=8，下轨 y=14 并按盾形收窄到 x9..15，四侧留白均为 2 格；整组中心 y=11.0，与内腔质心 11.3 对齐。<br><b>v10 两轨紧缩并等长</b>：v9 的下轨为配合盾形收窄成 x9..15，与上轨 x8..16 不等长，看着像长短腿。现两轨统一等长 <code>x8..16</code>，y 间距由 6 紧到 4：<code>M8 9h8M8 13h8</code> + 旋钮 (11,9)/(13,13)。y=13 处盾内壁仍有 x5.25..18.75，故四侧留白实测均 2.00 格、与上轨完全一致，组中心 y=11.0 仍对质心。间距 4 下两枚 r=2 旋钮实测仍分离（不黏连）。<br><b>v11 整组下移一档</b>：<code>M8 10h8M8 14h8</code> + 旋钮 (11,10)/(13,14)，组中心 y=12.0。下轨落到盾壁收窄区（y=14 内壁 x5.75..18.25），下排留白 1.50~1.75 格、上排 2.00~2.25 —— <b>y=14 已是下轨下限</b>，再下移一档就会重演贴边。<br><b>v12 第一道轨上移一档</b>：<code>M8 9h8M8 14h8</code> + 旋钮 (11,9)/(13,14)，第二道轨原地不动。间距由 4 拉到 5，两轨之间留出整行空白，组中心 y=11.5（更贴质心 11.3）。该条在界面里是 <code>custom_protect_window</code>「自訂防護」入口</div></div>
 </div>
 
 <h2 class="grp">工具箱</h2>

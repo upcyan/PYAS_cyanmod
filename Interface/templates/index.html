@@ -74,7 +74,13 @@
   <!-- 窗口控制 -->
   <symbol id="i-minimize" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></symbol>
   <symbol id="i-maximize" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/></symbol>
-  <symbol id="i-restore" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h10a2 2 0 0 1 2 2v10"/><path d="M13 3h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2"/></symbol>
+  <!-- i-restore:回退原版。415c2e6 那轮为「与 i-maximize 拉开混淆度」改成了双层错位框,
+       但那一版是画坏的:前窗路径结尾停在 (15,13) 没有补回右边与右上圆角(未闭合),
+       且前后窗顶边同在 y=3 共线,渲染出来并成一条横线 —— 24 格下整枚读作「一个大开口
+       方框 + 底部一个小钩子」,不是两层窗;该版已随 v3.7.1-8 发出去。
+       原版是「前窗完整 rect + 后窗开口 L」,与 i-copy / i-copy-list 同一画法,
+       16px / 24px 下都能读出两层窗。混淆度要靠几何设计去降,不能拿画坏的形状换。 -->
+  <symbol id="i-restore" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 0 1 2-2h10"/></symbol>
   <symbol id="i-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5 19 19M19 5 5 19"/></symbol>
 
   <!-- 侧栏导航 -->
@@ -101,7 +107,20 @@
   <symbol id="i-monitor-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/><path d="m8 10 3 3 5-5"/></symbol>
   <symbol id="i-shield-wifi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M8 10a6 6 0 0 1 8 0"/><path d="M10 13a3 3 0 0 1 4 0"/><circle cx="12" cy="16" r="0.5"/></symbol>
   <symbol id="i-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/><path d="m8 12 3 3 5-6"/></symbol>
-  <symbol id="i-custom-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M8 10h8M8 15h5"/></symbol>
+  <!-- 自訂防護(敏感目錄過濾):盾牌 + 內部兩道滑塊。
+       位置是量出來的,不是估的。盾內壁 y=5..12 為全寬(x4..20),y=13 起隨盾形收窄
+       (y=15 只剩 x5..19)。舊版兩道等長軌放 y=9/15,下軌四側留白僅 1.0 格、上軌 2.0 格,
+       24px 點陣裡 y=15 那一行與左右盾壁連成一整條 —— 就是「貼邊、不協調」的來源。
+       現版兩軌等長 x8..16,放 y=9 / y=14(間距 5):第一道軌與其旋鈕上移一檔(前一版 10/14),
+       第二道軌停在 y=14 不動 —— 這是使用者指定的。**y=14 是下軌的下限**:它落在內壁
+       x5.75..18.25 上(下排留白 1.50~1.75 格);再下移一檔到 y=15 只剩 x6.25..17.75,
+       會重演貼邊。上軌在 y=9 處內壁仍全寬,留白 2.00~2.25 格。整組中心 y=11.5,
+       比前一版的 12.0 更貼內腔質心 11.3;間距 5 讓兩軌之間留出整行空白(點陣 y=11 全空)。
+       旋鈕照舊用直徑 4 的實心圓(cx 錯開 11 / 13,讀作「兩項各自可調」),**旋鈕必須跟著
+       所在軌一起動**(試過只移線不移鈕:旋鈕掛到線上緣外,且與下軌黏連)。空心圓試過,
+       16px 內洞不可見、40px 下環相對長 8 的軌道過重,已棄;實心點是本檔既有做法
+       (i-palette 色點同款),不改描邊契約。 -->
+  <symbol id="i-custom-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M8 9h8M8 14h8"/><circle cx="11" cy="9" r="2" fill="currentColor" stroke="none"/><circle cx="13" cy="14" r="2" fill="currentColor" stroke="none"/></symbol>
 
   <!-- 工具 -->
   <symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="4"/><path d="M6 7h12v4a6 6 0 0 1-6 6 6 6 0 0 1-6-6V7zM12 17v4"/></symbol>
