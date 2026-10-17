@@ -29,6 +29,10 @@ class WatcherHarness(RealtimeMixin):
         self.h_dir_file = None
         self.virus_lock = {}
         self.scanned = []
+        self.recoveries = []
+
+    def _schedule_recovery(self, reason):
+        self.recoveries.append(reason)
 
     def write_log(self, *args, **kwargs):
         pass
@@ -66,9 +70,6 @@ class WatcherHarness(RealtimeMixin):
     def _schedule_file_task(self, task_name, file_path, callback, delay=0):
         callback(file_path)
         return True
-
-    def _schedule_recovery(self, reason):
-        pass
 
 
 class FileWatcherLifecycleTests(unittest.TestCase):
@@ -155,6 +156,52 @@ class FileWatcherLifecycleTests(unittest.TestCase):
         while time.monotonic() < deadline and "canary_rearm.py" not in harness2.scanned:
             time.sleep(0.05)
         self.assertIn("canary_rearm.py", harness2.scanned)
+
+    def test_watchdog_fires_when_event_heartbeat_stalls(self):
+        # 心跳静止(模拟句柄被外部因素静默失效):看门狗触发兜底重扫
+        self.harness._dir_watch_beat = time.monotonic() - 999
+        health = threading.Thread(
+            target=self.harness.dir_watch_health_thread,
+            kwargs={"interval": 0.1, "silent_seconds": 0.5},
+            daemon=True,
+        )
+        health.start()
+        self.addCleanup(health.join, 3)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and "watchdog" not in self.harness.recoveries:
+            time.sleep(0.05)
+        self.assertIn("watchdog", self.harness.recoveries)
+        self.assertTrue(health.is_alive() or not health.is_alive())
+
+    def test_watchdog_stays_quiet_while_events_flow(self):
+        # 心跳健康(真实 watcher 收到事件即更新):看门狗不触发
+        health = threading.Thread(
+            target=self.harness.dir_watch_health_thread,
+            kwargs={"interval": 0.2, "silent_seconds": 2},
+            daemon=True,
+        )
+        health.start()
+        self.addCleanup(health.join, 3)
+        probe = os.path.join(self.directory.name, "watchdog_quiet.py")
+        with open(probe, "w") as f:
+            f.write("x\n")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and "watchdog_quiet.py" not in self.harness.scanned:
+            time.sleep(0.05)
+        self.assertIn("watchdog_quiet.py", self.harness.scanned)
+        self.assertNotIn("watchdog", self.harness.recoveries)
+
+    def test_watchdog_exits_when_switch_turned_off(self):
+        self.harness.pyas_config["document_switch"] = False
+        health = threading.Thread(
+            target=self.harness.dir_watch_health_thread,
+            kwargs={"interval": 0.1},
+            daemon=True,
+        )
+        health.start()
+        health.join(3)
+        self.assertFalse(health.is_alive())
+        self.assertEqual(self.harness.recoveries, [])
 
     def test_stop_dir_watcher_is_safe_and_idempotent(self):
         # 外部裸 CloseHandle 的挂起无法在线程内自愈(读永不返回),这是把

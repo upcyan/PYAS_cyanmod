@@ -30,7 +30,15 @@ RECOVERY_REASONS = {
     "queue_full": ("INFO", "Pending task capacity reached; recovering by rescan"),
     "buffer_lost": ("WARN", "Directory change buffer overflowed (events lost); recovering by rescan"),
     "watcher_error": ("WARN", "Watcher read failed; recovering by rescan"),
+    # 目录监视句柄可能被外部因素静默失效(读永不返回、也无失败信号),
+    # 看门狗发现事件心跳长时间静止时兜底重扫,保证防护不缺席
+    "watchdog": ("WARN", "Directory watch silent for too long; recovering by rescan"),
 }
+
+# 事件心跳静止多久判定句柄失效(兜底重扫触发)
+DIR_WATCH_SILENT_SECONDS = 600
+# 看门狗巡检周期
+DIR_WATCH_HEALTH_INTERVAL = 60
 
 
 class RealtimeMixin:
@@ -299,15 +307,57 @@ class RealtimeMixin:
         self._dir_watcher_stopped = True
         self._cancel_dir_handle()
 
+    def dir_watch_health_thread(self, interval=DIR_WATCH_HEALTH_INTERVAL,
+                                silent_seconds=DIR_WATCH_SILENT_SECONDS):
+        """目录监视看门狗:事件心跳静止超时即兜底全量重扫。
+
+        同步 Read 的句柄被外部因素静默失效时(阻塞不返回、也无失败信号),
+        事件管线整体缺席;兜底重扫保证防护不缺席,同时 WARN 留痕。"""
+        while True:
+            with self.lock_config:
+                if (
+                    self.closing
+                    or self._dir_watcher_stopped
+                    or not self.pyas_config.get("document_switch", False)
+                ):
+                    return
+
+            time.sleep(interval)
+
+            if self._dir_watcher_stopped or self.closing:
+                return
+
+            silent_for = time.monotonic() - getattr(self, "_dir_watch_beat", 0)
+
+            if silent_for >= silent_seconds:
+                self.write_log(
+                    "WARN",
+                    "File Watcher",
+                    detail=f"no filesystem events for {int(silent_for)}s; fallback rescan",
+                    success=False,
+                )
+                self._schedule_recovery("watchdog")
+
     def protect_file_thread(self):
         # WindowAPI 等宿主类不预置这些属性,旧实现全程 getattr 防御;
         # 重写后本方法与关闭路径都走直接引用,入口先归一化并清停止标志
         self.h_dir_file = getattr(self, "h_dir_file", None)
         self._dir_watcher_stopped = False
+        self._dir_watch_beat = time.monotonic()
 
         with self.lock_file_ops:
             if self.h_dir_file:
                 return
+
+        health = getattr(self, "_dir_watch_health", None)
+
+        if not health or not health.is_alive():
+            self._dir_watch_health = threading.Thread(
+                target=self.dir_watch_health_thread,
+                daemon=True,
+                name="PYAS.dir_watch_health",
+            )
+            self._dir_watch_health.start()
 
         # 1MB 吃住突发写入,把 overflowed 从「一次截图就可能触发」压回罕见路径
         buffer = ctypes.create_string_buffer(1048576)
@@ -387,6 +437,9 @@ class RealtimeMixin:
                 # 内核说缓冲区溢出、事件已丢失:必须重扫,且这是 WARN 级信号
                 self._schedule_recovery("buffer_lost")
                 continue
+
+            # 事件心跳:看门狗据此判断句柄是否被静默失效
+            self._dir_watch_beat = time.monotonic()
 
             # 后缀过滤配置按「批」读取一次:原先每个文件事件都拿一次全局
             # lock_config,配置写盘持锁时 watcher 停止消费,内核缓冲区一涨满
