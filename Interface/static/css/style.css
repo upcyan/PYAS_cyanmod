@@ -1359,11 +1359,29 @@ body.resizing-active * {
 }
 
 .modal-progress-fill {
+    position: relative;
     height: 100%;
     width: 0%;
     border-radius: var(--radius-pill);
     background-color: var(--accent-color);
     transition: width 0.2s ease;
+    overflow: hidden;
+}
+/* 检测到更新后的下载进度:填充区上一道高光来回扫过;到 100% 或减少动画偏好时停用 */
+.modal-progress-fill::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, var(--accent-hover), transparent);
+    animation: progress-shimmer 1.4s ease-in-out infinite;
+}
+.modal-progress-fill.is-complete::after { content: none; }
+@keyframes progress-shimmer {
+    to { transform: translateX(100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .modal-progress-fill::after { content: none; }
 }
 
 .modal-progress-text {

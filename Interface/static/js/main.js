@@ -2692,6 +2692,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateModalState.lastProgress = payload;
         const fill = document.getElementById('update_progress_fill');
         const text = document.getElementById('update_progress_text');
+        if (fill) fill.classList.remove('is-complete');
         if (payload.percent >= 0) {
             if (fill) fill.style.width = `${payload.percent}%`;
             if (text) text.textContent = `${payload.percent}%`;
@@ -2708,7 +2709,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const status = document.getElementById('update_modal_status');
         if (result && result.success) {
             const fill = document.getElementById('update_progress_fill');
-            if (fill) fill.style.width = '100%';
+            if (fill) { fill.style.width = '100%'; fill.classList.add('is-complete'); }
             const progressText = document.getElementById('update_progress_text');
             if (progressText) progressText.textContent = '100%';
             setModalElement('update_modal_progress', false);
