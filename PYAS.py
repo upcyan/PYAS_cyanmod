@@ -710,15 +710,9 @@ class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin, AIMixin, Age
 
         self.cloud_cancel_event.set()
 
-        with self.lock_file_ops:
-            if getattr(self, "h_dir_file", None):
-                try:
-                    self.kernel32.CloseHandle(self.h_dir_file)
-                except Exception:
-                    log_exception("PYAS._MainMixin.close:380")
-                    pass
-
-                self.h_dir_file = None
+        # 先 CancelIoEx 中止挂起读再关句柄(见 stop_dir_watcher 注释)
+        if hasattr(self, "stop_dir_watcher"):
+            self.stop_dir_watcher()
 
             if hasattr(self, "virus_lock"):
                 for file_path, (fd, lock_size) in list(self.virus_lock.items()):

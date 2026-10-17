@@ -275,105 +275,140 @@ class RealtimeMixin:
 
         return None
 
+    def stop_dir_watcher(self):
+        """停掉目录监视:同步 ReadDirectoryChangesW 挂起期间直接 CloseHandle
+        会让读永久挂起(线程卡在内核等待、句柄失效后事件永久丢失),必须
+        先 CancelIoEx 中止挂起 I/O 再关句柄。"""
+        with self.lock_file_ops:
+            handle = self.h_dir_file
+            self.h_dir_file = None
+
+        if not handle:
+            return
+
+        cancel = self.kernel32.CancelIoEx
+        cancel.argtypes = [ctypes.wintypes.HANDLE, ctypes.c_void_p]
+        cancel.restype = ctypes.wintypes.BOOL
+        cancel(ctypes.wintypes.HANDLE(handle), None)
+        self.kernel32.CloseHandle(ctypes.wintypes.HANDLE(handle))
+
     def protect_file_thread(self):
         with self.lock_file_ops:
             if getattr(self, "h_dir_file", None):
                 return
 
-        hDir = self.kernel32.CreateFileW(
-            self.path_user, 0x0001, 0x00000007, None, 3, 0x02000000, None
-        )
+        # 1MB 吃住突发写入,把 overflowed 从「一次截图就可能触发」压回罕见路径
+        buffer = ctypes.create_string_buffer(1048576)
+        temp_prefix = os.path.normcase(self.path_temp)
 
-        if not hDir or hDir == -1:
-            return
+        if not temp_prefix.endswith(os.sep):
+            temp_prefix += os.sep
 
-        with self.lock_file_ops:
-            self.h_dir_file = hDir
+        while True:
+            with self.lock_config:
+                if self.closing or not self.pyas_config.get("document_switch", False):
+                    break
 
-        try:
-            # 同步模式(无 OVERLAPPED)允许大缓冲;1MB 吃住突发写入,
-            # 把 overflowed 从「一次截图就可能触发」压回罕见路径
-            buffer = ctypes.create_string_buffer(1048576)
-            temp_prefix = os.path.normcase(self.path_temp)
-
-            if not temp_prefix.endswith(os.sep):
-                temp_prefix += os.sep
-
-            while True:
-                with self.lock_config:
-                    if not self.pyas_config.get("document_switch", False):
-                        break
-
-                try:
-                    bytes_returned = ctypes.wintypes.DWORD()
-                    res = self.kernel32.ReadDirectoryChangesW(
-                        self.h_dir_file,
-                        buffer,
-                        ctypes.sizeof(buffer),
-                        True,
-                        0x0000001F,
-                        ctypes.byref(bytes_returned),
-                        None,
-                        None,
+            # 句柄生命周期归本线程所有:每次循环确保句柄在,失效则重开(自愈)
+            with self.lock_file_ops:
+                if self.h_dir_file is None:
+                    hDir = self.kernel32.CreateFileW(
+                        self.path_user, 0x0001, 0x00000007, None, 3, 0x02000000, None
                     )
 
-                    if not res:
-                        raise OSError(ctypes.get_last_error(), "Directory watcher read failed")
-
-                    if bytes_returned.value == 0:
-                        # 内核说缓冲区溢出、事件已丢失:必须重扫,且这是 WARN 级信号
-                        self._schedule_recovery("buffer_lost")
+                    if not hDir or hDir == -1:
+                        log_exception("PYAS_Realtime.RealtimeMixin.protect_file_thread:open")
+                        self.write_log(
+                            "WARN",
+                            "File Watcher",
+                            detail=f"watch open failed on {self.path_user}",
+                            success=False,
+                        )
+                        time.sleep(5)
                         continue
 
-                    # 后缀过滤配置按「批」读取一次:原先每个文件事件都拿一次全局
-                    # lock_config,配置写盘持锁时 watcher 停止消费,内核缓冲区一涨满
-                    # 就报 buffer overflowed(截图等突发写入最易触发),只能靠重扫兜底
-                    with self.lock_config:
-                        ext_filter = self.pyas_config.get("suffix_switch", True)
-                        suffix = self.pyas_config.get("suffix", [])
+                    self.h_dir_file = hDir
+                    self.write_log(
+                        "INFO",
+                        "File Watcher",
+                        detail=f"watching {self.path_user}",
+                    )
 
-                    for action, raw_filename in iter_file_notifications(
-                        buffer, bytes_returned.value
-                    ):
-                        if raw_filename and action in [1, 3, 5]:
-                            file_path = self.norm_path(
-                                os.path.join(self.path_user, raw_filename), must_exist=True
-                            )
+            bytes_returned = ctypes.wintypes.DWORD()
+            res = self.kernel32.ReadDirectoryChangesW(
+                self.h_dir_file,
+                buffer,
+                ctypes.sizeof(buffer),
+                True,
+                0x0000001F,
+                ctypes.byref(bytes_returned),
+                None,
+                None,
+            )
 
-                            if file_path and not self.is_in_whitelist(file_path):
-                                norm_path = os.path.normcase(file_path)
+            if not res:
+                # 句柄被收走(h_dir_file 已置 None)= 外部停止指令,干净退出;
+                # 否则是句柄真失效:记日志、冷却后自愈重开
+                with self.lock_file_ops:
+                    externally_stopped = self.h_dir_file is None
 
-                                if not (
-                                    norm_path.startswith(temp_prefix)
-                                    and norm_path[len(temp_prefix) :].startswith("_mei")
+                if externally_stopped or self.closing:
+                    break
+
+                with self.lock_config:
+                    enabled = self.pyas_config.get("document_switch", False)
+
+                if not enabled:
+                    break
+
+                log_exception("PYAS_Realtime.RealtimeMixin.protect_file_thread:230")
+                self._schedule_recovery("watcher_error")
+                self.stop_dir_watcher()
+                time.sleep(1)
+                continue
+
+            if bytes_returned.value == 0:
+                # 内核说缓冲区溢出、事件已丢失:必须重扫,且这是 WARN 级信号
+                self._schedule_recovery("buffer_lost")
+                continue
+
+            # 后缀过滤配置按「批」读取一次:原先每个文件事件都拿一次全局
+            # lock_config,配置写盘持锁时 watcher 停止消费,内核缓冲区一涨满
+            # 就报 buffer overflowed(截图等突发写入最易触发),只能靠重扫兜底
+            with self.lock_config:
+                ext_filter = self.pyas_config.get("suffix_switch", True)
+                suffix = self.pyas_config.get("suffix", [])
+
+            try:
+                for action, raw_filename in iter_file_notifications(
+                    buffer, bytes_returned.value
+                ):
+                    if raw_filename and action in [1, 3, 5]:
+                        file_path = self.norm_path(
+                            os.path.join(self.path_user, raw_filename), must_exist=True
+                        )
+
+                        if file_path and not self.is_in_whitelist(file_path):
+                            norm_path = os.path.normcase(file_path)
+
+                            if not (
+                                norm_path.startswith(temp_prefix)
+                                and norm_path[len(temp_prefix) :].startswith("_mei")
+                            ):
+                                if (
+                                    not ext_filter
+                                    or os.path.splitext(file_path)[-1].lower() in suffix
                                 ):
-                                    if (
-                                        not ext_filter
-                                        or os.path.splitext(file_path)[-1].lower() in suffix
-                                    ):
-                                        self._queue_file_scan(file_path)
+                                    self._queue_file_scan(file_path)
+            except ValueError:
+                log_exception("PYAS_Realtime.RealtimeMixin.protect_file_thread:parse")
+                self._schedule_recovery("watcher_error")
 
-                except Exception:
-                    log_exception("PYAS_Realtime.RealtimeMixin.protect_file_thread:230")
-
-                    with self.lock_config:
-                        enabled = self.pyas_config.get("document_switch", False)
-
-                    if not enabled or self.closing:
-                        break
-
-                    self._schedule_recovery("watcher_error")
-                    time.sleep(0.25)
-        finally:
-            with self.lock_file_ops:
-                if getattr(self, "h_dir_file", None):
-                    try:
-                        self.kernel32.CloseHandle(self.h_dir_file)
-                    except Exception:
-                        log_exception("PYAS_Realtime.RealtimeMixin.protect_file_thread:237")
-                        pass
-
-                    self.h_dir_file = None
+        # 退出:读已返回,直接关句柄
+        with self.lock_file_ops:
+            if getattr(self, "h_dir_file", None):
+                self.kernel32.CloseHandle(ctypes.wintypes.HANDLE(self.h_dir_file))
+                self.h_dir_file = None
 
     def _cancel_pending_file_tasks(self, task_name=None, target_path=None):
         scheduler = getattr(self, "file_scheduler", None)

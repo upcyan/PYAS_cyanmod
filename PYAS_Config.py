@@ -148,13 +148,9 @@ class ConfigMixin:
                     return bool(self.manage_autostart(state))
                 elif key == "document_switch" and not state:
                     self._cancel_pending_file_scans()
-
-                    with self.lock_file_ops:
-                        if getattr(self, "h_dir_file", None):
-                            if not self.kernel32.CloseHandle(self.h_dir_file):
-                                raise OSError("Could not close directory watcher")
-
-                            self.h_dir_file = None
+                    # 先 CancelIoEx 再关句柄:同步读挂起期间直接 CloseHandle 会
+                    # 让监视线程永久卡死(句柄失效后事件静默丢失)
+                    self.stop_dir_watcher()
                 elif key == "suspend_switch" and not state:
                     with self.lock_proc:
                         for handle in list(getattr(self, "suspended_procs", ())):
