@@ -1983,13 +1983,14 @@ class DialogMixin(AlertPolicyMixin):
 
         with self.lock_config:
             enabled = bool(self.pyas_config.get("ai_assist_switch", False))
-            base_url = str(self.pyas_config.get("ai_base_url", "")).strip().rstrip("/")
-            model = str(self.pyas_config.get("ai_model", "")).strip()
-            api_key = str(self.pyas_config.get("ai_api_key", "")).strip()
             delay = bool(self.pyas_config.get("ai_delay_switch", True))
             delay_seconds = clamp_ai_delay_seconds(
                 self.pyas_config.get("ai_delay_seconds", AI_DELAY_DEFAULT)
             )
+
+        # 端点与密钥必须走解密通路:落盘的是 DPAPI 密文(ai_api_key_enc),
+        # 明文字段恒为空,直读会以空密钥发请求被服务端 401 拒绝(「AI 建议不可用」)
+        base_url, model, api_key = self._ai_endpoint_config()
 
         if not enabled or not base_url or not model:
             queue.set_ai_state(request, {"state": "unavailable", "verdict": "", "reason": ""})

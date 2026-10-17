@@ -35,6 +35,14 @@ class ConfigApp(DialogMixin):
             **config,
         }
 
+    def _ai_endpoint_config(self):
+        # 与 AIMixin 同语义的简化版:测试密钥仍走明文字段
+        return (
+            str(self.pyas_config.get('ai_base_url', '')).strip().rstrip('/'),
+            str(self.pyas_config.get('ai_model', '')).strip(),
+            str(self.pyas_config.get('ai_api_key', '')).strip(),
+        )
+
 
 class FakeResponse:
     status_code = 200

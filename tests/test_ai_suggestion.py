@@ -22,6 +22,14 @@ class ConfigApp(DialogMixin):
             **config,
         }
 
+    def _ai_endpoint_config(self):
+        # 与 AIMixin 同语义的简化版:测试密钥仍走明文字段
+        return (
+            str(self.pyas_config.get('ai_base_url', '')).strip().rstrip('/'),
+            str(self.pyas_config.get('ai_model', '')).strip(),
+            str(self.pyas_config.get('ai_api_key', '')).strip(),
+        )
+
 
 class ParseVerdictTests(unittest.TestCase):
     def test_plain_and_fenced_json(self):
@@ -90,6 +98,19 @@ class StarterTests(unittest.TestCase):
         mocked.assert_not_called()
         self.assertIsNone(request.ai)
         queue.close()
+
+    def test_starter_reads_key_via_decrypted_endpoint_config(self):
+        """密钥以 DPAPI 密文落盘后明文字段恒空:发起分析必须走 _ai_endpoint_config,
+        直读 ai_api_key 会以空密钥发请求被服务端 401 拒绝(「AI 建议不可用」的根因)。"""
+        app = ConfigApp(ai_assist_switch=True, ai_delay_switch=False)
+        app._ai_endpoint_config = lambda: ('http://ai.local/v1', 'test-model', 'sk-decrypted')
+        captured = {}
+        app._spawn_ai_worker = lambda q, r, b, m, k: captured.update(api_key=k)
+        request = _DecisionRequest('english_switch', 't', 'm', None)
+        app._threat_queue = _ThreatPromptQueue()
+        app._start_ai_suggestion(request)
+        self.assertEqual(captured.get('api_key'), 'sk-decrypted')
+        app._threat_queue.close()
 
     def test_queue_starts_analysis_once_not_for_followers(self):
         starter = Mock()

@@ -136,6 +136,8 @@ class TestSelftestDialog(unittest.TestCase):
         owner = types.SimpleNamespace(
             lock_config=threading.RLock(),
             pyas_config={"ai_assist_switch": False},
+            # 密钥解密通路:配置关时不该被调用,但方法必须存在(与 AIMixin 一致)
+            _ai_endpoint_config=lambda: ("", "", ""),
             _threat_queue=types.SimpleNamespace(
                 set_ai_state=lambda request, state: states.append(state)
             ),
