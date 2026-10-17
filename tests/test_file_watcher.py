@@ -103,6 +103,33 @@ class FileWatcherLifecycleTests(unittest.TestCase):
             f.write("x\n")
         self.assertTrue(self._wait_for("canary_event.py"))
 
+    def test_arms_on_host_class_without_preset_attribute(self):
+        # 回归测试:WindowAPI 宿主类不预置 h_dir_file,线程若直接引用会在
+        # 首轮迭代 AttributeError → worker 无限重启(warning 刷屏)。
+        # 用独立台架(不与 setUp 线程共享状态)保证确定性。
+        class NakedHost(WatcherHarness):
+            def __init__(self, watch_dir):
+                super().__init__(watch_dir)
+                del self.h_dir_file
+
+        harness = NakedHost(self.directory.name)
+        thread = threading.Thread(target=harness.protect_file_thread, daemon=True)
+        thread.start()
+        self.addCleanup(harness.stop_dir_watcher)
+        self.addCleanup(thread.join, 3)
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and not getattr(harness, "h_dir_file", None):
+            time.sleep(0.05)
+        self.assertTrue(getattr(harness, "h_dir_file", None))
+        self.assertTrue(thread.is_alive())
+        probe = os.path.join(self.directory.name, "canary_nopreset.py")
+        with open(probe, "w") as f:
+            f.write("x\n")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and "canary_nopreset.py" not in harness.scanned:
+            time.sleep(0.05)
+        self.assertIn("canary_nopreset.py", harness.scanned)
+
     def test_stop_dir_watcher_wakes_pending_read_and_rearm_recovers(self):
         # 先确认读挂起中(无事件时线程阻塞在 ReadDirectoryChangesW)
         time.sleep(0.3)

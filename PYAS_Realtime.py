@@ -275,12 +275,10 @@ class RealtimeMixin:
 
         return None
 
-    def stop_dir_watcher(self):
-        """停掉目录监视:同步 ReadDirectoryChangesW 挂起期间直接 CloseHandle
-        会让读永久挂起(线程卡在内核等待、句柄失效后事件永久丢失),必须
-        先 CancelIoEx 中止挂起 I/O 再关句柄。"""
+    def _cancel_dir_handle(self):
+        """中止挂起读并关闭当前监视句柄,置 None(不区分停止与自愈)。"""
         with self.lock_file_ops:
-            handle = self.h_dir_file
+            handle = getattr(self, "h_dir_file", None)
             self.h_dir_file = None
 
         if not handle:
@@ -292,9 +290,23 @@ class RealtimeMixin:
         cancel(ctypes.wintypes.HANDLE(handle), None)
         self.kernel32.CloseHandle(ctypes.wintypes.HANDLE(handle))
 
+    def stop_dir_watcher(self):
+        """外部停止目录监视:置停止标志再中止句柄。
+
+        同步 ReadDirectoryChangesW 挂起期间直接 CloseHandle 会让读永久挂起
+        (线程卡在内核等待、句柄失效后事件永久丢失),必须先 CancelIoEx。
+        停止标志阻止线程的自愈重开把监视重新拉起来。"""
+        self._dir_watcher_stopped = True
+        self._cancel_dir_handle()
+
     def protect_file_thread(self):
+        # WindowAPI 等宿主类不预置这些属性,旧实现全程 getattr 防御;
+        # 重写后本方法与关闭路径都走直接引用,入口先归一化并清停止标志
+        self.h_dir_file = getattr(self, "h_dir_file", None)
+        self._dir_watcher_stopped = False
+
         with self.lock_file_ops:
-            if getattr(self, "h_dir_file", None):
+            if self.h_dir_file:
                 return
 
         # 1MB 吃住突发写入,把 overflowed 从「一次截图就可能触发」压回罕见路径
@@ -306,12 +318,19 @@ class RealtimeMixin:
 
         while True:
             with self.lock_config:
-                if self.closing or not self.pyas_config.get("document_switch", False):
+                if (
+                    self.closing
+                    or self._dir_watcher_stopped
+                    or not self.pyas_config.get("document_switch", False)
+                ):
                     break
 
             # 句柄生命周期归本线程所有:每次循环确保句柄在,失效则重开(自愈)
             with self.lock_file_ops:
                 if self.h_dir_file is None:
+                    if self._dir_watcher_stopped:
+                        break
+
                     hDir = self.kernel32.CreateFileW(
                         self.path_user, 0x0001, 0x00000007, None, 3, 0x02000000, None
                     )
@@ -347,23 +366,20 @@ class RealtimeMixin:
             )
 
             if not res:
-                # 句柄被收走(h_dir_file 已置 None)= 外部停止指令,干净退出;
-                # 否则是句柄真失效:记日志、冷却后自愈重开
-                with self.lock_file_ops:
-                    externally_stopped = self.h_dir_file is None
-
-                if externally_stopped or self.closing:
+                # 995 = ERROR_OPERATION_ABORTED(stop_dir_watcher 的外部停止);
+                # 其余为句柄真失效:记日志、冷却后自愈重开
+                if ctypes.get_last_error() == 995 and self._dir_watcher_stopped:
                     break
 
                 with self.lock_config:
                     enabled = self.pyas_config.get("document_switch", False)
 
-                if not enabled:
+                if not enabled or self.closing:
                     break
 
                 log_exception("PYAS_Realtime.RealtimeMixin.protect_file_thread:230")
                 self._schedule_recovery("watcher_error")
-                self.stop_dir_watcher()
+                self._cancel_dir_handle()
                 time.sleep(1)
                 continue
 
