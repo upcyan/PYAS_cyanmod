@@ -17,7 +17,7 @@ const VISIBLE_ACTIONS = [
     'Deferred Scan Allow', 'Deferred Scan Block', 'Driver Block', 'Driver Identity',
     'Driver Protection', 'Driver Service', 'Driver Unload Authorization',
     'False Positive Reported', 'File Allow', 'File Block', 'File Event Recovery',
-    'File Extract', 'File Lock Deferred', 'Load Engine', 'MBR Repaired',
+    'File Extract', 'File Lock Deferred', 'File Watcher', 'Load Engine', 'MBR Repaired',
     'Memory Boost', 'Modern Context Menu', 'Network Allow', 'Network Block',
     'Popup Blocker', 'Process Allow', 'Process Block', 'Process DLL Allow',
     'Process DLL Block', 'Protection Recovery', 'Scan Completed', 'Scan Engine',
@@ -102,6 +102,13 @@ const HIDDEN_ACTIONS = ['Exception', 'Diagnostic'];
             return row.action;
         };
         assert.equal(find('File Block'), '文件拦截', 'File Block 应译为中文');
+        assert.equal(find('File Watcher'), '文件实时防护', 'File Watcher 应译为中文');
+
+        // 详情句式翻译:后端固定英文模板 + 内嵌路径,应整体渲染成中文
+        const translated = await page.evaluate(() =>
+            window.translateLogDetail('Real-time file protection is monitoring C:\\Users\\Admin'));
+        assert.equal(translated, '文件实时防护已开启，正在监控：C:\\Users\\Admin',
+            'watching 详情应译为中文并保留路径');
         assert.equal(find('Suppression Hit'), '命中抑制规则', 'Suppression Hit 应译为中文');
         assert.equal(find('AI Token Usage'), 'Token 用量', 'AI Token Usage 应译为中文');
         assert.equal(find('Alert Decision Remembered'), '已记住放行决定', 'Alert Decision Remembered 应译为中文');

@@ -163,6 +163,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const getMsg = (key) => (dict[appState.lang] || dict["english_switch"])[key] || key;
 
+    // 日志详情句式翻译:后端固定英文模板(内嵌路径/数字),按当前语言渲染成用户能懂的话;
+    // 当前语言没有句式表时原样返回(其余语言回退英文原文)
+    const translateLogDetail = (text) => {
+        const s = String(text || '');
+        const patterns = (dict[appState.lang] || dict["english_switch"]).log_detail_patterns;
+        if (patterns) {
+            for (const [pattern, template] of patterns) {
+                const m = s.match(pattern);
+                if (m) return template.replace(/\{(\d+)\}/g, (_, i) => m[Number(i)] ?? '');
+            }
+        }
+        return s;
+    };
+    window.translateLogDetail = translateLogDetail;
+
     // 图标按钮的可访问名在下方初始化,这里先占位,保证切语言时能安全调用
     let refreshIconButtonLabels = () => {};
 
@@ -932,7 +947,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (targetId === 'log_export_window' && window.pywebview) {
             window.pywebview.api.get_logs().then(logs => {
-                const logList = logs.reverse().map(log => ({ time_str: `[${log.time_str}]`, level: log.level, action: log.action, source: log.source || '-', id: log.id }));
+                const logList = logs.reverse().map(log => ({ time_str: `[${log.time_str}]`, level: log.level, action: log.action, source: log.source || translateLogDetail(log.detail) || '-', id: log.id }));
                 renderDataGrid('#log_export_window', logList, cols.log, 'id', true);
             });
         }
@@ -1100,7 +1115,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const attrs = lv === 'BLOCK'
                 ? ' data-action="' + escapeHtml(actionRaw) + '" data-pid="' + escapeHtml(String(e.pid ?? '')) + '" data-path="' + escapeHtml(String(e.source || '')) + '"'
                 : '';
-            const sourceText = String(e.source || e.detail || '');
+            const sourceText = String(e.source || translateLogDetail(e.detail) || '');
             const rowText = [e.time_str || '', getMsg(lv) || lv, actionText, sourceText].join('\t');
             const copyText = rowText + (e.detail && e.detail !== sourceText ? '\n' + e.detail : '');
             return '<li class="home-log-item lv-' + escapeHtml(lv) + '" data-copy-text="' + escapeHtml(copyText) + '"' + attrs + '>'
@@ -1133,7 +1148,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const logs = await window.pywebview.api.get_logs();
             if (document.getElementById('log_export_window')?.classList.contains('active')) {
-                const logList = logs.reverse().map(log => ({ time_str: `[${log.time_str}]`, level: log.level, action: log.action, source: log.source || '-', id: log.id }));
+                const logList = logs.reverse().map(log => ({ time_str: `[${log.time_str}]`, level: log.level, action: log.action, source: log.source || translateLogDetail(log.detail) || '-', id: log.id }));
                 renderDataGrid('#log_export_window', logList, cols.log, 'id', true);
             }
         } catch (error) { console.error('Log refresh failed', error); }

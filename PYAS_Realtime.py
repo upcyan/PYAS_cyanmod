@@ -25,14 +25,15 @@ from PYAS_WinAPI import (
 # 全量重扫的三种触发共用一个动作,但含义与级别不同(此前文案硬编码,
 # 队列慢/OS 丢事件/读失败无法区分)。两次全量重扫之间至少间隔 RECOVERY_MIN_INTERVAL,
 # 持续高压下背靠背重扫会把仅有的 4 个扫描 worker 长期占死。
+# 文案面向终端用户(界面经 i18n 的 log_detail_patterns 本地化),固定句式勿随意改写。
 RECOVERY_MIN_INTERVAL = 300
 RECOVERY_REASONS = {
-    "queue_full": ("INFO", "Pending task capacity reached; recovering by rescan"),
-    "buffer_lost": ("WARN", "Directory change buffer overflowed (events lost); recovering by rescan"),
-    "watcher_error": ("WARN", "Watcher read failed; recovering by rescan"),
+    "queue_full": ("INFO", "Too many files changing at once; running a full rescan"),
+    "buffer_lost": ("WARN", "File events were dropped during heavy activity; running a full rescan"),
+    "watcher_error": ("WARN", "File monitoring hit an error; running a full rescan"),
     # 目录监视句柄可能被外部因素静默失效(读永不返回、也无失败信号),
     # 看门狗发现事件心跳长时间静止时兜底重扫,保证防护不缺席
-    "watchdog": ("WARN", "Directory watch silent for too long; recovering by rescan"),
+    "watchdog": ("WARN", "File monitoring stopped responding; running a full rescan"),
 }
 
 # 事件心跳静止多久判定句柄失效(兜底重扫触发)
@@ -333,7 +334,7 @@ class RealtimeMixin:
                 self.write_log(
                     "WARN",
                     "File Watcher",
-                    detail=f"no filesystem events for {int(silent_for)}s; fallback rescan",
+                    detail=f"No file activity for {int(silent_for)}s; rescanning to make sure nothing was missed",
                     success=False,
                 )
                 self._schedule_recovery("watchdog")
@@ -390,7 +391,7 @@ class RealtimeMixin:
                         self.write_log(
                             "WARN",
                             "File Watcher",
-                            detail=f"watch open failed on {self.path_user}",
+                            detail=f"Real-time file protection cannot monitor {self.path_user}; will retry",
                             success=False,
                         )
                         time.sleep(5)
@@ -400,7 +401,7 @@ class RealtimeMixin:
                     self.write_log(
                         "INFO",
                         "File Watcher",
-                        detail=f"watching {self.path_user}",
+                        detail=f"Real-time file protection is monitoring {self.path_user}",
                     )
 
             bytes_returned = ctypes.wintypes.DWORD()
