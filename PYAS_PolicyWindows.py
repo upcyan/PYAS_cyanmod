@@ -261,9 +261,9 @@ BROKER = r'''
 $ErrorActionPreference='Stop'
 
 
-$root=Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'PYAS.Policy'
-$target=Join-Path $root 'Config.json'
-$utf8=New-Object Text.UTF8Encoding($false)
+ $root=Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'PYAS.Policy'
+ $target=Join-Path $root 'Config.json'
+ $utf8=New-Object Text.UTF8Encoding($false)
 $allowed=@(__ALL_KEYS__)
 $bools=@(__BOOL_KEYS__)
 $strings=@(__STRING_KEYS__)
@@ -382,6 +382,36 @@ try{
 }
 '''
 
+HELPER_LOG_SUFFIX = '.helper.log'
+
+
+def helper_log_path(request_path):
+    directory, name = os.path.split(os.fspath(request_path or ''))
+    if os.path.basename(directory) != 'PolicyRequests' or not name.endswith('.request'):
+        return None
+    nonce = name[:-len('.request')]
+    if len(nonce) != 32 or any(ch not in '0123456789abcdef' for ch in nonce):
+        return None
+    return os.path.join(directory, nonce + HELPER_LOG_SUFFIX)
+
+
+def write_helper_log(request_path, text):
+    """Bounded, fixed-format diagnostics; never request payload or secrets."""
+    path = helper_log_path(request_path)
+    if not path: return
+    try:
+        with open(path, 'wb') as stream: stream.write(text.encode('utf-8', 'replace')[:4096])
+    except OSError: pass
+
+
+def read_helper_log(request_path, limit=2048):
+    path = helper_log_path(request_path)
+    if not path: return ''
+    try:
+        with open(path, 'rb') as stream: raw = stream.read(limit)
+    except OSError: return ''
+    return ' '.join(raw.decode('utf-8', 'replace').split())
+
 
 def _script(request, digest):
     script = BROKER.replace('__REQUEST__', base64.b64encode(request.encode('utf-8')).decode('ascii')).replace('__HEADER_HASH__', digest)
@@ -393,7 +423,7 @@ def _script(request, digest):
     return encoded
 
 
-def _run_broker(request, digest):
+def _run_broker(request, digest, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL):
     directory, env = _environment()
     command = [os.path.join(directory, 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
         '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', _script(request, digest)]
@@ -597,7 +627,7 @@ class WindowsPolicyLease:
 
 
 HELPER_FAILURES = {
-    2: 'invalid or cancelled request', 3: 'broker failed', 4: 'broker timed out',
+    1: 'frozen helper failed before Python initialization', 2: 'invalid or cancelled request', 3: 'broker failed', 4: 'broker timed out',
     5: 'helper did not receive an administrator token',
     11: 'request-owner verification failed', 12: 'PowerShell broker launch failed',
     13: 'helper installation is not trusted', 14: 'request owner is not the installed application',
@@ -615,43 +645,64 @@ HELPER_FAILURES = {
 def helper_failure(code, phase):
     if code & 0xFFFF0000 == 0x10000:
         reason = 'request verification failed (WinError ' + str(code & 0xFFFF) + ')'
-    elif code & 0xFFFF0000 == 0x20000:
-        reason = 'PowerShell launch failed (WinError ' + str(code & 0xFFFF) + ')'
     else:
         reason = HELPER_FAILURES.get(code, 'unexpected process exit')
     return 'Administrator helper exited ' + str(code) + ' ' + phase + ': ' + reason
 
 
 def helper_main(arguments):
+    request = arguments[0] if len(arguments) >= 2 else ''
     if os.name != 'nt' or not getattr(sys, 'frozen', False) or len(arguments) != 2: return 2
-    request, digest = arguments
+def helper_main(arguments):
+    request = arguments[0] if len(arguments) >= 2 else ''
+    if os.name != 'nt' or not getattr(sys, 'frozen', False) or len(arguments) != 2: return 2
+    _, digest = arguments
     if len(digest) != 64 or any(ch not in '0123456789abcdef' for ch in digest): return 2
+    import time as _time
+    started = _time.time()
+    code = 11; phase = 'exited before helper initialization'
+    process = None
     try:
-        from PYAS_PolicyNative import verify_request_owner
-        handles = verify_request_owner(request, digest)
+        import PYAS_PolicyNative
+        phase = 'during request verification'
+        handles = PYAS_PolicyNative.verify_request_owner(request, digest)
         try:
-            try: process = _run_broker(request, digest)
-            except OSError as error: return 0x20000 | (getattr(error, 'winerror', 0) or 0)
-            except Exception: return 12
-            try: return process.wait(timeout=150)
+            try: process = _run_broker(request, digest, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            except OSError as error: code = 0x20000 | (getattr(error, 'winerror', 0) or 0); return code
+            except Exception: code = 12; return code
+            phase = 'while waiting for the PowerShell broker'
+            try: code = process.wait(timeout=150)
             except subprocess.TimeoutExpired:
                 process.kill(); process.wait()
-                return 4
+                code = 4; return code
         finally:
             for handle in reversed(handles): _close(handle)
     except OSError as error:
-        return 0x10000 | (getattr(error, 'winerror', 0) or 0)
+        code = 0x10000 | (getattr(error, 'winerror', 0) or 0)
     except PolicyDenied as error:
         # Fixed protocol reasons only: no request values, secrets or arbitrary
         # caller-supplied text is sent over the process-exit diagnostic channel.
         message = str(error)
-        if message == 'Untrusted helper installation': return 13
-        if message == 'Request owner is not this application': return 14
-        if message in ('Request hash mismatch', 'Invalid request identity',
-                       'Invalid request location', 'Invalid request owner'): return 15
-        if message in ('Request is not owned by the GUI', 'Request file was replaced',
-                       'Request sharing mode is invalid', 'Request is not exclusively writable by the GUI'): return 16
-        if message in ('Local fixed-drive request required', 'Remote policy requests are not supported',
-                       'Reparse-point policy requests are not supported', 'Local request required'): return 17
-        return 11
-    except Exception: return 11
+        if message == 'Untrusted helper installation': code = 13
+        elif message == 'Request owner is not this application': code = 14
+        elif message in ('Request hash mismatch', 'Invalid request identity',
+                       'Invalid request location', 'Invalid request owner'): code = 15
+        elif message in ('Request is not owned by the GUI', 'Request file was replaced',
+                       'Request sharing mode is invalid', 'Request is not exclusively writable by the GUI'): code = 16
+        elif message in ('Local fixed-drive request required', 'Remote policy requests are not supported',
+                       'Reparse-point policy requests are not supported', 'Local request required'): code = 17
+    except Exception:
+        code = 11
+    finally:
+        if process is not None and process.stdout is not None:
+            try:
+                stdout_text = (process.stdout.read() or b'').decode('utf-8', 'replace')[-1200:]
+                stderr_text = (process.stderr.read() or b'').decode('utf-8', 'replace')[-1200:]
+            except Exception:
+                stdout_text = stderr_text = 'log capture failed'
+        else:
+            stdout_text = stderr_text = ''
+        write_helper_log(request, 'exit=' + str(code) + ' phase=' + phase
+                         + ' seconds=' + str(round(_time.time() - started, 1))
+                         + '\nstdout:\n' + stdout_text + '\nstderr:\n' + stderr_text)
+    return code

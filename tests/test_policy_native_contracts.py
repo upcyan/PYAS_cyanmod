@@ -93,9 +93,30 @@ class HelperFailureTests(unittest.TestCase):
         error.winerror = 5
         with patch.object(windows.os, 'name', 'nt'), \
              patch.object(windows.sys, 'frozen', True, create=True), \
-             patch.object(native, 'verify_request_owner', side_effect=error):
+             patch.object(native, 'verify_request_owner', side_effect=error), \
+             patch.object(windows, 'write_helper_log') as record:
             self.assertEqual(windows.helper_main(['request', 'a' * 64]), 0x10005)
+            self.assertEqual(record.call_count, 1)  # the finally-block log covers every failure path
         self.assertIn('WinError 5', windows.helper_failure(0x10005, 'before readiness'))
+
+    def test_policy_denied_reasons_map_to_fixed_exit_codes(self):
+        cases = {'Untrusted helper installation': 13, 'Request owner is not this application': 14,
+                 'Request hash mismatch': 15, 'Invalid request identity': 15,
+                 'Invalid request location': 15, 'Invalid request owner': 15,
+                 'Request is not owned by the GUI': 16, 'Request file was replaced': 16,
+                 'Request sharing mode is invalid': 16,
+                 'Request is not exclusively writable by the GUI': 16,
+                 'Local fixed-drive request required': 17,
+                 'Remote policy requests are not supported': 17,
+                 'Reparse-point policy requests are not supported': 17,
+                 'Local request required': 17}
+        for message, expected in cases.items():
+            with self.subTest(message=message), \
+                 patch.object(windows.os, 'name', 'nt'), \
+                 patch.object(windows.sys, 'frozen', True, create=True), \
+                 patch.object(native, 'verify_request_owner', side_effect=PolicyDenied(message)), \
+                 patch.object(windows, 'write_helper_log'):
+                self.assertEqual(windows.helper_main(['request', 'a' * 64]), expected, message)
 
     def test_helper_preserves_broker_exit_stage_and_releases_pinned_handles(self):
         process = Mock()
