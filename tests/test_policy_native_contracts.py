@@ -75,4 +75,39 @@ class WindowsParserTests(unittest.TestCase):
           '-EncodedCommand',base64.b64encode(parser.encode('utf-16-le')).decode()],env=env,capture_output=True,text=True,timeout=20)
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
 
+class HelperFailureTests(unittest.TestCase):
+    def test_helper_preserves_verification_and_broker_launch_stages(self):
+        for failing_stage, expected in (('verify', 11), ('launch', 0x20000)):
+            with self.subTest(stage=failing_stage), patch.object(windows.os, 'name', 'nt'), \
+                 patch.object(windows.sys, 'frozen', True, create=True), \
+                 patch.object(native, 'verify_request_owner',
+                     side_effect=PolicyDenied('request rejected') if failing_stage == 'verify' else None,
+                     return_value=[123]), \
+                 patch.object(windows, '_run_broker', side_effect=OSError('launch failed')), \
+                 patch.object(windows, '_close') as close:
+                self.assertEqual(windows.helper_main(['request', 'a' * 64]), expected)
+                self.assertEqual(close.call_count, int(failing_stage == 'launch'))
+
+    def test_native_verification_winerror_is_preserved(self):
+        error = OSError('access denied')
+        error.winerror = 5
+        with patch.object(windows.os, 'name', 'nt'), \
+             patch.object(windows.sys, 'frozen', True, create=True), \
+             patch.object(native, 'verify_request_owner', side_effect=error):
+            self.assertEqual(windows.helper_main(['request', 'a' * 64]), 0x10005)
+        self.assertIn('WinError 5', windows.helper_failure(0x10005, 'before readiness'))
+
+    def test_helper_preserves_broker_exit_stage_and_releases_pinned_handles(self):
+        process = Mock()
+        process.wait.return_value = 45
+        with patch.object(windows.os, 'name', 'nt'), \
+             patch.object(windows.sys, 'frozen', True, create=True), \
+             patch.object(native, 'verify_request_owner', return_value=[123, 456]), \
+             patch.object(windows, '_run_broker', return_value=process), \
+             patch.object(windows, '_close') as close:
+            self.assertEqual(windows.helper_main(['request', 'a' * 64]), 45)
+            self.assertEqual([c.args[0] for c in close.call_args_list], [456, 123])
+        self.assertIn('receipt creation', windows.helper_failure(45, 'before readiness'))
+        self.assertIn('exited 45', windows.helper_failure(45, 'before readiness'))
+
 if __name__=='__main__':unittest.main()

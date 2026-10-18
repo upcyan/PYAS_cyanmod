@@ -599,7 +599,11 @@ class WindowsPolicyLease:
 HELPER_FAILURES = {
     2: 'invalid or cancelled request', 3: 'broker failed', 4: 'broker timed out',
     5: 'helper did not receive an administrator token',
-    11: 'request-owner or installation verification failed', 12: 'PowerShell broker launch failed',
+    11: 'request-owner verification failed', 12: 'PowerShell broker launch failed',
+    13: 'helper installation is not trusted', 14: 'request owner is not the installed application',
+    15: 'request header identity or hash does not match',
+    16: 'request handle, file identity or sharing mode does not match',
+    17: 'request is not on a local fixed-drive path',
     40: 'request header validation failed', 41: 'request identity or scope validation failed',
     42: 'policy writer lock failed', 43: 'protected policy directory setup failed',
     44: 'existing policy validation or revision check failed', 45: 'authorization receipt creation failed',
@@ -609,7 +613,13 @@ HELPER_FAILURES = {
 
 
 def helper_failure(code, phase):
-    return 'Administrator helper exited ' + str(code) + ' ' + phase + ': ' + HELPER_FAILURES.get(code, 'unexpected process exit')
+    if code & 0xFFFF0000 == 0x10000:
+        reason = 'request verification failed (WinError ' + str(code & 0xFFFF) + ')'
+    elif code & 0xFFFF0000 == 0x20000:
+        reason = 'PowerShell launch failed (WinError ' + str(code & 0xFFFF) + ')'
+    else:
+        reason = HELPER_FAILURES.get(code, 'unexpected process exit')
+    return 'Administrator helper exited ' + str(code) + ' ' + phase + ': ' + reason
 
 
 def helper_main(arguments):
@@ -621,6 +631,7 @@ def helper_main(arguments):
         handles = verify_request_owner(request, digest)
         try:
             try: process = _run_broker(request, digest)
+            except OSError as error: return 0x20000 | (getattr(error, 'winerror', 0) or 0)
             except Exception: return 12
             try: return process.wait(timeout=150)
             except subprocess.TimeoutExpired:
@@ -628,4 +639,19 @@ def helper_main(arguments):
                 return 4
         finally:
             for handle in reversed(handles): _close(handle)
+    except OSError as error:
+        return 0x10000 | (getattr(error, 'winerror', 0) or 0)
+    except PolicyDenied as error:
+        # Fixed protocol reasons only: no request values, secrets or arbitrary
+        # caller-supplied text is sent over the process-exit diagnostic channel.
+        message = str(error)
+        if message == 'Untrusted helper installation': return 13
+        if message == 'Request owner is not this application': return 14
+        if message in ('Request hash mismatch', 'Invalid request identity',
+                       'Invalid request location', 'Invalid request owner'): return 15
+        if message in ('Request is not owned by the GUI', 'Request file was replaced',
+                       'Request sharing mode is invalid', 'Request is not exclusively writable by the GUI'): return 16
+        if message in ('Local fixed-drive request required', 'Remote policy requests are not supported',
+                       'Reparse-point policy requests are not supported', 'Local request required'): return 17
+        return 11
     except Exception: return 11

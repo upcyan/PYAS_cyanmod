@@ -143,4 +143,36 @@ class PolicyAccessTests(unittest.TestCase):
         finally: worker.join(2)
         self.assertEqual(errors, [])
 
+    def test_authorization_failure_is_returned_with_actual_detail(self):
+        from PYAS_Policy import PolicyDenied
+        self.backend.authorize = Mock(side_effect=PolicyDenied('Administrator helper exited 11: request verification failed'))
+        result = self.owner.initialize_security_policy()
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['state'], 'not_initialized')
+        self.assertIn('exited 11', result['detail'])
+        self.assertFalse(result['cancelled'])
+
+    def test_cancelled_uac_is_not_presented_as_commit_failure(self):
+        from PYAS_Policy import PolicyCancelled
+        self.backend.authorize = Mock(side_effect=PolicyCancelled('Administrator authorization was cancelled'))
+        result = self.owner.initialize_security_policy()
+        self.assertFalse(result['ok'])
+        self.assertTrue(result['cancelled'])
+        self.assertEqual(result['state'], 'not_initialized')
+
+    def test_commit_failure_returns_detail_and_does_not_start_protection(self):
+        from PYAS_Policy import PolicyDenied
+        original = self.backend.authorize
+        def authorize(*args):
+            lease = original(*args)
+            lease.commit = Mock(side_effect=PolicyDenied('Administrator helper exited 49: atomic replacement failed'))
+            return lease
+        self.backend.authorize = authorize
+        result = self.owner.initialize_security_policy()
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['state'], 'commit_failed')
+        self.assertIn('exited 49', result['detail'])
+        self.assertEqual(self.owner.effects, [])
+        self.assertFalse(self.owner.pyas_config['process_switch'])
+
 if __name__ == '__main__': unittest.main()

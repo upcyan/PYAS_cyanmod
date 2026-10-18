@@ -32,8 +32,16 @@ const fs = require('node:fs'), path = require('node:path'), http = require('node
     initialize_security_policy:async(legacy,digest)=>{
       window.p.writes.push({legacy,digest});
       if(window.p.mode==='hang'){window.p.status={state:'authorizing',initialized:false};return new Promise(resolve=>window.p.initHold=resolve);}
+      if(window.p.mode==='failure'){
+       window.p.status={state:'not_initialized',initialized:false,error:'Administrator helper exited 11: request-owner verification failed'};
+       return {ok:false,state:'not_initialized',detail:window.p.status.error};
+      }
+      if(window.p.mode==='unknown'){
+       window.p.status={state:'commit_unknown',initialized:false,error:'Commit result is unknown'};
+       return {ok:false,state:'commit_unknown',detail:window.p.status.error};
+      }
       if(window.p.mode==='accept'){window.p.status={state:'restart_required',initialized:true};return {ok:true,restart_required:true};}
-      window.p.status={state:'not_initialized',initialized:false,error:'cancelled'};return {ok:false};
+      window.p.status={state:'not_initialized',initialized:false,error:'cancelled'};return {ok:false,cancelled:true};
     },
     show_alert:async()=>true, get_context_menu_status:async()=>({mode:'disabled'}),
    }};
@@ -111,6 +119,27 @@ const fs = require('node:fs'), path = require('node:path'), http = require('node
    await page.waitForFunction(()=>!document.getElementById('policy_initialize_btn').disabled);
    assert.equal(await processToggle.isChecked(),false);
   });
+  await check('helper failure keeps its exit stage visible instead of calling it cancellation',async()=>{
+   await page.evaluate(()=>{window.p.mode='failure';});
+   await review();await page.locator('#policy_review_confirm').check();await page.locator('#policy_review_approve').click();
+   await page.waitForFunction(()=>document.getElementById('policy_status_text').textContent.includes('exited 11'));
+   assert.doesNotMatch(await page.locator('#policy_status_text').textContent(), /已取消|cancelled/i);
+   await page.evaluate(()=>window.dispatchEvent(new Event('pyas-policy-refresh')));
+   await page.waitForFunction(()=>!document.getElementById('policy_initialize_btn').disabled);
+   assert.match(await page.locator('#policy_status_text').textContent(), /exited 11/);
+  });
+  await check('unknown commit hides write actions and never retries',async()=>{
+   await page.evaluate(()=>{window.p.mode='unknown';});
+   await review();await page.locator('#policy_review_confirm').check();await page.locator('#policy_review_approve').click();
+   await page.waitForFunction(()=>document.getElementById('policy_status_text').textContent.includes('尚无法确认'));
+   assert.equal(await page.locator('#policy_initialize_btn').isVisible(), false);
+   assert.doesNotMatch(await page.locator('#policy_status_text').textContent(), /已取消/);
+   const writes=await page.evaluate(()=>window.p.writes.length);
+   await page.evaluate(()=>{for(let i=0;i<3;i++)window.dispatchEvent(new Event('pyas-policy-refresh'));});
+   assert.equal(await page.evaluate(()=>window.p.writes.length), writes);
+   await page.evaluate(()=>{window.p.status={state:'not_initialized',initialized:false};window.dispatchEvent(new Event('pyas-policy-refresh'));});
+   await page.locator('#policy_initialize_btn').waitFor({state:'visible'});
+  });
   await check('successful commit requests restart without claiming active protection',async()=>{
    await page.evaluate(()=>{window.p.mode='accept';});
    await review();await page.locator('#policy_review_confirm').check();await page.locator('#policy_review_approve').click();
@@ -118,7 +147,7 @@ const fs = require('node:fs'), path = require('node:path'), http = require('node
    assert.equal(await processToggle.isChecked(),false);
    assert.equal(await processToggle.isDisabled(),true);
    assert.equal(await page.locator('#policy_initialize_btn').isVisible(),false);
-   assert.equal(await page.evaluate(()=>window.p.writes.length),3);
+   assert.equal(await page.evaluate(()=>window.p.writes.length),5);
   });
   await check('status polling is single-flight and stale page responses are discarded',async()=>{
    await page.evaluate(()=>{window.p.statusMode='hang';window.dispatchEvent(new Event('pyas-policy-refresh'));});
