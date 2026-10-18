@@ -18,7 +18,7 @@ from uuid import uuid4
 from PYAS_DataPaths import policy_data_dir, user_data_dir, legacy_config_path
 from PYAS_FileTrust import locked_read, system_directory
 from PYAS_Policy import (POLICY_KEYS, BOOL_KEYS, STRING_KEYS, NUMBER_KEYS, LIST_KEYS,
-                         FORMAT, MAX_BYTES, PolicyDenied, PolicyPending, bounded_json)
+                         FORMAT, MAX_BYTES, PolicyDenied, PolicyCancelled, PolicyPending, bounded_json)
 
 PAYLOAD_OFFSET = 65536
 ADMIN_SIDS = {'S-1-5-18', 'S-1-5-32-544'}
@@ -269,7 +269,7 @@ $bools=@(__BOOL_KEYS__)
 $strings=@(__STRING_KEYS__)
 $numbers=@(__NUMBER_KEYS__)
 $lists=@(__LIST_KEYS__)
-$nonce='';$ack='';$ackCreated=$false;$held=$false;$reader=$null;$mutex=$null
+$nonce='';$ack='';$ackCreated=$false;$held=$false;$reader=$null;$mutex=$null;$stage=40
 function Secure($path,$directory) {
  if( -not  (Test-Path -LiteralPath $path)){return $false}
  if(([IO.File]::GetAttributes($path) -band  [IO.FileAttributes]::ReparsePoint) -ne  0){return $false}
@@ -319,11 +319,12 @@ try{
  $bytes=$binary.ReadBytes($length);if((Hash $bytes) -cne  '__HEADER_HASH__'){throw 'header mismatch'}
  $h=$utf8.GetString($bytes)|ConvertFrom-Json
  if($h.protocol -ne  1 -or  $h.nonce-notmatch '^[a-f0-9]{32}$'){throw 'protocol'}
- $nonce=$h.nonce
+ $stage=41;$nonce=$h.nonce
  foreach($key in $h.scope){if($key  -cnotin  $allowed){throw 'scope'}}
  $reader.Position=65536;if($binary.ReadInt32() -eq  1){exit 2}
- $mutex=[Threading.Mutex]::new($false,'GlobalPYAS.Policy.Writer.v1')
+ $stage=42;$mutex=[Threading.Mutex]::new($false,'GlobalPYAS.Policy.Writer.v1')
  try{$held=$mutex.WaitOne(10000)}catch [Threading.AbandonedMutexException]{$held=$true};if( -not  $held){throw 'policy writer busy'}
+ $stage=43
  for($attempt=0;$attempt -lt  3;$attempt++){
   if(Test-Path -LiteralPath $root){
    if(Secure $root $true){break}
@@ -333,14 +334,14 @@ try{
   if(Secure $root $true){break}
  }
  if( -not (Secure $root $true)){throw 'untrusted directory'}
- $current=$null;$invalid=$false
+ $stage=44;$current=$null;$invalid=$false
  try{$current=Read-Policy}catch{if( -not $h.initialize){throw};$invalid=$true}
  $revision=if($current){$current.revision}else{$null}
  if($revision -cne  $h.revision){throw 'policy conflict'}
  if( -not  $current  -and   -not  $h.initialize){throw 'policy not initialized'}
- $ack=Join-Path $root ('.auth-'+$nonce+'.json')
+ $stage=45;$ack=Join-Path $root ('.auth-'+$nonce+'.json')
  Write-New $ack @{stage='ready';nonce=$nonce;revision=$revision};$ackCreated=$true
- $end=[DateTime]::UtcNow.AddSeconds(120);$payload=$null
+ $stage=46;$end=[DateTime]::UtcNow.AddSeconds(120);$payload=$null
  while([DateTime]::UtcNow -lt  $end){
   $reader.Position=65536;$n=$binary.ReadInt32()
   if($n -eq  1){exit 2}
@@ -352,7 +353,7 @@ try{
  }
  if( -not  $payload){throw 'authorization expired'}
  if($payload.nonce -cne  $nonce){throw 'nonce'}
- $latest=$null
+ $stage=47;$latest=$null
  try{$latest=Read-Policy}catch{if( -not $h.initialize){throw}}
  $latestRevision=if($latest){$latest.revision}else{$null}
  if($latestRevision -cne  $h.revision){throw 'policy conflict'}
@@ -367,13 +368,14 @@ try{
   if($key -ceq  'ai_api_key' -and  $v){throw 'unencrypted credential'}
   $values[$key]=$v
  }
- $values['_format']='pyas-admin-policy-v1';$values['_revision']=[Guid]::NewGuid().ToString('N');$values['_request']=$nonce
+ $stage=48;$values['_format']='pyas-admin-policy-v1';$values['_revision']=[Guid]::NewGuid().ToString('N');$values['_request']=$nonce
  $temporary=Join-Path $root ('.config-'+$nonce+'.tmp')
  Write-New $temporary $values
  if((Test-Path -LiteralPath $target) -and ( -not $latest)){[IO.File]::Move($target,(Join-Path $root ('.untrusted-config-'+$nonce+'.json')))}
+ $stage=49
  if(Test-Path -LiteralPath $target){[IO.File]::Replace($temporary,$target,$null)}else{[IO.File]::Move($temporary,$target)}
  exit 0
-}catch{exit 3}finally{
+}catch{exit $stage}finally{
  if($reader){$reader.Dispose()}
  if($ackCreated -and  $ack){try{[IO.File]::Delete($ack)}catch{}}
  if($held){$mutex.ReleaseMutex()};if($mutex){$mutex.Dispose()}
@@ -524,14 +526,19 @@ class WindowsPolicyLease:
         ack = os.path.join(self.backend.root, '.auth-' + self.nonce + '.json')
         while time.monotonic() < deadline:
             if self.closed or getattr(self.backend.owner, 'closing', False): raise PolicyDenied('Authorization cancelled')
-            if self.launch_done.is_set() and self.launch_error: raise PolicyDenied(str(self.launch_error))
+            if self.launch_done.is_set() and self.launch_error:
+                if getattr(self.launch_error, 'winerror', None) == 1223:
+                    raise PolicyCancelled('Administrator authorization was cancelled')
+                raise PolicyDenied('Cannot launch administrator helper: ' + str(self.launch_error))
             if secure_path(self.backend.root, True) and secure_path(ack):
                 try:
                     with locked_read(ack) as stream: value = json.loads(stream.read(65536).decode('utf-8'))
                     if value.get('nonce') == self.nonce and value.get('stage') == 'ready':
                         self.authorized = True; return
                 except (OSError, ValueError): pass
-            if self._poll() is not None: raise PolicyDenied('Administrator authorization was declined or failed')
+            code = self._poll()
+            if code is not None:
+                raise PolicyDenied(helper_failure(code, 'before authorization readiness'))
             self.backend.pause()
         raise PolicyDenied('Administrator authorization timed out')
 
@@ -565,7 +572,7 @@ class WindowsPolicyLease:
             if code is not None:
                 document = self.backend.read_policy()
                 if code != 0 and (not document or document.get('_request') != self.nonce):
-                    raise PolicyDenied('Policy commit was rejected or conflicted')
+                    raise PolicyDenied(helper_failure(code, 'during policy commit'))
                 if not document or document.get('_request') != self.nonce: raise PolicyDenied('Policy commit could not be confirmed')
                 self.committed = True
                 return document
@@ -589,6 +596,22 @@ class WindowsPolicyLease:
             except OSError: pass
 
 
+HELPER_FAILURES = {
+    2: 'invalid or cancelled request', 3: 'broker failed', 4: 'broker timed out',
+    5: 'helper did not receive an administrator token',
+    11: 'request-owner or installation verification failed', 12: 'PowerShell broker launch failed',
+    40: 'request header validation failed', 41: 'request identity or scope validation failed',
+    42: 'policy writer lock failed', 43: 'protected policy directory setup failed',
+    44: 'existing policy validation or revision check failed', 45: 'authorization receipt creation failed',
+    46: 'authorized payload wait or validation failed', 47: 'update scope or revision validation failed',
+    48: 'policy serialization or temporary file write failed', 49: 'atomic policy replacement failed',
+}
+
+
+def helper_failure(code, phase):
+    return 'Administrator helper exited ' + str(code) + ' ' + phase + ': ' + HELPER_FAILURES.get(code, 'unexpected process exit')
+
+
 def helper_main(arguments):
     if os.name != 'nt' or not getattr(sys, 'frozen', False) or len(arguments) != 2: return 2
     request, digest = arguments
@@ -597,11 +620,12 @@ def helper_main(arguments):
         from PYAS_PolicyNative import verify_request_owner
         handles = verify_request_owner(request, digest)
         try:
-            process = _run_broker(request, digest)
+            try: process = _run_broker(request, digest)
+            except Exception: return 12
             try: return process.wait(timeout=150)
             except subprocess.TimeoutExpired:
                 process.kill(); process.wait()
                 return 4
         finally:
             for handle in reversed(handles): _close(handle)
-    except Exception: return 3
+    except Exception: return 11

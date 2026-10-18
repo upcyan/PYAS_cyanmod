@@ -65,6 +65,20 @@ const fs = require('node:fs'), path = require('node:path'), http = require('node
   });
   await check('review requires explicit confirmation and cancel sends no write',async()=>{
    await review();assert.equal(await page.locator('#policy_review_approve').isDisabled(),true);
+   const approve = page.locator('#policy_review_approve');
+   const disabledStyle = await approve.evaluate(el => ({opacity: getComputedStyle(el).opacity,
+     cursor: getComputedStyle(el).cursor}));
+   assert.ok(Number(disabledStyle.opacity) < 1, 'unchecked approval must look greyed out');
+   assert.equal(disabledStyle.cursor, 'not-allowed');
+   await approve.evaluate(el => el.click());
+   assert.equal(await page.locator('#policy_review_dialog').isVisible(), true);
+   assert.equal(await page.evaluate(()=>window.p.writes.length), 0);
+   await page.locator('#policy_review_confirm').check();
+   assert.equal(await approve.isEnabled(), true);
+   assert.equal(await approve.evaluate(el => getComputedStyle(el).opacity), '1');
+   await page.locator('#policy_review_confirm').uncheck();
+   assert.equal(await approve.isDisabled(), true);
+   assert.ok(Number(await approve.evaluate(el => getComputedStyle(el).opacity)) < 1);
    assert.match(await page.locator('#policy_review_values').textContent(),/redacted/);
    await page.locator('#policy_review_cancel').click();
    assert.equal(await page.evaluate(()=>window.p.writes.length),0);

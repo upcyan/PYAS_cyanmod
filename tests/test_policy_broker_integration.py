@@ -45,8 +45,8 @@ class BrokerIntegrationTests(unittest.TestCase):
             text = text.replace(fixed, "$root='" + str(self.root).replace("'", "''") + "'")
             # Until the production diagnostic channel exists, expose the original
             # swallowed exception to this test only; do not alter broker behavior.
-            text = text.replace('}catch{exit 3}finally{',
-                '}catch{[Console]::Error.WriteLine($_.Exception.ToString());exit 3}finally{')
+            text = text.replace('}catch{exit $stage}finally{',
+                '}catch{[Console]::Error.WriteLine($_.Exception.ToString());exit $stage}finally{')
             return base64.b64encode(text.encode('utf-16-le')).decode('ascii')
         def captured_popen(*args, **kwargs):
             kwargs['stdout'] = subprocess.PIPE
@@ -75,6 +75,32 @@ class BrokerIntegrationTests(unittest.TestCase):
                     outputs.append((process.returncode, out.decode('utf-8', 'replace'),
                                     err.decode('utf-8', 'replace')))
             self.fail(str(error) + '\nBroker outputs: ' + repr(outputs))
+
+    def test_frozen_helper_round_trip_from_protected_installation(self):
+        import shutil
+        import uuid
+        repo = Path(__file__).resolve().parents[1]
+        built = subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean',
+            '--onefile', '--name', 'PolicyProbe', '--distpath', str(self.directory / 'dist'),
+            '--workpath', str(self.directory / 'build'), '--specpath', str(self.directory),
+            '--paths', str(repo), str(repo / 'tests' / 'policy_frozen_probe.py')],
+            cwd=repo, capture_output=True, timeout=180)
+        self.assertEqual(built.returncode, 0, built.stderr.decode('utf-8', 'replace')[-6000:])
+        # Match the user's protected installed onefile executable, rather than a
+        # source-mode test that bypasses helper_main or installation verification.
+        installed = Path(os.environ['ProgramFiles']) / ('PYAS Policy Probe ' + uuid.uuid4().hex)
+        installed.mkdir()
+        try:
+            executable = installed / 'PolicyProbe.exe'
+            shutil.copyfile(self.directory / 'dist' / 'PolicyProbe.exe', executable)
+            env = dict(os.environ, PYAS_TEST_POLICY_ROOT=str(self.root),
+                       PYINSTALLER_RESET_ENVIRONMENT='1')
+            result = subprocess.run([str(executable)], env=env, capture_output=True, timeout=150)
+            self.assertEqual(result.returncode, 0,
+                             result.stdout.decode('utf-8', 'replace') + result.stderr.decode('utf-8', 'replace'))
+            self.assertIn(b'FROZEN_POLICY_COMMIT_OK', result.stdout)
+        finally:
+            shutil.rmtree(installed)
 
     def test_authorize_commit_and_confirm_real_policy(self):
         self.start()

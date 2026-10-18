@@ -6,19 +6,19 @@ document.addEventListener('DOMContentLoaded', () => {
             failed: 'Policy authorization or saving failed. No automatic retry was sent.', unknown: 'The commit result is unknown. Restart and check the policy before making more changes.',
             defaults: 'Review default policy', legacy: 'Review old settings', review: 'Review all security settings before saving.',
             warning: 'Old settings were user-writable and are not automatically trusted.', confirm: 'I have reviewed these settings', approve: 'Authorize and save', cancel: 'Cancel',
-            unavailable: 'No valid settings are available to import.', cancelled: 'Authorization was cancelled or could not be confirmed.' },
+            unavailable: 'No valid settings are available to import.', cancelled: 'Administrator authorization was cancelled.' },
         zh: { title: '管理员安全策略', missing: '尚未初始化可信策略。请审核默认设置或旧配置，再由管理员授权保存。',
             pending: '正在等待管理员授权或确认保存结果…', restart: '策略已保存，请重新启动 PYAS 后应用；尚未启动的防护不会显示为已开启。',
             failed: '策略授权或保存失败，未自动重试。', unknown: '保存结果尚无法确认，请重新启动并核对策略后再操作。',
             defaults: '审核默认策略', legacy: '审核旧配置', review: '请逐项核对安全设置后再授权保存。',
             warning: '旧配置曾允许普通用户修改，不会被自动信任。', confirm: '我已审核以上设置', approve: '授权并保存', cancel: '取消',
-            unavailable: '没有可导入的有效配置。', cancelled: '授权已取消，或无法确认保存结果。' },
+            unavailable: '没有可导入的有效配置。', cancelled: '已取消管理员授权，未提交策略。' },
         tw: { title: '管理員安全策略', missing: '尚未初始化可信策略。請審核預設設定或舊配置，再由管理員授權儲存。',
             pending: '正在等待管理員授權或確認儲存結果…', restart: '策略已儲存，請重新啟動 PYAS 後套用；尚未啟動的防護不會顯示為已開啟。',
             failed: '策略授權或儲存失敗，未自動重試。', unknown: '儲存結果尚無法確認，請重新啟動並核對策略後再操作。',
             defaults: '審核預設策略', legacy: '審核舊配置', review: '請逐項核對安全設定後再授權儲存。',
             warning: '舊配置曾允許普通使用者修改，不會被自動信任。', confirm: '我已審核以上設定', approve: '授權並儲存', cancel: '取消',
-            unavailable: '沒有可匯入的有效配置。', cancelled: '授權已取消，或無法確認儲存結果。' },
+            unavailable: '沒有可匯入的有效配置。', cancelled: '已取消管理員授權，未提交策略。' },
     };
     const texts = () => /^zh/i.test(document.documentElement.lang)
         ? (/TW|HK|Hant/i.test(document.documentElement.lang) ? copy.tw : copy.zh) : copy.en;
@@ -65,7 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (notice && !waiting && value.state !== 'restart_required') text = notice;
         if (message.textContent !== text) message.textContent = text;
         defaults.textContent = t.defaults; legacy.textContent = t.legacy;
-        actions.classList.toggle('hidden', value.initialized || waiting);
+        actions.classList.toggle('hidden', value.initialized || waiting || value.state === 'commit_unknown');
         defaults.disabled = legacy.disabled = waiting;
     };
     const refresh = () => {
@@ -91,7 +91,10 @@ document.addEventListener('DOMContentLoaded', () => {
         for (const button of [approve, cancel]) { button.type = 'button'; button.className = 'action-btn modern-btn'; }
         confirm.addEventListener('change', () => { approve.disabled = !confirm.checked; });
         let accepted = false;
-        approve.addEventListener('click', () => { accepted = true; dialog.close(); });
+        approve.addEventListener('click', () => {
+            if (approve.disabled || !confirm.checked) return;
+            accepted = true; dialog.close();
+        });
         cancel.addEventListener('click', () => dialog.close());
         dialog.addEventListener('close', () => { dialog.remove(); resolve(accepted); }, { once: true });
         const row = document.createElement('div'); row.className = 'policy-status-actions'; row.append(cancel, approve);
@@ -113,7 +116,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (view !== epoch || !active) return;
             epoch++; // invalidate status reads captured before this write completed
             if (result?.ok) render({ state: 'restart_required', initialized: true });
-            else notice = texts().cancelled;
+            else {
+                const state = result?.state || status?.state || 'commit_failed';
+                const detail = result?.detail || status?.error || result?.error || '';
+                notice = result?.cancelled ? texts().cancelled : '';
+                render({state, initialized: false, error: String(detail)});
+            }
         } catch (error) {
             if (view === epoch && active) notice = texts().failed;
         } finally { busy = false; if (status) render(status); refresh(); }

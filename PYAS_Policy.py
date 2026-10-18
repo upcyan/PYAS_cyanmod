@@ -27,6 +27,7 @@ FORMAT = 'pyas-admin-policy-v1'
 
 
 class PolicyDenied(RuntimeError): pass
+class PolicyCancelled(PolicyDenied): pass
 class PolicyConflict(PolicyDenied): pass
 class PolicyPending(PolicyDenied): pass
 
@@ -171,7 +172,8 @@ class PolicyStore:
             self.status = {'state': 'applying', 'error': ''}
             return lease
         except Exception as error:
-            self.status = {'state': 'ready' if self.revision else 'not_initialized', 'error': str(error)}
+            self.status = {'state': 'ready' if self.revision else 'not_initialized', 'error': str(error),
+                           'cancelled': isinstance(error, PolicyCancelled)}
             self.operation.release()
             raise
 

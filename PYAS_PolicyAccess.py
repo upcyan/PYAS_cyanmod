@@ -279,5 +279,12 @@ class PolicyAccessMixin:
                 store.status = {'state': 'restart_required', 'error': ''}
                 return {'ok': True, 'restart_required': True}
             return {'ok': False, 'error': 'policy_commit_failed'}
-        return self._policy_call(POLICY_KEYS, initialize,
+        result = self._policy_call(POLICY_KEYS, initialize,
             {'ok': False, 'error': 'administrator_authorization_required'}, 'initialize', initialize=True)
+        if not result.get('ok'):
+            status = store.snapshot()
+            result = {**result, 'state': status['state'], 'detail': status.get('error', ''),
+                      'cancelled': status.get('cancelled', False)}
+            if result['detail'] and result['error'] == 'policy_commit_failed':
+                self._policy_notice(result['detail'])
+        return result
