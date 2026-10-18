@@ -100,7 +100,7 @@ class InstallerLifecycleTests(unittest.TestCase):
         self.assertTrue(self.exited.wait(1))
         self.assertEqual(os.path.basename(captured['file']), 'msiexec.exe')
         self.assertEqual(os.path.basename(os.path.dirname(captured['file'])), 'System32')
-        self.assertIn('"' + str(package) + '"', captured['parameters'])
+        self.assertIn('"' + os.path.realpath(os.path.abspath(str(package))) + '"', captured['parameters'])
 
 class WindowsFileSharingTests(unittest.TestCase):
     @unittest.skipUnless(os.name == 'nt', 'requires real Windows FILE_SHARE_READ semantics')
