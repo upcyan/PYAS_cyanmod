@@ -70,27 +70,31 @@ UNTRUSTED_SIDS = {
     'S-1-5-7',     # ANONYMOUS LOGON
     'S-1-5-32-554',  # Builtin\Pre-Windows 2000 Compatible Access
 }
-WRITE_BITS = 0x40000000 | 0x2 | 0x4 | 0x10 | 0x100 | 0x40000 | 0x80000
+# ACE inherit flags (wSection: AceFlags)
+ACE_OBJECT_INHERIT = 0x01
+ACE_CONTAINER_INHERIT = 0x02
+ACE_INHERIT_ONLY = 0x08      # this ACE does not apply to the object itself
+
+# Access-mask bits that let the holder modify content or the ACL.
+WRITE_BITS = 0x2 | 0x4 | 0x10 | 0x100 | 0x40000 | 0x80000
+
 
 def _ace_allows_write(mask, container):
-    """Map FILE_ALL_ACCESS / generic bits onto the concrete write bits."""
-    if mask & 0x10000000:      # GENERIC_ALL
+    """Map generic bits onto concrete write bits, ignoring read/execute-only."""
+    if mask & 0x10000000:            # GENERIC_ALL
         return True
-    if mask & 0x40000000:      # GENERIC_WRITE
+    if mask & 0x40000000:            # GENERIC_WRITE
         return True
-    if mask & 0x1F01FF == 0x1F01FF:  # concrete FILE_ALL_ACCESS
+    if mask & 0x1F01FF == 0x1F01FF:  # full FILE_ALL_ACCESS
         return True
-    effective = WRITE_BITS
-    if mask & effective:
+    if mask & WRITE_BITS:
         return True
-    # FILE_DELETE_CHILD only matters on containers.
     return bool(container and mask & 0x40)
 
 
 def _dacl_grants_untrusted_write(dacl, container, details):
-    """Any allow-ACE for a broad principal that carries write access disqualifies.
-    Inheritance flags do not matter for that question, so they are ignored, and
-    unrecognised ACE types can only narrow access, so they are skipped."""
+    """Any allow-ACE that applies to this object and grants a broad principal write
+    access disqualifies it. INHERIT_ONLY entries constrain children, not the object."""
     if not dacl:
         details.update(reason='no discretionary ACL', stage='dacl')
         return True
@@ -117,7 +121,12 @@ def _dacl_grants_untrusted_write(dacl, container, details):
                            winerror=ctypes.get_last_error())
             return None
         kind = ctypes.c_ubyte.from_address(ace.value).value
-        if kind != 0:  # ACCESS_ALLOWED_ACE_TYPE only; everything else narrows access
+        if kind != 0:  # ACCESS_ALLOWED_ACE_TYPE only; deny and audit cannot widen access
+            continue
+        flags = ctypes.c_ubyte.from_address(ace.value + 1).value
+        # INHERIT_ONLY: the entry constrains children, not this object. Program Files
+        # carries e.g. "CREATOR OWNER:(OI)(CI)(IO)(F)", which is not a grant here.
+        if flags & ACE_INHERIT_ONLY:
             continue
         mask = ctypes.c_uint32.from_address(ace.value + 4).value
         if not _ace_allows_write(mask, container):
@@ -129,11 +138,10 @@ def _dacl_grants_untrusted_write(dacl, container, details):
             finally: kernel.LocalFree(ctypes.cast(text, ctypes.c_void_p))
         if sid in UNTRUSTED_SIDS:
             details.update(reason='a non-administrator can modify this object', stage='dacl',
-                           writer_sid=sid, access_mask=hex(mask))
+                           writer_sid=sid, access_mask=hex(mask), ace_flags=hex(flags))
             return True
     details['stage'] = 'dacl-clean'
     return False
-
 def secure_path(path, directory=False, installation=False, ancestor=False, details=None):
     """Verify the opened object; trust is decided by the OS, not by our ACE parser."""
     if details is not None:
