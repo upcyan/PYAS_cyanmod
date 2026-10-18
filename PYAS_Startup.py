@@ -16,7 +16,15 @@ def configure_startup_logging():
     return configure_report_logging()
 
 
+def configure_frozen_children():
+    # Every GUI/helper launch is an independent app instance, not a worker that
+    # may reuse the current onefile parent's temporary directory.
+    if getattr(sys, 'frozen', False):
+        os.environ['PYINSTALLER_RESET_ENVIRONMENT'] = '1'
+
+
 def bootstrap_startup():
+    configure_frozen_children()
     log_path = configure_startup_logging()
     logger = logging.getLogger("PYAS.Startup")
 

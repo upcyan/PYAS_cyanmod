@@ -745,7 +745,7 @@ def lint_i18n():
     log("i18n", f"简中文案检查通过({len(zh)} 键)")
 
 BUILD_CONTRACT_PATTERNS = (
-    'test_policy_store.py', 'test_policy_access.py', 'test_policy_native_contracts.py',
+    'test_policy_store.py', 'test_policy_access.py', 'test_policy_native_contracts.py', 'test_bootstrap_launch.py', 'test_launcher_build.py', 'test_i18n_keys.py',
     'test_update_install_guard.py', 'test_signature_trust.py', 'test_ai_cache_scope.py',
 )
 
@@ -774,6 +774,9 @@ def do_build(interactive, channel="dev"):
     ensure_setup_resources()
     build_exe()
     assemble_payload()
+    result = run([sys.executable, str(ROOT / 'build_launcher.py')])
+    if result.returncode != 0:
+        die('独立启动器构建或冻结启动检查失败')
     result = run([sys.executable, str(ROOT / 'build_menu.py')])
     if result.returncode != 0:
         die('新版右键菜单组件构建失败')

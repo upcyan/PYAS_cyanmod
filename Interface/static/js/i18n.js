@@ -1080,6 +1080,17 @@ window.AppI18n = {
             "File Block": "File Block",
             "File Watcher": "Real-time file protection",
             "File Event Recovery": "File protection self-recovery",
+            "log_detail_patterns": [
+                // Not yet localized: explicit English fallback, identical to
+                // the backend text (main.js previously relied on implicit fallback).
+                [/^Real-time file protection is monitoring (.+)$/, "Real-time file protection is monitoring {1}"],
+                [/^Real-time file protection cannot monitor (.+); will retry$/, "Real-time file protection cannot monitor {1}; will retry"],
+                [/^No file activity for (\d+)s; rescanning to make sure nothing was missed$/, "No file activity for {1}s; rescanning to make sure nothing was missed"],
+                [/^Too many files changing at once; running a full rescan$/, "Too many files changing at once; running a full rescan"],
+                [/^File events were dropped during heavy activity; running a full rescan$/, "File events were dropped during heavy activity; running a full rescan"],
+                [/^File monitoring hit an error; running a full rescan$/, "File monitoring hit an error; running a full rescan"],
+                [/^File monitoring stopped responding; running a full rescan$/, "File monitoring stopped responding; running a full rescan"],
+            ],
             "Network Block": "Network Block",
             "Driver Block": "Driver Block",
             "System Restart": "System Restart",
@@ -1612,6 +1623,17 @@ window.AppI18n = {
             "Driver Service": "ドライバーサービス",
             "Driver Unload Authorization": "ドライバー卸除の認可",
             "File Event Recovery": "ファイルイベント復旧",
+            "log_detail_patterns": [
+                // Not yet localized: explicit English fallback, identical to
+                // the backend text (main.js previously relied on implicit fallback).
+                [/^Real-time file protection is monitoring (.+)$/, "Real-time file protection is monitoring {1}"],
+                [/^Real-time file protection cannot monitor (.+); will retry$/, "Real-time file protection cannot monitor {1}; will retry"],
+                [/^No file activity for (\d+)s; rescanning to make sure nothing was missed$/, "No file activity for {1}s; rescanning to make sure nothing was missed"],
+                [/^Too many files changing at once; running a full rescan$/, "Too many files changing at once; running a full rescan"],
+                [/^File events were dropped during heavy activity; running a full rescan$/, "File events were dropped during heavy activity; running a full rescan"],
+                [/^File monitoring hit an error; running a full rescan$/, "File monitoring hit an error; running a full rescan"],
+                [/^File monitoring stopped responding; running a full rescan$/, "File monitoring stopped responding; running a full rescan"],
+            ],
             "File Lock Deferred": "ファイルロック遅延",
             "Memory Boost": "メモリブースト",
             "Popup Blocker": "ポップアップブロック",
@@ -2019,6 +2041,17 @@ window.AppI18n = {
             "Driver Service": "드라이버 서비스",
             "Driver Unload Authorization": "드라이버 언로드 권한",
             "File Event Recovery": "파일 이벤트 복구",
+            "log_detail_patterns": [
+                // Not yet localized: explicit English fallback, identical to
+                // the backend text (main.js previously relied on implicit fallback).
+                [/^Real-time file protection is monitoring (.+)$/, "Real-time file protection is monitoring {1}"],
+                [/^Real-time file protection cannot monitor (.+); will retry$/, "Real-time file protection cannot monitor {1}; will retry"],
+                [/^No file activity for (\d+)s; rescanning to make sure nothing was missed$/, "No file activity for {1}s; rescanning to make sure nothing was missed"],
+                [/^Too many files changing at once; running a full rescan$/, "Too many files changing at once; running a full rescan"],
+                [/^File events were dropped during heavy activity; running a full rescan$/, "File events were dropped during heavy activity; running a full rescan"],
+                [/^File monitoring hit an error; running a full rescan$/, "File monitoring hit an error; running a full rescan"],
+                [/^File monitoring stopped responding; running a full rescan$/, "File monitoring stopped responding; running a full rescan"],
+            ],
             "File Lock Deferred": "파일 잠금 지연",
             "Memory Boost": "메모리 부스트",
             "Popup Blocker": "팝업 차단",
@@ -2426,6 +2459,17 @@ window.AppI18n = {
             "Driver Service": "Service du pilote",
             "Driver Unload Authorization": "Autorisation de déchargement",
             "File Event Recovery": "Récupération des événements",
+            "log_detail_patterns": [
+                // Not yet localized: explicit English fallback, identical to
+                // the backend text (main.js previously relied on implicit fallback).
+                [/^Real-time file protection is monitoring (.+)$/, "Real-time file protection is monitoring {1}"],
+                [/^Real-time file protection cannot monitor (.+); will retry$/, "Real-time file protection cannot monitor {1}; will retry"],
+                [/^No file activity for (\d+)s; rescanning to make sure nothing was missed$/, "No file activity for {1}s; rescanning to make sure nothing was missed"],
+                [/^Too many files changing at once; running a full rescan$/, "Too many files changing at once; running a full rescan"],
+                [/^File events were dropped during heavy activity; running a full rescan$/, "File events were dropped during heavy activity; running a full rescan"],
+                [/^File monitoring hit an error; running a full rescan$/, "File monitoring hit an error; running a full rescan"],
+                [/^File monitoring stopped responding; running a full rescan$/, "File monitoring stopped responding; running a full rescan"],
+            ],
             "File Lock Deferred": "Verrouillage différé",
             "Memory Boost": "Optimisation mémoire",
             "Popup Blocker": "Bloqueur de popups",
@@ -2833,6 +2877,17 @@ window.AppI18n = {
             "Driver Service": "Servicio del controlador",
             "Driver Unload Authorization": "Autorización de descarga",
             "File Event Recovery": "Recuperación de eventos",
+            "log_detail_patterns": [
+                // Not yet localized: explicit English fallback, identical to
+                // the backend text (main.js previously relied on implicit fallback).
+                [/^Real-time file protection is monitoring (.+)$/, "Real-time file protection is monitoring {1}"],
+                [/^Real-time file protection cannot monitor (.+); will retry$/, "Real-time file protection cannot monitor {1}; will retry"],
+                [/^No file activity for (\d+)s; rescanning to make sure nothing was missed$/, "No file activity for {1}s; rescanning to make sure nothing was missed"],
+                [/^Too many files changing at once; running a full rescan$/, "Too many files changing at once; running a full rescan"],
+                [/^File events were dropped during heavy activity; running a full rescan$/, "File events were dropped during heavy activity; running a full rescan"],
+                [/^File monitoring hit an error; running a full rescan$/, "File monitoring hit an error; running a full rescan"],
+                [/^File monitoring stopped responding; running a full rescan$/, "File monitoring stopped responding; running a full rescan"],
+            ],
             "File Lock Deferred": "Bloqueo diferido",
             "Memory Boost": "Optimización de memoria",
             "Popup Blocker": "Bloqueo de ventanas",
@@ -3240,6 +3295,17 @@ window.AppI18n = {
             "Driver Service": "ड्राइवर सेवा",
             "Driver Unload Authorization": "ड्राइवर अनलोड अनुमति",
             "File Event Recovery": "फ़ाइल घटना पुनर्प्राप्ति",
+            "log_detail_patterns": [
+                // Not yet localized: explicit English fallback, identical to
+                // the backend text (main.js previously relied on implicit fallback).
+                [/^Real-time file protection is monitoring (.+)$/, "Real-time file protection is monitoring {1}"],
+                [/^Real-time file protection cannot monitor (.+); will retry$/, "Real-time file protection cannot monitor {1}; will retry"],
+                [/^No file activity for (\d+)s; rescanning to make sure nothing was missed$/, "No file activity for {1}s; rescanning to make sure nothing was missed"],
+                [/^Too many files changing at once; running a full rescan$/, "Too many files changing at once; running a full rescan"],
+                [/^File events were dropped during heavy activity; running a full rescan$/, "File events were dropped during heavy activity; running a full rescan"],
+                [/^File monitoring hit an error; running a full rescan$/, "File monitoring hit an error; running a full rescan"],
+                [/^File monitoring stopped responding; running a full rescan$/, "File monitoring stopped responding; running a full rescan"],
+            ],
             "File Lock Deferred": "फ़ाइल लॉक स्थगित",
             "Memory Boost": "मेमोरी बूस्ट",
             "Popup Blocker": "पॉपअप ब्लॉकर",
@@ -3647,6 +3713,17 @@ window.AppI18n = {
             "Driver Service": "خدمة برنامج التشغيل",
             "Driver Unload Authorization": "تفويض تفريغ برنامج التشغيل",
             "File Event Recovery": "استعادة أحداث الملفات",
+            "log_detail_patterns": [
+                // Not yet localized: explicit English fallback, identical to
+                // the backend text (main.js previously relied on implicit fallback).
+                [/^Real-time file protection is monitoring (.+)$/, "Real-time file protection is monitoring {1}"],
+                [/^Real-time file protection cannot monitor (.+); will retry$/, "Real-time file protection cannot monitor {1}; will retry"],
+                [/^No file activity for (\d+)s; rescanning to make sure nothing was missed$/, "No file activity for {1}s; rescanning to make sure nothing was missed"],
+                [/^Too many files changing at once; running a full rescan$/, "Too many files changing at once; running a full rescan"],
+                [/^File events were dropped during heavy activity; running a full rescan$/, "File events were dropped during heavy activity; running a full rescan"],
+                [/^File monitoring hit an error; running a full rescan$/, "File monitoring hit an error; running a full rescan"],
+                [/^File monitoring stopped responding; running a full rescan$/, "File monitoring stopped responding; running a full rescan"],
+            ],
             "File Lock Deferred": "تأجيل قفل الملف",
             "Memory Boost": "تسريع الذاكرة",
             "Popup Blocker": "مانع النوافذ المنبثقة",
@@ -4054,6 +4131,17 @@ window.AppI18n = {
             "Driver Service": "Служба драйвера",
             "Driver Unload Authorization": "Авторизация выгрузки драйвера",
             "File Event Recovery": "Восстановление событий файлов",
+            "log_detail_patterns": [
+                // Not yet localized: explicit English fallback, identical to
+                // the backend text (main.js previously relied on implicit fallback).
+                [/^Real-time file protection is monitoring (.+)$/, "Real-time file protection is monitoring {1}"],
+                [/^Real-time file protection cannot monitor (.+); will retry$/, "Real-time file protection cannot monitor {1}; will retry"],
+                [/^No file activity for (\d+)s; rescanning to make sure nothing was missed$/, "No file activity for {1}s; rescanning to make sure nothing was missed"],
+                [/^Too many files changing at once; running a full rescan$/, "Too many files changing at once; running a full rescan"],
+                [/^File events were dropped during heavy activity; running a full rescan$/, "File events were dropped during heavy activity; running a full rescan"],
+                [/^File monitoring hit an error; running a full rescan$/, "File monitoring hit an error; running a full rescan"],
+                [/^File monitoring stopped responding; running a full rescan$/, "File monitoring stopped responding; running a full rescan"],
+            ],
             "File Lock Deferred": "Отложенная блокировка файла",
             "Memory Boost": "Ускорение памяти",
             "Popup Blocker": "Блокировщик всплывающих окон",
@@ -4461,6 +4549,17 @@ window.AppI18n = {
             "Driver Service": "Storitev gonilnika",
             "Driver Unload Authorization": "Pooblastitev odstranjevanja",
             "File Event Recovery": "Obnovitev dogodkov datotek",
+            "log_detail_patterns": [
+                // Not yet localized: explicit English fallback, identical to
+                // the backend text (main.js previously relied on implicit fallback).
+                [/^Real-time file protection is monitoring (.+)$/, "Real-time file protection is monitoring {1}"],
+                [/^Real-time file protection cannot monitor (.+); will retry$/, "Real-time file protection cannot monitor {1}; will retry"],
+                [/^No file activity for (\d+)s; rescanning to make sure nothing was missed$/, "No file activity for {1}s; rescanning to make sure nothing was missed"],
+                [/^Too many files changing at once; running a full rescan$/, "Too many files changing at once; running a full rescan"],
+                [/^File events were dropped during heavy activity; running a full rescan$/, "File events were dropped during heavy activity; running a full rescan"],
+                [/^File monitoring hit an error; running a full rescan$/, "File monitoring hit an error; running a full rescan"],
+                [/^File monitoring stopped responding; running a full rescan$/, "File monitoring stopped responding; running a full rescan"],
+            ],
             "File Lock Deferred": "Odloženo zaklepanje",
             "Memory Boost": "Optimizacija pomnilnika",
             "Popup Blocker": "Blokiranje pojavnih oken",

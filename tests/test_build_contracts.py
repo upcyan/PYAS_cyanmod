@@ -30,19 +30,25 @@ class BuildContractTests(unittest.TestCase):
         events=[]
         menu,exe,iscc=self.mocked_build(lambda patterns:events.append(tuple(patterns)))
         exe.side_effect=lambda:events.append('exe')
-        menu.side_effect=lambda *args:events.append('menu') or SimpleNamespace(returncode=0)
+        menu.side_effect=lambda command:events.append('launcher' if command[-1].endswith('build_launcher.py') else 'menu') or SimpleNamespace(returncode=0)
         iscc.side_effect=lambda *args:events.append('installer') or 'installer.exe'
         self.assertEqual(build.do_build(False,'normal'),'installer.exe')
-        self.assertEqual(events,[build.BUILD_CONTRACT_PATTERNS,'exe','menu',('test_menu_certificate.py',),'installer'])
+        self.assertEqual(events,[build.BUILD_CONTRACT_PATTERNS,'exe','launcher','menu',('test_menu_certificate.py',),'installer'])
 
     def test_preflight_failure_cannot_produce_an_executable(self):
         menu,exe,iscc=self.mocked_build(Mock(side_effect=SystemExit(1)))
         with self.assertRaises(SystemExit):build.do_build(False,'normal')
         exe.assert_not_called();menu.assert_not_called();iscc.assert_not_called()
 
+    def test_launcher_or_frozen_probe_failure_cannot_produce_an_installer(self):
+        menu,exe,iscc=self.mocked_build(lambda patterns:None)
+        menu.return_value=SimpleNamespace(returncode=1)
+        with self.assertRaises(SystemExit):build.do_build(False,'normal')
+        exe.assert_called_once();menu.assert_called_once();iscc.assert_not_called()
+
     def test_certificate_failure_cannot_produce_an_installer(self):
         menu,exe,iscc=self.mocked_build(Mock(side_effect=[None,SystemExit(1)]))
         with self.assertRaises(SystemExit):build.do_build(False,'normal')
-        exe.assert_called_once();menu.assert_called_once();iscc.assert_not_called()
+        exe.assert_called_once();self.assertEqual(menu.call_count,2);iscc.assert_not_called()
 
 if __name__=='__main__':unittest.main()

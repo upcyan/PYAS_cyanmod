@@ -48,8 +48,9 @@ def _close(handle):
         function(handle)
 
 
-def secure_path(path, directory=False, installation=False, ancestor=False):
+def secure_path(path, directory=False, installation=False, ancestor=False, details=None):
     """Verify the opened object, not an untrusted filename or inherited owner."""
+    if details is not None: details.update(path=str(path), reason='security descriptor unavailable')
     if os.name != 'nt': return False
     handle = None; descriptor = ctypes.c_void_p()
     try:
@@ -82,7 +83,11 @@ def secure_path(path, directory=False, installation=False, ancestor=False):
             try: return text.value
             finally: kernel.LocalFree(ctypes.cast(text, ctypes.c_void_p))
         trusted = INSTALLER_SIDS if installation else ADMIN_SIDS
-        if sid_text(owner) not in trusted: return False
+        owner_sid = sid_text(owner)
+        if details is not None: details['owner_sid'] = owner_sid
+        if owner_sid not in trusted:
+            if details is not None: details['reason'] = 'owner is not an administrator/system identity'
+            return False
         class AclSize(ctypes.Structure):
             _fields_ = [('count', wt.DWORD), ('used', wt.DWORD), ('free', wt.DWORD)]
         size = AclSize()
@@ -101,7 +106,10 @@ def secure_path(path, directory=False, installation=False, ancestor=False):
             if kind != 0: return False
             mask = ctypes.c_uint32.from_address(ace.value + 4).value
             restricted = 0x500D0040 if ancestor else WRITE_ACCESS
-            if mask & restricted and sid_text(ace.value + 8) not in trusted: return False
+            writer_sid = sid_text(ace.value + 8)
+            if mask & restricted and writer_sid not in trusted:
+                if details is not None: details.update(reason='non-administrator write permission', writer_sid=writer_sid, access_mask=hex(mask))
+                return False
         return True
     except (OSError, ValueError):
         return False
@@ -113,21 +121,31 @@ def secure_path(path, directory=False, installation=False, ancestor=False):
         _close(handle)
 
 
-def installed_helper_trusted():
+def installation_trust_issue():
     from PYAS_DataPaths import known_folder
     try:
         base = os.path.normcase(os.path.realpath(known_folder(0x26)))
         image = os.path.normcase(os.path.realpath(sys.executable))
-        if os.path.commonpath([base, image]) != base: return False
-        if not secure_path(image, installation=True): return False
+        if os.path.commonpath([base, image]) != base:
+            return 'outside protected Program Files: ' + image
+        details = {}
+        if not secure_path(image, installation=True, details=details):
+            return json.dumps(details, ensure_ascii=False)
         parent = os.path.dirname(image)
         while parent:
-            if not secure_path(parent, True, installation=True, ancestor=True): return False
+            details = {}
+            if not secure_path(parent, True, installation=True, ancestor=True, details=details):
+                return json.dumps(details, ensure_ascii=False)
             next_parent = os.path.dirname(parent)
             if next_parent == parent: break
             parent = next_parent
-        return True
-    except (OSError, ValueError): return False
+        return None
+    except (OSError, ValueError) as error:
+        return 'cannot resolve installation security: ' + str(error)
+
+
+def installed_helper_trusted():
+    return installation_trust_issue() is None
 
 
 def _environment():
@@ -396,8 +414,9 @@ class WindowsPolicyLease:
         else:
             if not getattr(sys, 'frozen', False):
                 raise PolicyDenied('Use an installed build, or run the development build as administrator')
-            if not installed_helper_trusted():
-                raise PolicyDenied('The authorization helper must be installed in an administrator-owned directory')
+            issue = installation_trust_issue()
+            if issue:
+                raise PolicyDenied('The authorization helper must be installed in an administrator-owned directory: ' + issue)
             threading.Thread(target=self._elevate, daemon=True, name='PYAS.PolicyAuthorization').start()
         deadline = time.monotonic() + 120
         ack = os.path.join(self.backend.root, '.auth-' + self.nonce + '.json')

@@ -67,6 +67,7 @@ Source: "SetupResources\stop_menu.ps1"; DestDir: "{app}\Menu"; Flags: ignorevers
 Source: "Payload\Engine\*"; DestDir: "{app}\Engine"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "Payload\Interface\*"; DestDir: "{app}\Interface"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "Payload\License\*"; DestDir: "{app}\License"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "Payload\PYAS_Launcher.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Payload\PYAS.exe"; DestDir: "{app}"; Flags: ignoreversion; AfterInstall: FinalizeDriverRemoval
 Source: "Payload\PYAS_Menu.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Payload\Menu\*"; DestDir: "{app}\Menu"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -94,15 +95,15 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: 
 Type: filesandordirs; Name: "{commonappdata}\PYAS"
 
 [Icons]
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
-Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\PYAS_Launcher.exe"; IconFilename: "{app}\{#AppExeName}"; Tasks: desktopicon
+Name: "{group}\{#AppName}"; Filename: "{app}\PYAS_Launcher.exe"; IconFilename: "{app}\{#AppExeName}"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 
 [Run]
 ; 用原始(未提权)用户令牌启动应用:PyInstaller 6.22+ 的 onefile 防篡改校验
 ; 只对提权进程生效,提权 postinstall 启动存在祖先进程退出时序竞态,会弹
 ; "Security validation failure: invalid originating onefile parent process"
-Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent runasoriginaluser; Check: CanLaunchApp
+Filename: "{app}\PYAS_Launcher.exe"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent runasoriginaluser; Check: CanLaunchApp
 
 [CustomMessages]
 english.InstallingVCRuntime=Installing Microsoft Visual C++ Runtime...
@@ -477,8 +478,8 @@ var
   ResultCode: Integer;
   ExePath: string;
 begin
-  ExePath := ExpandConstant('{app}\{#AppExeName}');
-  if not Exec(ExePath, '-driver-uninstall', ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+  ExePath := ExpandConstant('{app}\PYAS_Launcher.exe');
+  if not Exec(ExePath, '--wait -driver-uninstall', ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
     RaiseException(CustomMessage('QuitFailed'));
 end;
 

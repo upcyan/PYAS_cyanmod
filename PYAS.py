@@ -1,5 +1,7 @@
 # The fixed elevated helper must not initialize logging, engines or a WebView.
 import sys as _policy_sys
+if __name__ == '__main__' and len(_policy_sys.argv) == 2 and _policy_sys.argv[1] == '--pyas-bootstrap-probe':
+    raise SystemExit(0)
 if __name__ == '__main__' and len(_policy_sys.argv) > 1 and _policy_sys.argv[1] == '--pyas-policy-helper':
     from PYAS_PolicyWindows import helper_main as _policy_helper_main
     raise SystemExit(_policy_helper_main(_policy_sys.argv[2:]))
