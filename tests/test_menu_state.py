@@ -22,6 +22,9 @@ MenuAPI = type('MenuAPI', (), {name: scope[name] for name in names})
 
 class MenuStateTests(unittest.TestCase):
     def setUp(self):
+        # Native calls are mocked; provide only the missing SDK constant on Linux.
+        sdk = patch.object(subprocess, 'CREATE_NO_WINDOW', 0, create=True)
+        sdk.start(); self.addCleanup(sdk.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)

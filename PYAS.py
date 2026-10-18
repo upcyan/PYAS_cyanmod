@@ -1,3 +1,9 @@
+# The fixed elevated helper must not initialize logging, engines or a WebView.
+import sys as _policy_sys
+if __name__ == '__main__' and len(_policy_sys.argv) > 1 and _policy_sys.argv[1] == '--pyas-policy-helper':
+    from PYAS_PolicyWindows import helper_main as _policy_helper_main
+    raise SystemExit(_policy_helper_main(_policy_sys.argv[2:]))
+
 from PYAS_Diagnostics import log_exception, bind_report_logging
 import os
 import sys
@@ -85,14 +91,16 @@ PYAS_MAINTENANCE_COMMANDS = frozenset(
 
 from PYAS_WinAPI import WindowsMixin
 from PYAS_Config import ConfigMixin
+from PYAS_PolicyAccess import PolicyAccessMixin
 from PYAS_Logs import LogMixin
 from PYAS_Runtime import RuntimeMixin
 from PYAS_AI import AIMixin
 from PYAS_Agents import AgentMonitorMixin
 
 
-class _MainMixin(WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin, AIMixin, AgentMonitorMixin):
+class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin, AIMixin, AgentMonitorMixin):
     def __init__(self):
+        self._policy_required = True
         self._window = None
         self.tray_icon = None
         self.logs_data = []

@@ -1312,14 +1312,7 @@ document.addEventListener('DOMContentLoaded', () => {
         card.click();
     });
     document.getElementById('quick_scan_btn')?.addEventListener('click', () => { if (!appState.scanning) { switchPage('scan_window'); triggerScan('smart'); }});
-    document.getElementById('quick_update_btn')?.addEventListener('click', () => {
-        if (!window.pywebview) return;
-        window.pywebview.api.check_update().then(res => {
-            if (res.error) window.pywebview.api.show_alert(getMsg("title_error"), updateErrorMessage(res), "error");
-            else if (res.has_update || res.upstream?.has_update) openUpdateModal(res);
-            else window.pywebview.api.show_alert(getMsg("title_prompt"), `${getMsg("msg_latest_version")} ${res.current}`, "info");
-        });
-    });
+    document.getElementById('quick_update_btn')?.addEventListener('click', () => checkForUpdates());
     document.getElementById('stop_btn')?.addEventListener('click', async (e) => {
         const stopBtn = e.currentTarget;
         if (!window.pywebview || stopBtn.dataset.stopping === '1') return;
@@ -2558,7 +2551,122 @@ document.addEventListener('DOMContentLoaded', () => {
 
     bindSettingAction('web_official', () => window.pywebview?.api.open_website());
 
-    const updateModalState = { result: null, downloading: false, pageUrl: '' };
+    const updateModalState = { result: null, downloading: false, pageUrl: '', downloadId: null,
+        revision: -1, view: 0, phase: 'idle', percent: 0, installerPath: null, installIntent: null };
+    let updateCheck = 0;
+    let updateChecking = false;
+    let updateDisposed = false;
+    const updateWaits = new Set();
+    const updateText = key => {
+        const text = {
+            simplified_switch: { checking: '正在检查更新…', timeout: '请求响应超时，未自动重试。请确认当前状态。',
+                unavailable: '暂时无法确认下载状态，请稍后重新打开。', verifying: '正在校验安装包…',
+                installing: '安装程序正在运行，请勿重复发起。', unknown: '无法确认安装是否启动，未重复发起。请检查安装程序后重新启动应用。',
+                exited: '安装程序已退出，请重新检查版本。', unknownTotal: '总大小未知', failed: '操作失败，请重试。' },
+            traditional_switch: { checking: '正在檢查更新…', timeout: '請求回應逾時，未自動重試。請確認目前狀態。',
+                unavailable: '暫時無法確認下載狀態，請稍後重新開啟。', verifying: '正在驗證安裝包…',
+                installing: '安裝程式正在執行，請勿重複發起。', unknown: '無法確認安裝是否啟動，未重複發起。請檢查安裝程式後重新啟動應用。',
+                exited: '安裝程式已退出，請重新檢查版本。', unknownTotal: '總大小未知', failed: '操作失敗，請重試。' },
+            english_switch: { checking: 'Checking for updates…', timeout: 'The response timed out. No automatic retry was sent; check the current state.',
+                unavailable: 'Download state is unavailable. Reopen this window to check again.', verifying: 'Verifying the installer…',
+                installing: 'The installer is running. Do not start it again.', unknown: 'The launch result is unknown. No retry was sent; check the installer and restart the application.',
+                exited: 'The installer has exited. Check the version again.', unknownTotal: 'Total size unknown', failed: 'The operation failed. Please try again.' },
+        };
+        return (text[appState.lang] || text.english_switch)[key];
+    };
+    const updateRpc = (operation, timeout = 5000) => new Promise((resolve, reject) => {
+        let settled = false;
+        let timer;
+        const finish = (callback, value) => {
+            if (settled) return;
+            settled = true; clearTimeout(timer); updateWaits.delete(cancel); callback(value);
+        };
+        const cancel = () => finish(reject, Object.assign(new Error('Update view closed'), { cancelled: true }));
+        timer = setTimeout(() => finish(reject, Object.assign(new Error(updateText('timeout')), { timedOut: true })), timeout);
+        updateWaits.add(cancel);
+        Promise.resolve().then(operation).then(value => finish(resolve, value), error => finish(reject, error));
+    });
+    const setModalElement = (id, show) => document.getElementById(id)?.classList.toggle('hidden', !show);
+    const showUpdateStatus = text => {
+        const element = document.getElementById('update_modal_status');
+        if (element) { element.textContent = String(text || ''); element.classList.remove('hidden'); }
+    };
+    const showUpdateError = async text => {
+        showUpdateStatus(text);
+        try {
+            await updateRpc(() => window.pywebview.api.show_alert(getMsg('title_error'), String(text), 'error'));
+        } catch (error) {
+            if (!error.cancelled) { try { window.alert(String(text)); } catch (_) {} }
+        }
+    };
+    const currentUpdateAsset = () => updateModalState.result?.asset;
+    const matchesUpdateAsset = state => {
+        const asset = currentUpdateAsset();
+        return !!asset && typeof asset.asset_id === 'string' && asset.asset_id.length === 64
+            && state?.asset_id === asset.asset_id && state.asset_url === asset.url
+            && state.file_name === asset.name;
+    };
+    const syncUpdateSweep = () => {
+        const track = document.getElementById('update_progress_track');
+        const visible = !updateDisposed && !document.hidden && !document.getElementById('update_modal')?.classList.contains('hidden');
+        const running = visible && updateModalState.phase === 'downloading' && updateModalState.percent < 100;
+        track?.classList.toggle('is-downloading', !!running);
+    };
+    const setUpdateProgress = state => {
+        const track = document.getElementById('update_progress_track');
+        const fill = document.getElementById('update_progress_fill');
+        const text = document.getElementById('update_progress_text');
+        const known = typeof state.percent === 'number' && Number.isFinite(state.percent) && state.percent >= 0;
+        const percent = known ? Math.min(100, Math.max(0, state.percent)) : -1;
+        const received = typeof state.received === 'number' && Number.isFinite(state.received) ? Math.max(0, state.received) : 0;
+        updateModalState.percent = percent;
+        if (fill) fill.style.width = String(known ? percent : 0) + '%';
+        if (track) {
+            track.style.setProperty('--update-progress', String(known ? percent : 0) + '%');
+            track.classList.toggle('is-complete', known && percent >= 100);
+            track.classList.toggle('is-indeterminate', !known);
+            if (known) track.setAttribute('aria-valuenow', String(percent)); else track.removeAttribute('aria-valuenow');
+            track.setAttribute('aria-label', getMsg('btn_download'));
+            track.setAttribute('aria-valuetext', known ? String(percent) + '%' : formatSize(received) + ' · ' + updateText('unknownTotal'));
+        }
+        if (text) text.textContent = known ? String(percent) + '%' : formatSize(received);
+        syncUpdateSweep();
+    };
+    const applyDownloadState = (state, restore = false) => {
+        if (!matchesUpdateAsset(state) || !/^[0-9a-f]{32}$/.test(String(state.download_id || ''))
+                || !Number.isInteger(state.revision) || state.revision < 0) return false;
+        if (restore && !updateModalState.downloadId) updateModalState.downloadId = state.download_id;
+        if (state.download_id !== updateModalState.downloadId || state.revision < updateModalState.revision) return false;
+        const phases = ['downloading', 'verifying', 'ready', 'failed', 'installing', 'install_unknown', 'installer_finished'];
+        if (!phases.includes(state.phase)) return false;
+        const result = state.result || {};
+        if (state.phase === 'ready' && (result.success !== true || typeof result.path !== 'string')) return false;
+        updateModalState.revision = state.revision;
+        updateModalState.phase = state.phase;
+        updateModalState.downloading = state.phase === 'downloading' || state.phase === 'verifying';
+        const installing = state.phase === 'installing' || state.phase === 'install_unknown';
+        const intent = updateModalState.installIntent;
+        if (intent && (state.phase === 'installer_finished' || state.phase === 'failed'
+                || (state.phase === 'ready' && state.revision > intent.revision && state.error))) updateModalState.installIntent = null;
+        const unresolved = installing || !!updateModalState.installIntent;
+        updateModalState.installerPath = state.phase === 'ready' && !unresolved ? result.path : null;
+        setUpdateProgress(state);
+        setModalElement('update_modal_progress', state.phase !== 'failed');
+        const ready = state.phase === 'ready';
+        setModalElement('update_install_btn', ready || installing || !!updateModalState.installIntent);
+        const install = document.getElementById('update_install_btn');
+        if (install) install.disabled = !ready || unresolved;
+        setModalElement('update_download_btn', !ready && !installing && !updateModalState.installIntent);
+        const download = document.getElementById('update_download_btn');
+        if (download) download.disabled = updateModalState.downloading || unresolved || updateChecking;
+        if (state.phase === 'downloading') setModalElement('update_modal_status', false);
+        else if (state.phase === 'verifying') showUpdateStatus(updateText('verifying'));
+        else if (unresolved) showUpdateStatus(updateText(state.phase === 'install_unknown' ? 'unknown' : 'installing'));
+        else if (ready) showUpdateStatus(state.error || getMsg('msg_update_downloaded') + ' ' + result.path);
+        else if (state.phase === 'failed') showUpdateStatus(getMsg('msg_update_download_fail') + '\n' + String(result.error || state.error || ''));
+        else showUpdateStatus(updateText('exited'));
+        return true;
+    };
     const updateErrorMessage = res => {
         const messages = {
             repository_unavailable: '更新仓库不可访问（HTTP 404），请确认仓库已公开且地址正确。',
@@ -2576,25 +2684,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${getMsg('msg_update_fail')}${reason ? `\n${reason}` : ''}${res?.detail ? `\n${res.detail}` : ''}`;
     };
 
-    const setModalElement = (id, show) => document.getElementById(id)?.classList.toggle('hidden', !show);
-
-    const applyDownloadState = (state) => {
-        if (!state) return;
-        if (state.downloading) {
-            updateModalState.downloading = true;
-            setModalElement('update_modal_progress', true);
-            setModalElement('update_modal_status', false);
-            setModalElement('update_download_btn', true);
-            const downloadBtn = document.getElementById('update_download_btn');
-            if (downloadBtn) downloadBtn.disabled = true;
-            window.updateDownloadProgress(state);
-        } else if (state.result) {
-            window.updateDownloadFinished(state.result);
-        }
-    };
 
     const openUpdateModal = async (res) => {
+        const view = ++updateModalState.view;
         updateModalState.result = res;
+        Object.assign(updateModalState, { downloadId: null, revision: -1, installerPath: null,
+            phase: 'idle', percent: 0, installIntent: null });
         updateModalState.downloading = false;
         // 本仓库发布页/下载按钮只在自身有更新时出现;上游单独提示时只给上游发布页,
         // 免得两个「发布页」按钮指向不同项目,也免得给出无从下载的按钮
@@ -2654,6 +2749,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (downloadBtn) downloadBtn.disabled = false;
         const fill = document.getElementById('update_progress_fill');
         if (fill) fill.style.width = '0%';
+        setUpdateProgress({ percent: 0, received: 0 });
         const progressText = document.getElementById('update_progress_text');
         if (progressText) progressText.textContent = '0%';
 
@@ -2679,102 +2775,128 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('update_modal')?.classList.remove('hidden');
 
         // 之前已开始的下载:直接恢复进度,不再提示重复下载
+        if (!selfUpdate || !res.asset?.asset_id) return;
         try {
-            const state = await window.pywebview.api.get_update_download_state();
-            applyDownloadState(state);
-        } catch (error) { /* 无状态则保持初始态 */ }
-    };
-
-    const closeUpdateModal = () => document.getElementById('update_modal')?.classList.add('hidden');
-
-    window.updateDownloadProgress = (payload) => {
-        if (!payload) return;
-        updateModalState.lastProgress = payload;
-        const fill = document.getElementById('update_progress_fill');
-        const text = document.getElementById('update_progress_text');
-        if (fill) fill.classList.remove('is-complete');
-        if (payload.percent >= 0) {
-            if (fill) fill.style.width = `${payload.percent}%`;
-            if (text) text.textContent = `${payload.percent}%`;
-        } else {
-            if (fill) fill.style.width = '35%';
-            if (text) text.textContent = formatSize(payload.received || 0);
+            const state = await updateRpc(() => window.pywebview.api.get_update_download_state());
+            if (view === updateModalState.view) applyDownloadState(state, true);
+        } catch (error) {
+            if (view === updateModalState.view) showUpdateStatus(updateText('unavailable'));
         }
     };
 
-    window.updateDownloadFinished = (result) => {
-        updateModalState.downloading = false;
-        const downloadBtn = document.getElementById('update_download_btn');
-        if (downloadBtn) downloadBtn.disabled = false;
-        const status = document.getElementById('update_modal_status');
-        if (result && result.success) {
-            const fill = document.getElementById('update_progress_fill');
-            if (fill) { fill.style.width = '100%'; fill.classList.add('is-complete'); }
-            const progressText = document.getElementById('update_progress_text');
-            if (progressText) progressText.textContent = '100%';
-            setModalElement('update_modal_progress', false);
-            updateModalState.installerPath = result.path;
-            if (status) {
-                status.textContent = `${getMsg('msg_update_downloaded')} ${result.path}`;
-                status.classList.remove('hidden');
-            }
-            setModalElement('update_install_btn', true);
-            setModalElement('update_download_btn', false);
-        } else {
-            if (status) {
-                status.textContent = `${getMsg('msg_update_download_fail')}${result && result.error ? `\n${result.error}` : ''}`;
-                status.classList.remove('hidden');
-            }
-            setModalElement('update_modal_progress', false);
-            setModalElement('update_download_btn', !!(updateModalState.result?.asset?.url));
-        }
+    const closeUpdateModal = () => {
+        updateModalState.view += 1;
+        document.getElementById('update_modal')?.classList.add('hidden');
+        syncUpdateSweep();
     };
-
-    document.getElementById('update_download_btn')?.addEventListener('click', () => {
-        const asset = updateModalState.result?.asset;
-        if (!asset || !asset.url || !window.pywebview || updateModalState.downloading) return;
-        updateModalState.downloading = true;
-        const downloadBtn = document.getElementById('update_download_btn');
-        if (downloadBtn) downloadBtn.disabled = true;
-        setModalElement('update_modal_status', false);
-        setModalElement('update_modal_progress', true);
-        window.pywebview.api.download_update(asset.url, asset.name).then(res => {
-            if (!res || !res.success) {
-                window.updateDownloadFinished(res || { success: false, error: 'failed to start' });
-            } else {
-                setModalElement('update_modal_status', false);
-                setModalElement('update_modal_progress', true);
+    window.updateDownloadState = state => applyDownloadState(state);
+    window.updateDownloadProgress = payload => applyDownloadState({ ...payload, phase: payload?.phase || 'downloading' });
+    window.updateDownloadFinished = result => applyDownloadState({ ...result,
+        phase: result?.phase || (result?.success ? 'ready' : 'failed'), result });
+    const restoreUpdateState = async view => {
+        const state = await updateRpc(() => window.pywebview.api.get_update_download_state());
+        if (view !== updateModalState.view) return false;
+        return applyDownloadState(state, !updateModalState.downloadId);
+    };
+    const downloadIdentity = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, '0')).join('');
+    document.getElementById('update_download_btn')?.addEventListener('click', async () => {
+        const asset = currentUpdateAsset();
+        if (!asset?.asset_id || !window.pywebview || updateModalState.downloading || updateChecking) return;
+        const view = updateModalState.view;
+        const id = downloadIdentity();
+        Object.assign(updateModalState, { downloadId: id, revision: -1, installerPath: null, installIntent: null });
+        applyDownloadState({ download_id: id, asset_id: asset.asset_id, asset_url: asset.url, file_name: asset.name,
+            revision: 0, phase: 'downloading', received: 0, total: asset.size || 0, percent: asset.size ? 0 : -1 });
+        try {
+            const response = await updateRpc(() => window.pywebview.api.download_update(asset.url, asset.name, id));
+            if (view !== updateModalState.view || id !== updateModalState.downloadId
+                    || currentUpdateAsset()?.asset_id !== asset.asset_id) return;
+            if (response?.already && matchesUpdateAsset(response.state)) {
+                updateModalState.downloadId = response.state.download_id;
+                updateModalState.revision = -1;
             }
-        }).catch(() => window.updateDownloadFinished({ success: false, error: 'bridge error' }));
+            if (response?.state) applyDownloadState(response.state);
+            if (!response?.success) {
+                updateModalState.downloading = false;
+                updateModalState.phase = 'failed'; syncUpdateSweep();
+                const button = document.getElementById('update_download_btn'); if (button) button.disabled = false;
+                await showUpdateError(response?.error || updateText('failed'));
+            }
+        } catch (error) {
+            if (view !== updateModalState.view || id !== updateModalState.downloadId || error.cancelled) return;
+            try { if (await restoreUpdateState(view)) return; } catch (_) {}
+            updateModalState.phase = 'unknown'; updateModalState.downloading = false; syncUpdateSweep();
+            showUpdateStatus(error.timedOut ? updateText('timeout') : updateText('unavailable'));
+            const button = document.getElementById('update_download_btn'); if (button) button.disabled = false;
+        }
     });
-
-    document.getElementById('update_install_btn')?.addEventListener('click', () => {
+    document.getElementById('update_install_btn')?.addEventListener('click', async () => {
+        if (updateModalState.phase !== 'ready' || !updateModalState.installerPath || updateModalState.installIntent || !window.pywebview) return;
+        const view = updateModalState.view;
+        const id = updateModalState.downloadId;
         const path = updateModalState.installerPath;
-        if (!path || !window.pywebview) return;
-        window.pywebview.api.run_update_installer(path).then(ok => {
-            if (ok) closeUpdateModal();
-            else window.pywebview.api.show_alert(getMsg("title_prompt"), getMsg("msg_update_install_fail"), "error");
-        });
+        updateModalState.installIntent = { id, revision: updateModalState.revision };
+        document.getElementById('update_install_btn').disabled = true;
+        showUpdateStatus(updateText('installing'));
+        try {
+            const accepted = await updateRpc(() => window.pywebview.api.run_update_installer(path, id));
+            if (view !== updateModalState.view || id !== updateModalState.downloadId) return;
+            if (accepted === true) closeUpdateModal();
+            else {
+                await restoreUpdateState(view);
+                if (updateModalState.phase !== 'install_unknown') await showUpdateError(getMsg('msg_update_install_fail'));
+            }
+        } catch (error) {
+            if (view !== updateModalState.view || id !== updateModalState.downloadId || error.cancelled) return;
+            try { await restoreUpdateState(view); } catch (_) {}
+            showUpdateStatus(updateText('unknown'));
+        }
     });
-
-    document.getElementById('update_upstream_btn')?.addEventListener('click', (event) => {
+    document.getElementById('update_upstream_btn')?.addEventListener('click', event => {
         const url = event.currentTarget?.dataset?.url;
-        if (url) window.pywebview?.api.open_url(url);
+        if (url) Promise.resolve(window.pywebview?.api.open_url(url)).catch(error => showUpdateError(String(error)));
     });
-
     document.getElementById('update_page_btn')?.addEventListener('click', () => {
         const url = updateModalState.pageUrl || updateModalState.result?.url;
-        if (url) window.pywebview?.api.open_url(url);
+        if (url) Promise.resolve(window.pywebview?.api.open_url(url)).catch(error => showUpdateError(String(error)));
     });
-
     document.getElementById('update_close_btn')?.addEventListener('click', closeUpdateModal);
-
-    bindSettingAction('update_check', () => {
-        window.pywebview?.api.check_update().then(res => {
-            if (res.error) window.pywebview.api.show_alert(getMsg("title_error"), updateErrorMessage(res), "error");
-            else if (res.has_update || res.upstream?.has_update) openUpdateModal(res);
-            else window.pywebview.api.show_alert(getMsg("title_prompt"), `${getMsg("msg_latest_version")} ${res.current}`, "info");
-        });
+    const checkForUpdates = async () => {
+        if (updateChecking || !window.pywebview) return;
+        updateChecking = true;
+        const token = ++updateCheck;
+        const view = updateModalState.view;
+        const quick = document.getElementById('quick_update_btn');
+        if (quick) { quick.disabled = true; quick.setAttribute('aria-busy', 'true'); }
+        try {
+            const response = await updateRpc(() => window.pywebview.api.check_update(), 45000);
+            if (token !== updateCheck || view !== updateModalState.view) return;
+            if (!response || response.error) await showUpdateError(updateErrorMessage(response || { error_code: 'invalid_response' }));
+            else if (response.has_update || response.upstream?.has_update) await openUpdateModal(response);
+            else await updateRpc(() => window.pywebview.api.show_alert(getMsg('title_prompt'), getMsg('msg_latest_version') + ' ' + response.current, 'info'));
+        } catch (error) {
+            if (token === updateCheck && view === updateModalState.view && !error.cancelled) await showUpdateError(error.timedOut ? updateText('timeout') : String(error.message || error));
+        } finally {
+            if (token === updateCheck) {
+                updateChecking = false;
+                if (quick) { quick.disabled = false; quick.removeAttribute('aria-busy'); }
+                const download = document.getElementById('update_download_btn');
+                if (download && !updateModalState.downloading && !updateModalState.installIntent) download.disabled = false;
+            }
+        }
+    };
+    bindSettingAction('update_check', checkForUpdates);
+    document.addEventListener('visibilitychange', syncUpdateSweep);
+    window.addEventListener('pagehide', () => {
+        updateDisposed = true; updateCheck += 1; updateModalState.view += 1; updateChecking = false;
+        for (const cancel of [...updateWaits]) cancel();
+        syncUpdateSweep();
+    });
+    window.addEventListener('pageshow', () => {
+        updateDisposed = false;
+        const quick = document.getElementById('quick_update_btn');
+        if (quick) { quick.disabled = false; quick.removeAttribute('aria-busy'); }
+        syncUpdateSweep();
     });
 
     const checkSystemNotifyPermission = () => {
@@ -3101,6 +3223,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.onEngineReady = async () => {
         if (!appState.firstLaunch) return;
+        if (appState.configCache?.policy_status) {
+            // A per-user first-run flag must never override administrator policy.
+            await window.pywebview.api.update_config('first_launch', false);
+            appState.firstLaunch = false;
+            if (appState.configCache.policy_status.initialized) {
+                document.querySelectorAll('.toggle-switch input').forEach(toggle => { if (!toggle.dataset.pending) toggle.disabled = false; });
+            }
+            window.dispatchEvent(new Event('pyas-policy-refresh'));
+            return;
+        }
         await window.pywebview.api.update_config("first_launch", false);
 
         const seq = ["autostart_switch", "suffix_switch", "process_switch", "suspend_switch", "load_switch", "document_switch", "system_switch", "network_switch", "driver_switch", "context_switch"];

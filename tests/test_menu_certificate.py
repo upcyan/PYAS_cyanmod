@@ -1,5 +1,6 @@
 """Validate real generated certificate checks without altering certificate stores."""
 import shutil
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,7 @@ import build_menu
 
 
 class MenuCertificateTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'requires real Windows PowerShell certificate validation')
     def test_exact_certificate_passes_checks_and_tampering_is_rejected(self):
         with tempfile.TemporaryDirectory(prefix='PYAS certificate ') as directory:
             root = Path(directory)

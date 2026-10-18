@@ -99,7 +99,8 @@ def report_log_path():
         if isinstance(handler, ReportHandler):
             return handler.baseFilename
 
-    return os.path.join(os.environ.get("ALLUSERSPROFILE", "C:\\ProgramData"), "PYAS", "Report.json")
+    from PYAS_DataPaths import user_data_dir
+    return os.path.join(user_data_dir(), "Report.json")
 
 
 class ReportHandler(logging.Handler):
@@ -222,11 +223,12 @@ def configure_report_logging():
         if isinstance(handler, ReportHandler):
             return handler.baseFilename
 
-    directories = [os.environ.get("ALLUSERSPROFILE", "C:\\ProgramData"), tempfile.gettempdir()]
+    from PYAS_DataPaths import user_data_dir
+    directories = [user_data_dir()]
 
     for directory in directories:
         try:
-            path = os.path.join(directory, "PYAS", "Report.json")
+            path = os.path.join(directory, "Report.json")
             os.makedirs(os.path.dirname(path), exist_ok=True)
             descriptor, probe = tempfile.mkstemp(prefix=".pyas-log-", dir=os.path.dirname(path))
             os.close(descriptor)

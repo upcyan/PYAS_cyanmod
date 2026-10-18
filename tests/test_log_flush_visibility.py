@@ -11,6 +11,14 @@ from collections import deque
 from unittest.mock import patch
 
 from PYAS_Diagnostics import MAX_LOG_ENTRIES, is_ui_log_entry
+# This test never opens a desktop/file dialog; use an explicit optional-UI stub
+# when running its pure log state machine without pywebview installed.
+import sys
+from types import ModuleType
+try:
+    import webview
+except ImportError:
+    sys.modules.setdefault('webview', ModuleType('webview'))
 from PYAS_Logs import LogMixin
 
 

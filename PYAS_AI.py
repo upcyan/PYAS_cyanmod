@@ -172,46 +172,65 @@ def is_verdict_cache_hit(cache_key):
         return bool(_LAST_CACHE_HIT.get(cache_key))
 
 
+_AI_CACHE_SCHEMA = 2
+
+
+def clear_verdict_cache():
+    with _VERDICT_CACHE_LOCK:
+        _VERDICT_CACHE.clear()
+        _LAST_CACHE_HIT.clear()
+
+
+def verdict_profile_key(base_url, model, api_key=""):
+    # Only this opaque fingerprint is retained; no plaintext credential in keys/logs.
+    data = json.dumps([str(base_url).strip().rstrip('/'), str(model).strip(), str(api_key)],
+                      ensure_ascii=False, separators=(',', ':'))
+    return _hashlib.sha256(data.encode('utf-8')).hexdigest()
+
+
+def ai_settings_identity(config):
+    fields = ('ai_base_url', 'ai_model', 'ai_provider_mode', 'ai_api_key_enc', 'ai_api_key',
+              'ai_assist_switch', 'ai_auto_execute')
+    values = {key: config.get(key) for key in fields}
+    return _hashlib.sha256(json.dumps(values, sort_keys=True, ensure_ascii=False,
+        default=str, separators=(',', ':')).encode('utf-8')).hexdigest()
+
+
+def make_verdict_cache_key(rule, category, title, detail, *, config_epoch=0):
+    identity = {"schema": _AI_CACHE_SCHEMA, "epoch": config_epoch, "rule": rule or {}, "category": category or "",
+                "title": title or "", "detail": detail or ""}
+    data = json.dumps(identity, ensure_ascii=False, sort_keys=True, default=str, separators=(',', ':'))
+    return 'evidence:' + _hashlib.sha256(data.encode('utf-8')).hexdigest()
+
+
 def request_ai_verdict_cached(cache_key, base_url, model, api_key,
                               category, title, detail, lang="english_switch",
                               usage_sink=None, cancel_event=None, session_holder=None):
-    """带缓存的建议请求;命中直接返回,不发网络请求(也不计 token)。"""
-    cached = _cache_get(cache_key)
-
-    if cached:
-        with _VERDICT_CACHE_LOCK:
-            _LAST_CACHE_HIT[cache_key] = True
-        return cached
-
-    with _VERDICT_CACHE_LOCK:
-        _LAST_CACHE_HIT[cache_key] = False
-
-        if len(_LAST_CACHE_HIT) > _VERDICT_CACHE_MAX:
-            _LAST_CACHE_HIT.clear()
-
-    suggestion = request_ai_verdict(base_url, model, api_key, category, title, detail, lang,
-                                    usage_sink=usage_sink, cancel_event=cancel_event,
-                                    session_holder=session_holder)
-
-    # 已取消的建议一律作废:既不返回给调用方,也不入缓存
-    # (否则用户下次遇到同一事件会拿到被作废的结论)
+    """Cache only identical evidence, endpoint, model, credential profile and prompt."""
     if cancel_event is not None and cancel_event.is_set():
         return None
-
+    identity = [str(cache_key), verdict_profile_key(base_url, model, api_key), category,
+                title, detail, lang, _AI_VERDICT_SYSTEM, _AI_CACHE_SCHEMA]
+    scoped_key = _hashlib.sha256(json.dumps(identity, ensure_ascii=False,
+        sort_keys=True, default=str, separators=(',', ':')).encode('utf-8')).hexdigest()
+    cached = _cache_get(scoped_key)
+    if cached:
+        if cancel_event is not None and cancel_event.is_set():
+            return None
+        with _VERDICT_CACHE_LOCK:
+            _LAST_CACHE_HIT[cache_key] = True
+        return dict(cached)
+    with _VERDICT_CACHE_LOCK:
+        _LAST_CACHE_HIT[cache_key] = False
+        if len(_LAST_CACHE_HIT) > _VERDICT_CACHE_MAX:
+            _LAST_CACHE_HIT.clear()
+    suggestion = request_ai_verdict(base_url, model, api_key, category, title, detail, lang,
+        usage_sink=usage_sink, cancel_event=cancel_event, session_holder=session_holder)
+    if cancel_event is not None and cancel_event.is_set():
+        return None
     if suggestion:
-        _cache_put(cache_key, suggestion)
-
+        _cache_put(scoped_key, dict(suggestion))
     return suggestion
-
-
-def make_verdict_cache_key(rule, category, title, detail):
-    if rule and rule.get("key"):
-        return f"rule:{rule['key']}"
-    if rule and rule.get("sha256"):
-        return f"sha:{rule['sha256']}"
-
-    fingerprint = "\n".join((category or "", title or "", detail or ""))
-    return "fp:" + _hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
 
 
 class AIMixin:
@@ -237,52 +256,46 @@ class AIMixin:
         return base_url, model, api_key
 
     def save_ai_config(self, base_url=None, model=None, provider_mode=None, api_key=None):
-        """显式保存接口:API Key 一律以 DPAPI 密文落盘。"""
+        """Persist a configuration snapshot, invalidating old cache/in-flight advice."""
+        fields = ('ai_base_url', 'ai_model', 'ai_provider_mode', 'ai_api_key_enc', 'ai_api_key')
         with self.lock_config:
-            encoded = str(self.pyas_config.get("ai_api_key_enc", "")).strip()
-            legacy = str(self.pyas_config.get("ai_api_key", "")).strip()
-
-            if encoded:
-                try:
-                    current_mask = mask_ai_key(unprotect_ai_key(encoded))
-                except Exception:
-                    log_exception("PYAS_AI.AIMixin.save_ai_config.mask")
-                    current_mask = ""
-            else:
-                current_mask = mask_ai_key(legacy)
-
-        with self.lock_config:
+            before = {key: self.pyas_config.get(key, '') for key in fields}
+            proposed = dict(before)
+            encoded = str(before['ai_api_key_enc']).strip()
+            legacy = str(before['ai_api_key']).strip()
+            try:
+                current_mask = mask_ai_key(unprotect_ai_key(encoded) if encoded else legacy)
+            except Exception:
+                current_mask = ''
             if base_url is not None:
-                self.pyas_config["ai_base_url"] = str(base_url).strip().rstrip("/")
-
+                proposed['ai_base_url'] = str(base_url).strip().rstrip('/')
             if model is not None:
-                self.pyas_config["ai_model"] = str(model).strip()
-
-            if provider_mode is not None and str(provider_mode) in ("local", "cloud"):
-                self.pyas_config["ai_provider_mode"] = str(provider_mode)
-
+                proposed['ai_model'] = str(model).strip()
+            if provider_mode is not None and str(provider_mode) in ('local', 'cloud'):
+                proposed['ai_provider_mode'] = str(provider_mode)
             if api_key is not None:
                 incoming = str(api_key).strip()
-
-                # 空或与回传掩码一致 = 未修改,保留原密文
                 if incoming and incoming != current_mask:
                     try:
-                        self.pyas_config["ai_api_key_enc"] = protect_ai_key(incoming)
+                        proposed['ai_api_key_enc'] = protect_ai_key(incoming)
                     except Exception:
-                        log_exception("PYAS_AI.AIMixin.save_ai_config.encrypt")
-                        self.write_log("WARN", "AI Config",
-                                       detail="DPAPI encrypt failed; key not saved", success=False)
-                        return {"ok": False, "error": "encrypt_failed"}
-
-                    self.pyas_config["ai_api_key"] = ""  # 清除历史明文
-
-            ok = self.save_config()
-
-        if not ok:
-            return {"ok": False, "error": "persist_failed"}
-
-        self.write_log("INFO", "AI Config", detail="Model access settings saved")
-        return {"ok": True}
+                        log_exception('PYAS_AI.AIMixin.save_ai_config.encrypt')
+                        self.write_log('WARN', 'AI Config', detail='DPAPI encrypt failed; key not saved', success=False)
+                        return {'ok': False, 'error': 'encrypt_failed'}
+                    proposed['ai_api_key'] = ''
+            changed = proposed != before
+            self.pyas_config.update(proposed)
+            if changed:
+                self._ai_config_epoch = getattr(self, '_ai_config_epoch', 0) + 1
+                clear_verdict_cache()
+            if not self.save_config():
+                self.pyas_config.update(before)
+                if changed:
+                    self._ai_config_epoch += 1
+                    clear_verdict_cache()
+                return {'ok': False, 'error': 'persist_failed'}
+        self.write_log('INFO', 'AI Config', detail='Model access settings saved')
+        return {'ok': True}
 
     def test_ai_connection(self):
         base_url, model, api_key = self._ai_endpoint_config()

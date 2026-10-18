@@ -24,6 +24,7 @@
     <script defer src="/static/js/i18n.js"></script>
     <script defer src="/static/js/theme.js"></script>
     <script defer src="/static/js/main.js"></script>
+    <script defer src="/static/js/policy.js"></script>
     <script>
         window.addEventListener('DOMContentLoaded', function () {
             window.setTimeout(function () {
@@ -974,7 +975,7 @@
                 <p id="update_modal_asset" class="modal-asset hidden"></p>
                 <div id="update_modal_changelog" class="modal-changelog hidden"></div>
                 <div id="update_modal_progress" class="modal-progress hidden">
-                    <div class="modal-progress-bar"><div class="modal-progress-fill" id="update_progress_fill"></div></div>
+                    <div class="modal-progress-bar" id="update_progress_track" role="progressbar" aria-label="Download progress" aria-valuemin="0" aria-valuemax="100"><div class="modal-progress-fill" id="update_progress_fill"></div><div class="modal-progress-remaining" id="update_progress_remaining" aria-hidden="true"></div></div>
                     <span class="modal-progress-text" id="update_progress_text">0%</span>
                 </div>
                 <p id="update_modal_status" class="modal-status hidden"></p>

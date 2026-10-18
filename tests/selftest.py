@@ -25,8 +25,10 @@ import urllib.request
 
 IS_NT = os.name == "nt"
 PROGRAM_DATA = os.environ.get("ALLUSERSPROFILE", "C:\\ProgramData")
-CONFIG_PATH = os.path.join(PROGRAM_DATA, "PYAS", "Config.json")
-REPORT_PATH = os.path.join(PROGRAM_DATA, "PYAS", "Report.json")
+CONFIG_PATH = os.path.join(PROGRAM_DATA, "PYAS.Policy", "Config.json")
+LOCAL_DATA = os.environ.get("LOCALAPPDATA", os.path.join(os.path.expanduser("~"), "AppData", "Local"))
+USER_DATA = os.path.join(LOCAL_DATA, "PYAS")
+REPORT_PATH = os.path.join(USER_DATA, "Report.json")
 SELFTEST_EXE = os.path.join(os.environ.get("TEMP", "."), "claude-selftest.exe")
 AGENT_WAIT_SECONDS = 400  # 后台监控 5 分钟一轮,留 6.5 分钟余量
 
@@ -44,7 +46,7 @@ CHECKS = []
 
 # 「交互弹窗(端到端)」的测试请求哨兵:应用侧(DialogMixin.selftest_threat_watchdog)
 # 检测到就弹一个标题带 [Self Test] 的真实裁决窗,决策只记日志不触发引擎动作
-SELFTEST_SENTINEL = os.path.join(PROGRAM_DATA, "PYAS", "selftest_threat.json")
+SELFTEST_SENTINEL = os.path.join(USER_DATA, "selftest_threat.json")
 DIALOG_WAIT_SECONDS = 180  # 用户留看点弹窗的时间
 
 

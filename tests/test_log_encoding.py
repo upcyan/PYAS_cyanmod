@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from types import SimpleNamespace
 
 import build_menu
 from PYAS_Encoding import decode_process_output
@@ -15,7 +16,8 @@ class LogEncodingTests(unittest.TestCase):
         message = '拒绝访问：中文路径 C:\\测试\\程序.exe'
         self.assertEqual(decode_process_output(message.encode('utf-8')), message)
         self.assertEqual(decode_process_output(message.encode('utf-8-sig')), message)
-        with patch('PYAS_Encoding.ctypes.windll.kernel32.GetACP', return_value=936):
+        # Only the ACP query is native; the decoder itself is platform-neutral.
+        with patch('PYAS_Encoding.ctypes.windll', SimpleNamespace(kernel32=SimpleNamespace(GetACP=lambda: 936)), create=True), patch('PYAS_Encoding.os', SimpleNamespace(name='nt')):
             self.assertEqual(decode_process_output(message.encode('gbk')), message)
             self.assertNotIn('\ufffd', decode_process_output(b'\xff'))
 

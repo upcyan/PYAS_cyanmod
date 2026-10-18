@@ -744,6 +744,21 @@ def lint_i18n():
 
     log("i18n", f"简中文案检查通过({len(zh)} 键)")
 
+BUILD_CONTRACT_PATTERNS = (
+    'test_policy_store.py', 'test_policy_access.py', 'test_policy_native_contracts.py',
+    'test_update_install_guard.py', 'test_signature_trust.py', 'test_ai_cache_scope.py',
+)
+
+
+def run_build_contracts(patterns):
+    """The same verification gates apply to local builds and GitHub builds."""
+    for pattern in patterns:
+        log('预检', pattern)
+        result = run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests', '-p', pattern, '-v'])
+        if result.returncode != 0:
+            die(f'构建验证未通过: {pattern}')
+
+
 def do_build(interactive, channel="dev"):
     lint_i18n()
     version = read_version()
@@ -751,6 +766,7 @@ def do_build(interactive, channel="dev"):
     write_build_channel(channel)
     sync_iss_version(version)
     check_python_packages(interactive)
+    run_build_contracts(BUILD_CONTRACT_PATTERNS)
     iscc_path = find_iscc()
     log("环境", f"Inno Setup: {iscc_path}")
     check_inno_languages(iscc_path)
@@ -761,6 +777,7 @@ def do_build(interactive, channel="dev"):
     result = run([sys.executable, str(ROOT / 'build_menu.py')])
     if result.returncode != 0:
         die('新版右键菜单组件构建失败')
+    run_build_contracts(('test_menu_certificate.py',))
     asset = run_iscc(iscc_path)
     log("完成", f"安装包已生成: {asset}")
     return asset

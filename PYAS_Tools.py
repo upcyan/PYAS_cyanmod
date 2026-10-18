@@ -566,12 +566,25 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
             return {'supported': True, 'error': True, 'error_code': 'invalid_response'}
 
     def check_update(self):
-        """检查更新：自身仓库必查；开发者模式另附上游跟进比对。"""
+        """Only the latest completed check may publish an installable selection."""
+        from PYAS_Updates import normalize_asset, update_control_lock
+        with update_control_lock(self):
+            generation = getattr(self, '_update_check_generation', 0) + 1
+            self._update_check_generation = generation
+            self._checked_update_asset = None
         result = self._check_self_update()
-
         if isinstance(result, dict) and self._is_dev_channel():
             result['upstream'] = self._check_upstream_update()
-
+        with update_control_lock(self):
+            if generation != self._update_check_generation:
+                return {'error': True, 'error_code': 'superseded'}
+            if isinstance(result, dict) and not result.get('error'):
+                try:
+                    selected = normalize_asset(result.get('asset'))
+                except ValueError:
+                    return {'error': True, 'error_code': 'invalid_response'}
+                result['asset'] = selected
+                self._checked_update_asset = selected
         return result
 
     def _check_self_update(self):
@@ -621,13 +634,13 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
                         "url": item.get("browser_download_url"),
                         "size": int(item.get("size") or 0),
                         'digest': item.get('digest'),
+                        'version': latest,
                     }
 
                     if lower.endswith(".exe"):
                         break
 
             if latest:
-                self._checked_update_asset = asset
                 if not self.compare_versions(current, latest) and current != latest:
                     return {
                         "has_update": True,
@@ -658,113 +671,21 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
 
         return {"error": True, 'error_code': 'invalid_response'}
 
-    def download_update(self, url, file_name=None):
-        with self.lock_update:
-            if getattr(self, "_update_downloading", False):
-                # 重新发起视为继续:前端据此直接恢复进度显示
-                return {"success": True, "already": True}
+    def _get_update_manager(self):
+        from PYAS_Updates import UpdateDownloadManager, update_control_lock
+        with update_control_lock(self):
+            manager = getattr(self, '_update_download_manager', None)
+            if manager is None:
+                manager = self._update_download_manager = UpdateDownloadManager(
+                    self.path_user, self._github_get, self._emit_ui_js, self.write_log)
+            manager.select(getattr(self, '_checked_update_asset', None))
+            return manager
 
-            if not isinstance(url, str) or not url.lower().startswith("https://github.com/"):
-                return {"success": False, "error": "invalid download url"}
-            asset = getattr(self, '_checked_update_asset', None)
-            if not asset or url != asset.get('url') or file_name != asset.get('name'):
-                return {'success': False, 'error': 'Check for updates again before downloading'}
-
-            self._update_downloading = True
-            self._update_download_state = {
-                "downloading": True, "received": 0, "total": 0, "percent": -1,
-            }
-
-        threading.Thread(
-            target=self._download_update_worker, args=(url, file_name), daemon=True
-        ).start()
-        return {"success": True, "started": True}
-
-    def _download_update_worker(self, url, file_name):
-        result = {"success": False, "path": None, "error": None, "size": 0}
-        temp_path = None
-
+    def download_update(self, url, file_name=None, download_id=None):
         try:
-            safe_name = os.path.basename(str(file_name) or url.rstrip("/").split("/")[-1])
-            safe_name = safe_name.split("?")[0] or "PYAS_Setup.exe"
-
-            if not safe_name.lower().endswith((".exe", ".msi")):
-                safe_name += ".exe"
-
-            downloads_dir = os.path.join(self.path_user, "Downloads")
-            os.makedirs(downloads_dir, exist_ok=True)
-            target_path = os.path.join(downloads_dir, safe_name)
-            temp_path = target_path + ".part"
-            response = self._github_get(url, stream=True)
-            response.raise_for_status()
-            total = int(response.headers.get("Content-Length") or 0)
-            received = 0
-            digest = hashlib.sha256()
-            next_report = 0.0
-
-            with open(temp_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=65536):
-                    if not chunk:
-                        continue
-
-                    f.write(chunk)
-                    digest.update(chunk)
-                    received += len(chunk)
-                    now = time.time()
-
-                    if now >= next_report:
-                        next_report = now + 0.2
-                        self._push_update_progress(received, total)
-
-            response.close()
-            expected = getattr(self, '_checked_update_asset', {}) or {}
-            if expected.get('url') != url:
-                raise ValueError('Update selection changed; check for updates again')
-            if expected.get('size') and received != expected['size']:
-                raise ValueError('Incomplete update download')
-            expected_digest = expected.get('digest')
-            if expected_digest and expected_digest != 'sha256:' + digest.hexdigest():
-                raise ValueError('Update checksum mismatch')
-            if temp_path:
-                os.replace(temp_path, target_path)
-                temp_path = None
-
-            result = {"success": True, "path": target_path, "error": None, "size": received}
-            self.write_log("INFO", "Update Download", detail=f"Saved {target_path}")
-
-        except Exception as error:
-            log_exception("PYAS_Tools.ToolsMixin.download_update")
-            result = {"success": False, "path": None, "error": str(error), "size": 0}
-            self.write_log("WARN", "Update Download", detail=str(error), success=False)
-
-        finally:
-            self._update_downloading = False
-            self._update_download_state = {"downloading": False, "result": result}
-
-            if temp_path:
-                try:
-                    os.remove(temp_path)
-                except Exception:
-                    log_exception("PYAS_Tools.ToolsMixin.download_update.cleanup")
-                    pass
-
-            self._emit_ui_js(
-                f"if(window.updateDownloadFinished) window.updateDownloadFinished({json.dumps(result)});"
-            )
-
-    def _push_update_progress(self, received, total):
-        if total > 0:
-            percent = min(100, int(received * 100 / total))
-        else:
-            percent = -1
-
-        self._update_download_state = {
-            "downloading": True, "received": received, "total": total, "percent": percent,
-        }
-        payload = json.dumps({"received": received, "total": total, "percent": percent})
-        self._emit_ui_js(
-            f"if(window.updateDownloadProgress) window.updateDownloadProgress({payload});"
-        )
+            return self._get_update_manager().start(url, file_name, download_id)
+        except (OSError, ValueError) as error:
+            return {'success': False, 'error': str(error)}
 
     def _emit_ui_js(self, command):
         try:
@@ -775,38 +696,16 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
             pass
 
     def get_update_download_state(self):
-        """供更新弹窗重开时恢复进度/终态。"""
-        state = getattr(self, "_update_download_state", None)
+        """Restore only a job-identified snapshot; no unsynchronised global flags."""
+        return self._get_update_manager().snapshot()
 
-        if state is None:
-            with self.lock_update:
-                if getattr(self, "_update_downloading", False):
-                    return {"downloading": True, "received": 0, "total": 0, "percent": -1}
-            return {"downloading": False}
-
-        return dict(state)
-
-    def run_update_installer(self, file_path):
+    def run_update_installer(self, file_path, download_id=None):
         try:
-            path = os.path.expandvars(str(file_path)).strip('"').strip("'")
-            downloads_dir = os.path.normcase(os.path.join(self.path_user, "Downloads"))
-
-            if os.path.normcase(os.path.dirname(path)) != downloads_dir:
-                return False
-
-            if not os.path.isfile(path):
-                return False
-
-            if not os.path.basename(path).lower().endswith((".exe", ".msi")):
-                return False
-
-            os.startfile(path)
-            return True
-
-        except Exception as error:
-            log_exception("PYAS_Tools.ToolsMixin.run_update_installer")
-            self.write_log("WARN", "Update Install", detail=str(error), success=False)
+            return self._get_update_manager().install(file_path, download_id)
+        except (OSError, ValueError) as error:
+            self.write_log('WARN', 'Update Install', detail=str(error), success=False)
             return False
+
 
     def calc_file_hash(self, file_path, block_size=65536):
         try:

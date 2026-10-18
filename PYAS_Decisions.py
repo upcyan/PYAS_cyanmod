@@ -432,21 +432,37 @@ class AlertPolicyMixin:
         return True
 
     def _rule_signer(self, rule):
-        """事件文件的签名者指纹,按内容哈希缓存;取不到返回 None(不匹配)。"""
+        """Only cache a trusted signer for the exact, pinned bytes of this event."""
+        from PYAS_FileTrust import locked_read, sha256_stream
         digest = rule.get('sha256')
         source = rule.get('source')
-
         if not digest or not source:
             return None
-
         cache = getattr(self, '_signer_hash_cache', None)
         if cache is None:
             cache = self._signer_hash_cache = {}
-
-        if digest not in cache:
-            cache[digest] = file_signer_hash(source)
-
-        return cache[digest]
+        verified = getattr(self, '_signer_verified_at', None)
+        if verified is None:
+            verified = self._signer_verified_at = {}
+        try:
+            with locked_read(source) as stream:
+                if sha256_stream(stream) != digest:
+                    return None
+                now = time.monotonic()
+                if digest in cache and now - verified.get(digest, -1e30) < 300:
+                    return cache[digest]
+                signer = file_signer_hash(source)
+                # The handle prevents Windows writers/replacement throughout verification.
+                if sha256_stream(stream) != digest:
+                    return None
+                if len(cache) >= MAX_RULES:
+                    cache.clear()
+                    verified.clear()
+                cache[digest] = signer
+                verified[digest] = now
+                return signer
+        except OSError:
+            return None
 
     def get_suppression_rules(self):
         """管理页数据:先清理过期条目,再返回按创建时间倒序的脱敏列表。"""
@@ -602,32 +618,48 @@ class AlertPolicyMixin:
 
 
 def file_signer_hash(path, runner=None):
-    """Authenticode 签名者证书的 SHA-1 指纹(十六进制);无签名/失败/非 Windows 返回 None。
-
-    经 PowerShell Get-AuthenticodeSignature 取签名者证书指纹;调用方必须按
-    文件内容哈希缓存结果,避免在事件路径上反复 spawn。"""
+    """Return a thumbprint only after Authenticode reports a valid trusted signature."""
+    import base64
     import re
     import subprocess
-
     if os.name != 'nt':
         return None
-
-    command = [
-        os.path.join(os.environ.get('SystemRoot', r'C:\Windows'),
-                     'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
-        '$s = Get-AuthenticodeSignature -LiteralPath $args[0];'
-        'if ($s.SignerCertificate) { $s.SignerCertificate.Thumbprint }',
-        str(path),
-    ]
+    # Never interpolate a filename into executable PowerShell syntax.
+    encoded_path = base64.b64encode(str(path).encode('utf-8')).decode('ascii')
+    script = (
+        "$ErrorActionPreference='Stop';"
+        "$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + encoded_path + "'));"
+        "$s=Get-AuthenticodeSignature -LiteralPath $p;"
+        "if ($s.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or -not $s.SignerCertificate) { exit 2 };"
+        "@{status=[string]$s.Status;thumbprint=$s.SignerCertificate.Thumbprint}|ConvertTo-Json -Compress"
+    )
     try:
-        result = (runner or subprocess.run)(command, capture_output=True, timeout=20, text=True)
-    except (OSError, subprocess.SubprocessError):
+        from PYAS_FileTrust import system_directory
+        directory = system_directory()
+        powershell = os.path.join(directory, 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+        # Do not inherit user module paths, CLR profiler hooks or loader settings.
+        environment = {'SystemRoot': os.path.dirname(directory), 'WINDIR': os.path.dirname(directory),
+            'PATH': directory, 'PSModulePath': os.path.join(directory, 'WindowsPowerShell', 'v1.0', 'Modules')}
+        for variable in ('TEMP', 'TMP'):
+            if os.environ.get(variable):
+                environment[variable] = os.environ[variable]
+    except OSError:
         return None
-
-    if result.returncode != 0:
+    command = [powershell,
+        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand',
+        base64.b64encode(script.encode('utf-16-le')).decode('ascii')]
+    try:
+        result = (runner or subprocess.run)(command, capture_output=True, timeout=20, text=True,
+            cwd=directory, env=environment)
+        if result.returncode != 0:
+            return None
+        data = json.loads((result.stdout or '').lstrip('\ufeff').strip())
+        if not isinstance(data, dict) or data.get('status') != 'Valid':
+            return None
+        thumbprint = data.get('thumbprint')
+        if not isinstance(thumbprint, str) or not re.fullmatch(r'[0-9A-Fa-f]{40}', thumbprint):
+            return None
+        return thumbprint.upper()
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError):
         return None
-
-    match = re.search(r'\b([0-9A-F]{40})\b', result.stdout or '')
-    return match.group(1) if match else None
 

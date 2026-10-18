@@ -233,7 +233,7 @@ $ProgressPreference = "SilentlyContinue"
 $env:PSModulePath = "$PSHOME\\Modules;$env:ProgramFiles\\WindowsPowerShell\\Modules"
 if ([Environment]::OSVersion.Version.Build -lt 22000) {{ return }}
 if ($RespectConfig) {{
-    $configFile = Join-Path $env:ProgramData "PYAS\\Config.json"
+    $configFile = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) "PYAS.Policy\\Config.json"
     if (Test-Path -LiteralPath $configFile) {{
         $config = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json
         if ($config.context_switch -eq $false) {{ return }}
@@ -280,7 +280,8 @@ $ExternalLocation = (Resolve-Path -LiteralPath $ExternalLocation).Path
 if (-not (Test-Path -LiteralPath (Join-Path $ExternalLocation "PYAS_Menu.exe")) -or
     -not (Test-Path -LiteralPath (Join-Path $ExternalLocation "PYAS.exe"))) {{ throw "Menu executables are missing" }}
 if ($RespectConfig) {{
-    $configFile = Join-Path $env:ProgramData "PYAS\\Config.json"
+    $configFile = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) "PYAS.Policy\\Config.json"
+    if (-not (Test-Path -LiteralPath $configFile)) {{ return }}
     if (Test-Path -LiteralPath $configFile) {{
         $config = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json
         if ($config.context_switch -eq $false) {{

@@ -52,6 +52,9 @@ class ConfigMixin:
         return self.SYSTEM_UI_LANGUAGES.get(langid & 0x03FF, "english_switch")
 
     def load_config(self):
+        if getattr(self, '_policy_required', False):
+            self._load_scoped_config()
+            return
         with self.lock_config:
 
             if not os.path.exists(self.file_config):
@@ -89,6 +92,13 @@ class ConfigMixin:
                     self.write_log("WARN", "load_config", detail=str(e), success=False)
 
     def save_config(self):
+        if getattr(self, '_policy_required', False):
+            store = getattr(self, '_policy_store', None)
+            if store is None:
+                return False
+            with self.lock_config:
+                snapshot = copy.deepcopy(self.pyas_config)
+            return store.save(snapshot)
         with self.lock_config:
             try:
                 atomic_write_json(self.file_config, self.pyas_config)
@@ -110,6 +120,12 @@ class ConfigMixin:
 
                 if not defer_driver_disable:
                     self.pyas_config[key] = value
+                # Fork AI authority changes invalidate all old model generations,
+                # even when the user quickly disables and re-enables the setting.
+                if key in ('ai_assist_switch', 'ai_auto_execute'):
+                    from PYAS_AI import clear_verdict_cache
+                    self._ai_config_epoch = getattr(self, '_ai_config_epoch', 0) + 1
+                    clear_verdict_cache()
 
             def apply_switch(state):
                 if key == "cloud_switch":

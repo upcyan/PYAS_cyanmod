@@ -1351,37 +1351,49 @@ body.resizing-active * {
 }
 
 .modal-progress-bar {
+    position: relative;
     flex: 1;
     height: 8px;
     border-radius: var(--radius-pill);
     background-color: var(--bg-hover);
     overflow: hidden;
 }
-
 .modal-progress-fill {
-    position: relative;
     height: 100%;
     width: 0%;
     border-radius: var(--radius-pill);
     background-color: var(--accent-color);
     transition: width 0.2s ease;
-    overflow: hidden;
 }
-/* 检测到更新后的下载进度:填充区上一道高光来回扫过;到 100% 或减少动画偏好时停用 */
-.modal-progress-fill::after {
-    content: '';
+/* Only the remaining track receives the sweep: [downloaded position, 100%]. */
+.modal-progress-remaining {
+    position: absolute;
+    left: var(--update-progress, 0%);
+    right: 0;
+    top: 0;
+    bottom: 0;
+    overflow: hidden;
+    pointer-events: none;
+    transition: left 0.2s ease;
+}
+.modal-progress-remaining::after {
+    content: none;
     position: absolute;
     inset: 0;
+    background: linear-gradient(90deg, transparent, var(--accent-color), rgba(255,255,255,.85), var(--accent-color), transparent);
     transform: translateX(-100%);
-    background: linear-gradient(90deg, transparent, var(--accent-hover), transparent);
-    animation: progress-shimmer 1.4s ease-in-out infinite;
+    animation: none;
 }
-.modal-progress-fill.is-complete::after { content: none; }
-@keyframes progress-shimmer {
-    to { transform: translateX(100%); }
+.modal-progress-bar.is-downloading .modal-progress-remaining::after {
+    content: '';
+    animation: progress-shimmer 1.4s linear infinite;
 }
+.modal-progress-bar.is-complete .modal-progress-remaining::after,
+#update_modal.hidden .modal-progress-remaining::after { content: none; animation: none; }
+@keyframes progress-shimmer { to { transform: translateX(100%); } }
 @media (prefers-reduced-motion: reduce) {
-    .modal-progress-fill::after { content: none; }
+    .modal-progress-bar.is-downloading .modal-progress-remaining::after { content: none; animation: none; }
+    .modal-progress-fill, .modal-progress-remaining { transition: none; }
 }
 
 .modal-progress-text {
@@ -2110,3 +2122,21 @@ body.resizing-active * {
 @media (max-width: 620px) {
     .ai-guide-layer .ai-guide-tip { padding: var(--space-2) var(--space-3); }
 }
+
+/* Administrator-policy status never masquerades as active protection. */
+.policy-status-panel {
+    position: fixed; left: 90px; right: 20px; bottom: 16px; z-index: 90;
+    max-width: 720px; margin: 0 auto; padding: 14px 18px;
+    border: 1px solid var(--accent-color); border-radius: var(--radius-control);
+    background: var(--bg-panel); color: var(--text-primary); box-shadow: 0 6px 24px rgba(0,0,0,.18);
+}
+.policy-status-panel p { margin: 6px 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.policy-status-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
+.policy-review-dialog {
+    width: min(760px, calc(100vw - 40px)); max-height: calc(100vh - 40px);
+    padding: 20px; border: 1px solid var(--border-color); border-radius: var(--radius-control);
+    background: var(--bg-panel); color: var(--text-primary);
+}
+.policy-review-dialog::backdrop { background: rgba(0,0,0,.45); }
+.policy-review-dialog pre { max-height: 48vh; overflow: auto; padding: 10px; background: var(--bg-hover); white-space: pre-wrap; overflow-wrap: anywhere; }
+.policy-review-dialog label { display: flex; align-items: center; gap: 8px; }
