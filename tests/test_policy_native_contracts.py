@@ -21,7 +21,7 @@ class NativeContractTests(unittest.TestCase):
     def lease(self):
         item = object.__new__(windows.WindowsPolicyLease)
         backend = SimpleNamespace(lock=threading.RLock(), leases=set())
-        item.backend=backend; item.nonce='a'*32; item.path='/test/PolicyRequests/'+item.nonce+'.request'
+        item.backend=backend; item.nonce='a'*32; item.path=os.path.join('/test','PolicyRequests',item.nonce+'.request')
         item.file=Channel(b'\0'*(windows.PAYLOAD_OFFSET+4));item.sent=False;item.closed=False
         item.native_process=None;item.launch_done=threading.Event();item.launch_error=None
         backend.leases.add(item)
