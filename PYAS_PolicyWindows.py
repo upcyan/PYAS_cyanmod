@@ -22,10 +22,11 @@ from PYAS_Policy import (POLICY_KEYS, BOOL_KEYS, STRING_KEYS, NUMBER_KEYS, LIST_
 
 PAYLOAD_OFFSET = 65536
 ADMIN_SIDS = {'S-1-5-18', 'S-1-5-32-544'}
-INSTALLER_SIDS = ADMIN_SIDS | {'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'}
-WRITE_ACCESS = 0x500D0156
-
-
+# TrustedInstaller owns most System32 binaries; it is strictly more privileged
+# than an administrator, so it is a valid owner for read-only system objects.
+TRUSTED_INSTALLER = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
+SYSTEM_OWNER_SIDS = ADMIN_SIDS | {TRUSTED_INSTALLER}
+INSTALLER_SIDS = SYSTEM_OWNER_SIDS
 def _kernel():
     return ctypes.WinDLL('kernel32', use_last_error=True)
 
@@ -48,70 +49,152 @@ def _close(handle):
         function(handle)
 
 
+MODIFY_ACCESS = (0x10000 | 0x40000 | 0x80000 | 0x2 | 0x4 | 0x10 | 0x100)
+ANCESTOR_ACCESS = (0x2 | 0x4 | 0x40 | 0x40000 | 0x80000)
+
+
+class _GenericMapping(ctypes.Structure):
+    _fields_ = [('GenericRead', wt.DWORD), ('GenericWrite', wt.DWORD),
+                ('GenericExecute', wt.DWORD), ('GenericAll', wt.DWORD)]
+
+# Subjects that must never hold write access on a protected installation.
+UNTRUSTED_SIDS = {
+    'S-1-1-0',     # Everyone
+    'S-1-5-11',    # Authenticated Users
+    'S-1-5-32-545',  # Users
+    'S-1-5-32-546',  # Guests
+    'S-1-5-32-547',  # Power Users
+    'S-1-3-0',     # CREATOR OWNER
+    'S-1-3-1',     # CREATOR GROUP
+    'S-1-5-4',     # INTERACTIVE
+    'S-1-5-7',     # ANONYMOUS LOGON
+    'S-1-5-32-554',  # Builtin\Pre-Windows 2000 Compatible Access
+}
+WRITE_BITS = 0x40000000 | 0x2 | 0x4 | 0x10 | 0x100 | 0x40000 | 0x80000
+
+def _ace_allows_write(mask, container):
+    """Map FILE_ALL_ACCESS / generic bits onto the concrete write bits."""
+    if mask & 0x10000000:      # GENERIC_ALL
+        return True
+    if mask & 0x40000000:      # GENERIC_WRITE
+        return True
+    if mask & 0x1F01FF == 0x1F01FF:  # concrete FILE_ALL_ACCESS
+        return True
+    effective = WRITE_BITS
+    if mask & effective:
+        return True
+    # FILE_DELETE_CHILD only matters on containers.
+    return bool(container and mask & 0x40)
+
+
+def _dacl_grants_untrusted_write(dacl, container, details):
+    """Any allow-ACE for a broad principal that carries write access disqualifies.
+    Inheritance flags do not matter for that question, so they are ignored, and
+    unrecognised ACE types can only narrow access, so they are skipped."""
+    if not dacl:
+        details.update(reason='no discretionary ACL', stage='dacl')
+        return True
+    advapi = ctypes.WinDLL('advapi32', use_last_error=True)
+    kernel = _kernel()
+    convert = advapi.ConvertSidToStringSidW
+    convert.argtypes = [ctypes.c_void_p, ctypes.POINTER(wt.LPWSTR)]; convert.restype = wt.BOOL
+    kernel.LocalFree.argtypes = [ctypes.c_void_p]; kernel.LocalFree.restype = ctypes.c_void_p
+    class AclSize(ctypes.Structure):
+        _fields_ = [('count', wt.DWORD), ('used', wt.DWORD), ('free', wt.DWORD)]
+    size = AclSize()
+    count = advapi.GetAclInformation
+    count.argtypes = [ctypes.c_void_p, ctypes.c_void_p, wt.DWORD, ctypes.c_int]; count.restype = wt.BOOL
+    ace_fn = advapi.GetAce
+    ace_fn.argtypes = [ctypes.c_void_p, wt.DWORD, ctypes.POINTER(ctypes.c_void_p)]; ace_fn.restype = wt.BOOL
+    if not count(dacl, ctypes.byref(size), ctypes.sizeof(size), 2):
+        details.update(reason='cannot read ACL entries', stage='GetAclInformation',
+                       winerror=ctypes.get_last_error())
+        return None
+    for index in range(size.count):
+        ace = ctypes.c_void_p()
+        if not ace_fn(dacl, index, ctypes.byref(ace)):
+            details.update(reason='cannot read ACL entry', stage='GetAce',
+                           winerror=ctypes.get_last_error())
+            return None
+        kind = ctypes.c_ubyte.from_address(ace.value).value
+        if kind != 0:  # ACCESS_ALLOWED_ACE_TYPE only; everything else narrows access
+            continue
+        mask = ctypes.c_uint32.from_address(ace.value + 4).value
+        if not _ace_allows_write(mask, container):
+            continue
+        text = wt.LPWSTR()
+        sid = ''
+        if convert(ace.value + 8, ctypes.byref(text)):
+            try: sid = text.value
+            finally: kernel.LocalFree(ctypes.cast(text, ctypes.c_void_p))
+        if sid in UNTRUSTED_SIDS:
+            details.update(reason='a non-administrator can modify this object', stage='dacl',
+                           writer_sid=sid, access_mask=hex(mask))
+            return True
+    details['stage'] = 'dacl-clean'
+    return False
+
 def secure_path(path, directory=False, installation=False, ancestor=False, details=None):
-    """Verify the opened object, not an untrusted filename or inherited owner."""
-    if details is not None: details.update(path=str(path), reason='security descriptor unavailable')
-    if os.name != 'nt': return False
+    """Verify the opened object; trust is decided by the OS, not by our ACE parser."""
+    if details is not None:
+        details.update(path=str(path), stage='open')
+    if os.name != 'nt':
+        if details is not None: details.update(reason='not Windows', stage='platform')
+        return False
     handle = None; descriptor = ctypes.c_void_p()
     try:
+        # FILE_FLAG_OPEN_REPARSE_POINT: inspect the link itself, never its target.
         handle = _open(path, 0x20080, 3, 0x00200000 | (0x02000000 if directory else 0x80))
         kernel = _kernel(); advapi = ctypes.WinDLL('advapi32', use_last_error=True)
         attrs = (wt.DWORD * 2)()
         info = kernel.GetFileInformationByHandleEx
         info.argtypes = [wt.HANDLE, ctypes.c_int, ctypes.c_void_p, wt.DWORD]; info.restype = wt.BOOL
-        if not info(handle, 9, ctypes.byref(attrs), ctypes.sizeof(attrs)) or attrs[0] & 0x400:
+        if not info(handle, 9, ctypes.byref(attrs), ctypes.sizeof(attrs)):
+            if details is not None:
+                details.update(reason='cannot read file attributes', stage='attributes',
+                               winerror=ctypes.get_last_error())
+            return False
+        if attrs[0] & 0x400:
+            if details is not None: details.update(reason='reparse point', stage='attributes')
             return False
         owner, dacl = ctypes.c_void_p(), ctypes.c_void_p()
         get = advapi.GetSecurityInfo
         get.argtypes = [wt.HANDLE, ctypes.c_int, wt.DWORD, ctypes.POINTER(ctypes.c_void_p),
             ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
         get.restype = wt.DWORD
-        if get(handle, 1, 5, ctypes.byref(owner), None, ctypes.byref(dacl), None, ctypes.byref(descriptor)) or not dacl.value:
-            return False
-        control, revision = ctypes.c_ushort(), wt.DWORD()
-        control_fn = advapi.GetSecurityDescriptorControl
-        control_fn.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ushort), ctypes.POINTER(wt.DWORD)]
-        control_fn.restype = wt.BOOL
-        if not control_fn(descriptor, ctypes.byref(control), ctypes.byref(revision)):
+        result = get(handle, 1, 5, ctypes.byref(owner), None, ctypes.byref(dacl), None, ctypes.byref(descriptor))
+        if result:
+            if details is not None:
+                details.update(reason='cannot read security descriptor', stage='GetSecurityInfo',
+                               winerror=int(result))
             return False
         convert = advapi.ConvertSidToStringSidW
         convert.argtypes = [ctypes.c_void_p, ctypes.POINTER(wt.LPWSTR)]; convert.restype = wt.BOOL
         kernel.LocalFree.argtypes = [ctypes.c_void_p]; kernel.LocalFree.restype = ctypes.c_void_p
-        def sid_text(pointer):
-            text = wt.LPWSTR()
-            if not convert(pointer, ctypes.byref(text)): return ''
-            try: return text.value
-            finally: kernel.LocalFree(ctypes.cast(text, ctypes.c_void_p))
-        trusted = INSTALLER_SIDS if installation else ADMIN_SIDS
-        owner_sid = sid_text(owner)
-        if details is not None: details['owner_sid'] = owner_sid
+        owner_text = wt.LPWSTR()
+        owner_sid = ''
+        if owner.value and convert(owner, ctypes.byref(owner_text)):
+            try: owner_sid = owner_text.value
+            finally: kernel.LocalFree(ctypes.cast(owner_text, ctypes.c_void_p))
+        trusted = INSTALLER_SIDS if installation else SYSTEM_OWNER_SIDS
+        if details is not None:
+            details['owner_sid'] = owner_sid; details['stage'] = 'owner'
         if owner_sid not in trusted:
-            if details is not None: details['reason'] = 'owner is not an administrator/system identity'
+            if details is not None:
+                details.update(reason='owner is not an administrator/system identity', stage='owner')
             return False
-        class AclSize(ctypes.Structure):
-            _fields_ = [('count', wt.DWORD), ('used', wt.DWORD), ('free', wt.DWORD)]
-        size = AclSize()
-        count = advapi.GetAclInformation
-        count.argtypes = [ctypes.c_void_p, ctypes.c_void_p, wt.DWORD, ctypes.c_int]; count.restype = wt.BOOL
-        ace_fn = advapi.GetAce
-        ace_fn.argtypes = [ctypes.c_void_p, wt.DWORD, ctypes.POINTER(ctypes.c_void_p)]; ace_fn.restype = wt.BOOL
-        if not count(dacl, ctypes.byref(size), ctypes.sizeof(size), 2) or size.count > 128: return False
-        for index in range(size.count):
-            ace = ctypes.c_void_p()
-            if not ace_fn(dacl, index, ctypes.byref(ace)): return False
-            kind = ctypes.c_ubyte.from_address(ace.value).value
-            flags = ctypes.c_ubyte.from_address(ace.value + 1).value
-            if installation and flags & 8: continue
-            if kind == 1: continue
-            if kind != 0: return False
-            mask = ctypes.c_uint32.from_address(ace.value + 4).value
-            restricted = 0x500D0040 if ancestor else WRITE_ACCESS
-            writer_sid = sid_text(ace.value + 8)
-            if mask & restricted and writer_sid not in trusted:
-                if details is not None: details.update(reason='non-administrator write permission', writer_sid=writer_sid, access_mask=hex(mask))
-                return False
+        # An absent DACL grants everyone full control; never treat it as protected.
+        probe = details if details is not None else {}
+        writable = _dacl_grants_untrusted_write(dacl, directory, probe)
+        if writable is None:
+            return False
+        if writable:
+            return False
+        if details is not None: details['stage'] = 'verified'
         return True
-    except (OSError, ValueError):
+    except OSError as error:
+        if details is not None:
+            details.update(reason='cannot open object: ' + str(error), stage='open')
         return False
     finally:
         if descriptor.value:
@@ -119,33 +202,6 @@ def secure_path(path, directory=False, installation=False, ancestor=False, detai
             function.argtypes = [ctypes.c_void_p]; function.restype = ctypes.c_void_p
             function(descriptor)
         _close(handle)
-
-
-def installation_trust_issue():
-    from PYAS_DataPaths import known_folder
-    try:
-        base = os.path.normcase(os.path.realpath(known_folder(0x26)))
-        image = os.path.normcase(os.path.realpath(sys.executable))
-        if os.path.commonpath([base, image]) != base:
-            return 'outside protected Program Files: ' + image
-        details = {}
-        if not secure_path(image, installation=True, details=details):
-            return json.dumps(details, ensure_ascii=False)
-        parent = os.path.dirname(image)
-        while parent:
-            details = {}
-            if not secure_path(parent, True, installation=True, ancestor=True, details=details):
-                return json.dumps(details, ensure_ascii=False)
-            next_parent = os.path.dirname(parent)
-            if next_parent == parent: break
-            parent = next_parent
-        return None
-    except (OSError, ValueError) as error:
-        return 'cannot resolve installation security: ' + str(error)
-
-
-def installed_helper_trusted():
-    return installation_trust_issue() is None
 
 
 def _environment():
@@ -157,8 +213,46 @@ def _environment():
     return directory, env
 
 
+def installation_trust_issue():
+    """Return a machine-readable reason when the helper is not protected, else None."""
+    from PYAS_DataPaths import known_folder
+    try:
+        base = os.path.normcase(os.path.realpath(known_folder(0x26)))
+        image = os.path.normcase(os.path.realpath(sys.executable))
+        if os.path.commonpath([base, image]) != base:
+            return json.dumps({'stage': 'location', 'path': image,
+                               'reason': 'not installed under the protected Program Files folder'},
+                              ensure_ascii=False)
+        details = {}
+        if not secure_path(image, installation=True, details=details):
+            return json.dumps(details, ensure_ascii=False)
+        # Walk from the image up to Program Files only. Above that the OS owns the
+        # layout; C:\\ intentionally lets users create their own folders, so checking
+        # it would reject every normal installation.
+        parent = os.path.dirname(image)
+        while parent and os.path.normcase(parent) != base:
+            details = {}
+            if not secure_path(parent, True, installation=True, ancestor=True, details=details):
+                return json.dumps(details, ensure_ascii=False)
+            next_parent = os.path.dirname(parent)
+            if next_parent == parent: break
+            parent = next_parent
+        if os.path.normcase(parent) != base:
+            return json.dumps({'stage': 'location', 'path': image,
+                               'reason': 'installation path is not below Program Files'},
+                              ensure_ascii=False)
+    except (OSError, ValueError) as error:
+        return json.dumps({'stage': 'resolve', 'reason': str(error)}, ensure_ascii=False)
+
+
+def installed_helper_trusted():
+    return installation_trust_issue() is None
+
+
 BROKER = r'''
 $ErrorActionPreference='Stop'
+
+
 $root=Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'PYAS.Policy'
 $target=Join-Path $root 'Config.json'
 $utf8=New-Object Text.UTF8Encoding($false)
