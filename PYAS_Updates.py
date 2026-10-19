@@ -24,6 +24,10 @@ def update_control_lock(owner):
         return lock
 
 
+# GitHub 直连不通时的传输兜底。镜像只负责「把字节送到」:
+# 安装包仍按 API 给的 sha256 与发布里的 .sha256 双重校验,内容被换就装不上。
+RELEASE_MIRRORS = ('https://gh-proxy.com/', 'https://ghfast.top/', 'https://ghproxy.net/')
+
 def normalize_asset(asset):
     if not isinstance(asset, dict):
         return None
@@ -50,7 +54,19 @@ def normalize_asset(asset):
         digest = str(digest).lower()
         if not re.fullmatch(r'sha256:[0-9a-f]{64}', digest):
             raise ValueError('Unsupported update checksum')
-    selected = dict(url=url, name=name, version=version, size=size, digest=digest)
+    # 第二份校验码:同一发布里附带的 .sha256 文件
+    checksum_url = str(asset.get('checksum_url') or '')
+
+    if checksum_url:
+        parsed_checksum = urlsplit(checksum_url)
+        if (parsed_checksum.scheme != 'https' or parsed_checksum.hostname != 'github.com'
+                or parsed_checksum.username or parsed_checksum.password
+                or not parsed_checksum.path.startswith(prefix)):
+            raise ValueError('Invalid update checksum source')
+        if unquote(parsed_checksum.path).rsplit('/', 1)[-1] != name + '.sha256':
+            raise ValueError('Update checksum does not match the installer')
+    selected = dict(url=url, name=name, version=version, size=size, digest=digest,
+                    checksum_url=checksum_url)
     selected['asset_id'] = hashlib.sha256(json.dumps(selected, sort_keys=True,
         separators=(',', ':')).encode('utf-8')).hexdigest()
     return selected
@@ -138,6 +154,46 @@ class UpdateDownloadManager:
         self._emit(state)
         return response
 
+    def _open_stream(self, url):
+        """直连失败时按镜像顺序重试;非 200 视为该渠道不可用。"""
+        error = None
+        for target in [url] + [mirror + url for mirror in RELEASE_MIRRORS]:
+            try:
+                response = self.fetch(target, stream=True)
+            except Exception as exc:
+                error = exc
+                continue
+            if getattr(response, 'status_code', 200) == 200:
+                return response
+            try:
+                response.close()
+            except Exception:
+                pass
+            error = ValueError('HTTP ' + str(getattr(response, 'status_code', '?')))
+        raise error if error else RuntimeError('update source unavailable')
+
+    def _read_checksum(self, asset):
+        """读发布里的 .sha256 旁路文件,得到第二份校验码。"""
+        error = None
+        for target in [asset['checksum_url']] + [m + asset['checksum_url'] for m in RELEASE_MIRRORS]:
+            try:
+                response = self.fetch(target, timeout=15)
+            except Exception as exc:
+                error = exc
+                continue
+            try:
+                text = str(getattr(response, 'text', '') or '')
+            finally:
+                try:
+                    response.close()
+                except Exception:
+                    pass
+            match = re.search(r'\b([0-9a-fA-F]{64})\b', text)
+            if match:
+                return 'sha256:' + match.group(1).lower()
+            error = ValueError('Invalid checksum file')
+        raise ValueError('Update checksum unavailable') from error
+
     def _download(self, job):
         asset = job['asset']
         target = os.path.join(self.directory, asset['name'])
@@ -146,8 +202,7 @@ class UpdateDownloadManager:
         received = 0
         try:
             os.makedirs(self.directory, exist_ok=True)
-            response = self.fetch(asset['url'], stream=True)
-            response.raise_for_status()
+            response = self._open_stream(asset['url'])
             header_size = int(response.headers.get('Content-Length') or 0)
             if header_size < 0:
                 raise ValueError('Invalid response size')
@@ -171,17 +226,37 @@ class UpdateDownloadManager:
             if total > 0 and received != total:
                 raise ValueError('Incomplete update download')
             actual = digest.hexdigest()
-            if asset['digest'] and asset['digest'] != 'sha256:' + actual:
-                raise ValueError('Update checksum mismatch')
+            # 多校验码:API 里的 digest 与发布附带的 .sha256 都要对得上;
+            # 一份都没有就拒绝安装(镜像只能换传输路径,不能改变内容)
+            checksums = []
+            if asset.get('digest'):
+                checksums.append(('github-api', str(asset['digest']).lower()))
+            if asset.get('checksum_url'):
+                checksums.append(('sha256-asset', self._read_checksum(asset)))
+            if not checksums:
+                raise ValueError('Missing update checksum')
+            for source, expected in checksums:
+                if expected != 'sha256:' + actual:
+                    raise ValueError('Update checksum mismatch (' + source + ')')
             self._publish(job, 'verifying', received=received, total=total, percent=100)
             os.replace(part, target)
-            # Detect replacement between publication into Downloads and verification.
-            with locked_read(target) as stream:
-                if sha256_stream(stream) != actual:
-                    raise ValueError('Downloaded installer changed')
-                stat = os.fstat(stream.fileno())
-                verified = dict(path=os.path.realpath(target), sha256=actual,
-                    device=stat.st_dev, inode=stat.st_ino, size=stat.st_size)
+            # 落盘后复核:杀软/索引器可能刚打开这个新文件,读到的内容会短暂不一致,
+            # 给它几次机会;三次都对不上就按「被替换」处理(失败关闭)。
+            verified = None
+            for attempt in range(3):
+                try:
+                    with locked_read(target) as stream:
+                        if sha256_stream(stream) != actual:
+                            raise ValueError('Downloaded installer changed')
+                        stat = os.fstat(stream.fileno())
+                        verified = dict(path=os.path.realpath(target), sha256=actual,
+                            device=stat.st_dev, inode=stat.st_ino, size=stat.st_size)
+                    break
+                except (OSError, ValueError):
+                    verified = None
+                    if attempt == 2:
+                        raise
+                    time.sleep(0.05)
             result = {'success': True, 'path': verified['path'], 'error': None, 'size': received}
             with self.lock:
                 if self.job is not job:

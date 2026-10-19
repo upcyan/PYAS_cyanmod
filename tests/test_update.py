@@ -13,8 +13,10 @@ from PYAS_Version import VERSION, UPSTREAM_REPO, UPSTREAM_TRACKED
 class _FakeWinreg:
     """只实现 _system_proxy_candidates 用到的注册表入口,值由用例切换。"""
     HKEY_CURRENT_USER = 0
+    HKEY_LOCAL_MACHINE = 1
     KEY_READ = 0
     VALUES = {}
+    WINHTTP_SERVER = ""
 
     class _Key:
         def __enter__(self):
@@ -29,6 +31,11 @@ class _FakeWinreg:
 
     @classmethod
     def QueryValueEx(cls, key, name):
+        if name == 'WinHttpSettings':
+            # WinHTTP 的二进制:4 字节标志 + 若干「长度 + UTF-16 串」
+            server = cls.WINHTTP_SERVER.encode('utf-16-le')
+            blob = (0).to_bytes(4, 'little') + len(server).to_bytes(4, 'little') + server
+            return blob, 1
         if name not in cls.VALUES:
             raise FileNotFoundError(name)
         return cls.VALUES[name], 1
@@ -108,6 +115,18 @@ class UpdateTests(unittest.TestCase):
             _FakeWinreg.VALUES = {'ProxyEnable': 1, 'ProxyServer': 'http=127.0.0.1:7890;https=127.0.0.1:7891'}
             self.assertEqual(api._system_proxy_candidates(),
                 ['http://127.0.0.1:7891', 'http://127.0.0.1:7890'])
+
+    def test_winhttp_proxy_is_used_when_ie_settings_are_empty(self):
+        # WinHTTP(netsh winhttp set proxy)与 IE 设置是两套;只配了前者时也要能取到
+        api = UpdateAPI()
+        with patch.dict(os.environ, {}, clear=True):
+            _FakeWinreg.VALUES = {}
+            _FakeWinreg.WINHTTP_SERVER = ""
+            self.assertEqual(api._system_proxy_candidates(), [])
+
+            _FakeWinreg.WINHTTP_SERVER = "127.0.0.1:8080"
+            self.assertEqual(api._system_proxy_candidates(), ["http://127.0.0.1:8080"])
+            _FakeWinreg.WINHTTP_SERVER = ""
 
     def test_registry_proxy_missing_values(self):
         api = UpdateAPI()

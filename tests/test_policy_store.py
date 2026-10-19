@@ -102,3 +102,60 @@ class PolicyStoreTests(unittest.TestCase):
         self.assertEqual(self.backend.prompts, 2)
 
 if __name__ == '__main__': unittest.main()
+
+
+class WhiteListDedupeTests(unittest.TestCase):
+    """同一路径只该有一条;默认项(time=0)不能让位成第二条(2026-10-19 白名单重复)。"""
+
+    def _store(self, white_list):
+        backend = Backend()
+        backend.document = {'white_list': white_list, '_format': FORMAT, '_revision': 'r1'}
+        return PolicyStore({}, backend)
+
+    def test_placeholder_yields_to_the_timed_entry(self):
+        path = r'C://Program Files\PYAS\PYAS.exe'
+        store = self._store([
+            {'file': path, 'is_dir': False, 'time': 1791418961.19},
+            {'file': path, 'is_dir': False, 'time': 0},
+        ])
+        values = store.load()['white_list']
+        self.assertEqual(len(values), 1)
+        self.assertGreater(values[0].get("time", 0), 0)
+
+    def test_case_and_trailing_separator_do_not_create_duplicates(self):
+        store = self._store([
+            {'file': r'C://Program Files\PYAS\PYAS.exe', 'is_dir': False, 'time': 1.0},
+            {'file': r'c://program files\pyas\pyas.exe', 'is_dir': False, 'time': 0},
+            {'file': r'C://Program Files\PYAS\PYAS_Menu.exe', 'is_dir': False, 'time': 2.0},
+        ])
+        values = store.load()['white_list']
+        self.assertEqual(len(values), 2)
+
+    def test_distinct_paths_are_kept(self):
+        store = self._store([
+            {'file': r'C://a.exe', 'is_dir': False, 'time': 1.0},
+            {'file': r'C://b.exe', 'is_dir': False, 'time': 2.0},
+        ])
+        self.assertEqual(len(store.load()['white_list']), 2)
+
+
+class MergeDefaultsTests(unittest.TestCase):
+    """迁移/初始化把默认自组件并进候选策略时,不能与已有路径并存。"""
+
+    def test_existing_path_is_not_appended_again(self):
+        from PYAS_PolicyAccess import _append_missing_white_list
+        candidate = {'white_list': [{'file': r'C://Program Files\PYAS\PYAS.exe', 'is_dir': False, 'time': 5.0}]}
+        defaults = [{'file': r'c://program files\pyas\pyas.exe', 'is_dir': False, 'time': 0}]
+        _append_missing_white_list(candidate, defaults)
+        self.assertEqual(len(candidate['white_list']), 1)
+
+    def test_missing_path_is_still_added(self):
+        from PYAS_PolicyAccess import _append_missing_white_list
+        candidate = {'white_list': [{'file': r'C://a.exe', 'is_dir': False, 'time': 5.0}]}
+        defaults = [{'file': r'C://Program Files\PYAS\PYAS.exe', 'is_dir': False, 'time': 0}]
+        _append_missing_white_list(candidate, defaults)
+        self.assertEqual(len(candidate['white_list']), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -39,6 +39,7 @@ class UpdateProtocolTests(unittest.TestCase):
 
     def response(self, payload=None, header=True):
         response = Mock()
+        response.status_code = 200
         data = self.payload if payload is None else payload
         response.headers = {'Content-Length': str(len(data))} if header else {}
         response.iter_content.return_value = [data]

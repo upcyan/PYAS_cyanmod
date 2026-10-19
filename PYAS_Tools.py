@@ -462,6 +462,22 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
         except Exception:
             pass
 
+        # WinHTTP(netsh winhttp set proxy)与 IE 设置是两套:只在 WinHTTP 里配了代理时,
+        # 上面那段读不到。这个二进制是「DWORD + 若干(长度+UTF-16 字符串)」。
+        try:
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\Connections",
+            ) as key:
+                blob = winreg.QueryValueEx(key, "WinHttpSettings")[0]
+            offset = 4
+            length = int.from_bytes(blob[offset:offset + 4], "little")
+            server = blob[offset + 4:offset + 4 + length].decode("utf-16-le", "ignore").strip()
+            if server:
+                candidates.append(server if "://" in server else "http://" + server)
+        except (FileNotFoundError, OSError, ValueError, IndexError, AttributeError):
+            pass
+
         seen = set()
         unique = []
 
@@ -473,27 +489,40 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
         return unique
 
     def _github_get(self, url, **kwargs):
-        """GitHub 请求:先直连,失败后依次尝试系统代理(环境变量/注册表/PAC 端口)。"""
+        """按渠道依次取 GitHub 数据:直连 → 系统代理 → 元数据镜像。
+
+        只要有一个渠道能通就返回;403/429 是 GitHub 给的真实状态,原样交给调用方。
+        镜像只用来判断「有没有新版本」,拿到的东西不参与安装包完整性判定。
+        """
         kwargs.setdefault("timeout", 15)
         kwargs.setdefault("headers", self.GITHUB_RELEASE_HEADERS)
 
-        try:
-            response = requests.get(url, **kwargs)
-            if response.status_code not in (502, 503, 504):
+        from PYAS_Updates import RELEASE_MIRRORS
+
+        attempts = [(None, url)]
+        for proxy in self._system_proxy_candidates():
+            attempts.append((proxy, url))
+        for mirror in RELEASE_MIRRORS:
+            attempts.append((None, mirror + url))
+
+        last = None
+        for proxy, target in attempts:
+            try:
+                response = requests.get(target, **kwargs) if proxy is None else requests.get(
+                    target, proxies={"http": proxy, "https": proxy}, **kwargs)
+            except requests.RequestException as error:
+                last = error
+                continue
+            if response.status_code in (200, 403, 429):
                 return response
+            last = response
             response.close()
 
-        except requests.RequestException:
-            pass
-
-        for proxy in self._system_proxy_candidates():
-            try:
-                return requests.get(url, proxies={"http": proxy, "https": proxy}, **kwargs)
-
-            except requests.RequestException:
-                continue
-
-        return requests.get(url, **kwargs)
+        if isinstance(last, requests.Response):
+            return last
+        if isinstance(last, Exception):
+            raise last
+        raise requests.RequestException('update source unavailable')
 
     def _is_dev_channel(self):
         """当前安装包是不是开发者模式（本地构建）。
@@ -629,11 +658,23 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
                     asset_url = str(item.get('browser_download_url') or '')
                     if not asset_url.startswith(f'https://github.com/{repository}/releases/download/'):
                         continue
+                    # 同一发布里的 .sha256 作为第二份校验码:API digest 之外独立成件,
+                    # 两个都对得上才允许安装
+                    checksum_url = ''
+                    for sibling in j.get('assets') or []:
+                        if str(sibling.get('name') or '') != name + '.sha256':
+                            continue
+                        candidate_url = str(sibling.get('browser_download_url') or '')
+                        if candidate_url.startswith('https://github.com/%s/releases/download/' % repository):
+                            checksum_url = candidate_url
+                        break
+
                     asset = {
                         "name": name,
                         "url": item.get("browser_download_url"),
                         "size": int(item.get("size") or 0),
                         'digest': item.get('digest'),
+                        'checksum_url': checksum_url,
                         'version': latest,
                     }
 

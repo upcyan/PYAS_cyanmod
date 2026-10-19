@@ -6,6 +6,7 @@ import copy
 import hashlib
 import json
 import math
+import os
 import threading
 import time
 
@@ -40,6 +41,38 @@ def bounded_json(data):
         raise ValueError('Policy document is too large')
     return raw
 
+
+def white_list_identity(item):
+    """白名单条目的去重键:同一个文件路径,大小写与分隔符无关。"""
+    value = item.get('file') if isinstance(item, dict) else item
+    if not isinstance(value, str) or not value.strip():
+        return ''
+    return os.path.normcase(value.strip().rstrip('\\'))
+
+
+def dedupe_white_list(items):
+    """同一路径只保留一条,优先带真实时间戳的那条。
+
+    默认策略里的自身组件是 {file, is_dir, time: 0}(没有日期),迁移/初始化时
+    按整串比较会把它和用户那条并存,白名单页就出现两条同路径、一条日期为空的记录。
+    """
+    result = []
+    index = {}
+    for item in items or []:
+        key = white_list_identity(item)
+        if not key:
+            result.append(item)
+            continue
+        if key not in index:
+            index[key] = len(result)
+            result.append(item)
+            continue
+        previous = result[index[key]]
+        if isinstance(previous, dict) and isinstance(item, dict):
+            # 占位项(time=0)让位给真正记录过时间的条目
+            if not previous.get('time') and item.get('time'):
+                result[index[key]] = item
+    return result
 
 def validate_values(values):
     if not isinstance(values, dict) or set(values) - POLICY_KEYS:
@@ -123,6 +156,8 @@ class PolicyStore:
                     revision = str(document.get('_revision') or '')
                     if not revision: raise ValueError('Missing policy revision')
                     self.values.update(values)
+                    # 历史数据里可能已经并存了 time=0 的默认项,读入时按路径合并掉
+                    self.values['white_list'] = dedupe_white_list(self.values.get('white_list', []))
                     self.revision = revision
                     self.status = {'state': 'ready', 'error': ''}
             except (OSError, ValueError, TypeError):

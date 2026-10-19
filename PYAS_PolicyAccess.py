@@ -4,8 +4,24 @@ import hashlib
 import json
 import os
 import threading
-from PYAS_Policy import POLICY_KEYS, USER_KEYS, PolicyDenied, bounded_json, policy_values
+from PYAS_Policy import (POLICY_KEYS, USER_KEYS, PolicyDenied, bounded_json, policy_values,
+                         white_list_identity)
 
+
+def _append_missing_white_list(candidate, defaults):
+    """把默认白名单并入候选策略,同一路径只留一条。
+
+    默认项是 {file, is_dir, time: 0}:整串比较时它和用户那条(带时间戳)不相等,
+    迁移/初始化各并一次,白名单页就会出现两条同路径、一条没有日期。
+    """
+    existing = {white_list_identity(item) for item in candidate.get('white_list', [])}
+    for item in defaults:
+        key = white_list_identity(item)
+        if key and key in existing:
+            continue
+        candidate.setdefault('white_list', []).append(copy.deepcopy(item))
+        if key:
+            existing.add(key)
 
 class PolicyAccessMixin:
     def _load_scoped_config(self):
@@ -22,7 +38,9 @@ class PolicyAccessMixin:
         for path in own_files:
             if path and os.path.isfile(path):
                 path = os.path.abspath(path)
-                if not any(isinstance(item, dict) and item.get('file') == path for item in defaults.get('white_list', [])):
+                # 按路径比较(大小写不敏感),否则同一文件会被当成两条
+                if not any(white_list_identity(item) == white_list_identity(path)
+                           for item in defaults.get('white_list', [])):
                     defaults.setdefault('white_list', []).append({'file': path, 'is_dir': False, 'time': 0})
         try:
             factory = getattr(self, '_policy_backend_factory', WindowsPolicyBackend)
@@ -237,10 +255,7 @@ class PolicyAccessMixin:
         if source is None: return {'available': False}
         candidate, digest, user_data = source
         candidate = {**policy_values(self._policy_store.defaults), **candidate}
-        defaults = self._policy_store.defaults.get('white_list', [])
-        for item in defaults:
-            if item not in candidate.get('white_list', []):
-                candidate.setdefault('white_list', []).append(copy.deepcopy(item))
+        _append_missing_white_list(candidate, self._policy_store.defaults.get('white_list', []))
         safe = copy.deepcopy(candidate)
         for key in ('api_key', 'ai_api_key', 'ai_api_key_enc'):
             if safe.get(key): safe[key] = '[redacted]'
@@ -258,9 +273,7 @@ class PolicyAccessMixin:
                 return {'ok': False, 'error': 'legacy_configuration_changed'}
             candidate.update(source[0])
             user_data = source[2]
-            for item in store.defaults.get('white_list', []):
-                if item not in candidate.get('white_list', []):
-                    candidate.setdefault('white_list', []).append(copy.deepcopy(item))
+            _append_missing_white_list(candidate, store.defaults.get('white_list', []))
         values = policy_values(candidate)
         def initialize():
             with self.lock_config:
