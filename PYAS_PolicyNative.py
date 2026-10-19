@@ -13,6 +13,29 @@ from PYAS_Policy import PolicyDenied
 def _kernel(): return ctypes.WinDLL('kernel32', use_last_error=True)
 
 
+def launcher_path():
+    """The installed static launcher is the only sanctioned way to start an
+    independent frozen instance. The elevated helper must go through it so the
+    PyInstaller onefile bootloader resets the inherited parent environment
+    (PYINSTALLER_RESET_ENVIRONMENT=1) instead of reusing the GUI's _MEI state."""
+    from PYAS_PolicyWindows import secure_path
+    path = os.path.join(os.path.dirname(sys.executable), 'PYAS_Launcher.exe')
+    if not os.path.isfile(path):
+        raise PolicyDenied('Authorization launcher is missing from the installation directory')
+    details = {}
+    if not secure_path(path, installation=True, details=details):
+        raise PolicyDenied('Authorization launcher is not a trusted installation component: '
+                           + json.dumps(details, ensure_ascii=False))
+    return path
+
+
+def _elevate_arguments(request, digest):
+    """Fixed launcher, fixed verb, fixed helper flag; no caller-controlled text."""
+    launcher = launcher_path()
+    return launcher, subprocess.list2cmdline(
+        ['--wait', '--pyas-policy-helper', request, digest])
+
+
 def elevate_helper(request, digest):
     class Icon(ctypes.Union):
         _fields_ = [('icon', wt.HANDLE), ('monitor', wt.HANDLE)]
@@ -22,10 +45,11 @@ def elevate_helper(request, digest):
             ('lpDirectory', wt.LPCWSTR), ('nShow', ctypes.c_int), ('hInstApp', wt.HINSTANCE),
             ('lpIDList', ctypes.c_void_p), ('lpClass', wt.LPCWSTR), ('hkeyClass', wt.HKEY),
             ('dwHotKey', wt.DWORD), ('icon', Icon), ('hProcess', wt.HANDLE)]
+    file, parameters = _elevate_arguments(request, digest)
     info = ExecuteInfo()
     info.cbSize = ctypes.sizeof(info); info.fMask = 0x40 | 0x100 | 0x400
-    info.lpVerb = 'runas'; info.lpFile = sys.executable
-    info.lpParameters = subprocess.list2cmdline(['--pyas-policy-helper', request, digest])
+    info.lpVerb = 'runas'; info.lpFile = file
+    info.lpParameters = parameters
     info.lpDirectory = os.path.dirname(sys.executable); info.nShow = 0
     function = ctypes.WinDLL('shell32', use_last_error=True).ShellExecuteExW
     function.argtypes = [ctypes.POINTER(ExecuteInfo)]; function.restype = wt.BOOL
@@ -34,7 +58,6 @@ def elevate_helper(request, digest):
     if not info.hProcess:
         raise PolicyDenied('Authorization launch could not be tracked; no policy change was submitted')
     return info.hProcess
-
 
 def process_exit_code(handle):
     kernel = _kernel()

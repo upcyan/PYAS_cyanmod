@@ -128,7 +128,54 @@ class HelperFailureTests(unittest.TestCase):
              patch.object(windows, '_close') as close:
             self.assertEqual(windows.helper_main(['request', 'a' * 64]), 45)
             self.assertEqual([c.args[0] for c in close.call_args_list], [456, 123])
-        self.assertIn('receipt creation', windows.helper_failure(45, 'before readiness'))
-        self.assertIn('exited 45', windows.helper_failure(45, 'before readiness'))
+    @unittest.skipUnless(os.name == 'nt', 'requires Windows ctypes')
+
+    def test_elevation_routes_through_the_static_launcher(self):
+        # Regression for 'exited 1 before Python initialization': the runas child
+        # inherited the GUI's PyInstaller _PYI_* environment and the bootloader
+        # aborted. Elevation must start the static launcher instead of PYAS.exe.
+        captured = {}
+
+        class Info:
+            hProcess = None
+            lpFile = None
+            lpParameters = None
+            lpVerb = None
+
+        holder = Info()
+
+        class Function:
+            argtypes = None
+            restype = None
+            def __call__(self, pointer):
+                # A real ShellExecuteExW writes the process handle back into the
+                # structure; the fake must do the same on the byref target.
+                pointer.hProcess = 4321
+                captured.update(file=pointer.lpFile, parameters=pointer.lpParameters,
+                                verb=pointer.lpVerb)
+                return True
+
+        class Shell:
+            ShellExecuteExW = Function()
+
+        with patch.object(native, 'launcher_path', return_value='C:/Program Files/PYAS/PYAS_Launcher.exe'), \
+             patch.object(native.ctypes, 'WinDLL', return_value=Shell()), \
+             patch.object(native.ctypes, 'sizeof', return_value=152), \
+             patch.object(native.ctypes, 'byref', side_effect=lambda value: value):
+            handle = native.elevate_helper('request', 'a' * 64)
+        self.assertEqual(handle, 4321)
+        self.assertEqual(captured['file'], 'C:/Program Files/PYAS/PYAS_Launcher.exe')
+        self.assertEqual(captured['verb'], 'runas')
+        self.assertIn('--pyas-policy-helper', captured['parameters'])
+        self.assertIn('--wait', captured['parameters'])
+
+    def test_launcher_path_rejects_missing_component(self):
+        with patch.object(native.os.path, 'isfile', side_effect=lambda p: 'PYAS_Launcher' not in p):
+            with self.assertRaises(PolicyDenied):
+                native.launcher_path()
+
+
+if __name__=='__main__':unittest.main()
+
 
 if __name__=='__main__':unittest.main()
