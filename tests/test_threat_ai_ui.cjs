@@ -141,7 +141,13 @@ const assert = require('node:assert/strict');
             assert.deepEqual([facts.x, facts.y, facts.w, facts.h], [0, 0, 900, 760]);
             assert.equal(facts.pointer, 'none'); assert.equal(facts.top || facts.bottom, false);
             assert.equal((facts.mask.match(/linear-gradient/g) || []).length, 4);
-            assert.match(facts.mask, /0.55/); assert.match(facts.mask, /0.14/);
+            // 渐隐的具体档位是设计参数(2026-10-19 按「过渡太急、颜色太深」重排过一次:
+            // 34px/4 档 -> 64px/8 档),不宜把某一档的 alpha 写死在测试里。
+            // 这里锁的是「四边都是连续渐隐、末档透明」——也就是没有实色边框、没有硬切口。
+            assert.ok((facts.mask.match(/rgba\(0, 0, 0, 0\.\d+\)/g) || []).length >= 20,
+                '四边都要铺多档中间透明度,否则就是硬边');
+            assert.ok((facts.mask.match(/rgba\(0, 0, 0, 0\)/g) || []).length >= 4,
+                '四边末档必须是透明,不能收成实色边');
             assert.equal(facts.animation, 'ai-window-spectrum'); assert.equal(facts.state, 'running');
         });
         await check('rainbow is actually animated', async () => {

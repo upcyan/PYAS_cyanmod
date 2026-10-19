@@ -12,7 +12,7 @@ import PYAS_PolicyWindows as windows
 
 def main():
     root = Path(os.environ['PYAS_TEST_POLICY_ROOT'])
-    fixed = "$root=Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'PYAS.Policy'"
+    fixed = "$root=[IO.Path]::Combine($programData,'PYAS.Policy')"
     assert windows.BROKER.count(fixed) == 1
     windows.BROKER = windows.BROKER.replace(fixed, "$root='" + str(root).replace("'", "''") + "'")
     if sys.argv[1:] and sys.argv[1] == '--pyas-policy-helper':

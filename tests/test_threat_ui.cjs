@@ -178,7 +178,8 @@ const assert = require('node:assert/strict');
         const classic = main.locator('#classic_menu_options');
         const clearDecisions = main.locator('#clear_alert_rules');
         assert.equal(await classic.isVisible(), false);
-        assert.equal(await main.locator('#setting_window .settings-group').count(), 2);
+        // 三组:菜单扫描 / 交互模式 / 忽略驱动防护状态(2026-10-19 起后者带二级行,同样要共用一张卡)
+        assert.equal(await main.locator('#setting_window .settings-group').count(), 3);
         assert.equal(await main.locator('#ai_window .settings-group').count(), 4, 'AI settings retain model, decision, suppression and draft groups');
         assert.equal(await main.evaluate(() => document.querySelector('[data-config-key="context_switch"]').closest('.settings-group') === document.querySelector('[data-config-key="interactive_switch"]').closest('.settings-group')), false, 'each parent must have a separate group');
         assert.equal(await automatic.isVisible(), false);

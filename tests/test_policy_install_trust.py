@@ -123,10 +123,18 @@ class InstallationTrustTests(unittest.TestCase):
                 self.skipTest('cannot grant Users modify: ' + granted.stderr.strip())
             details = {}
             self.assertFalse(windows.secure_path(probe, installation=True, details=details))
-            self.assertEqual(details.get('stage'), 'dacl')
-            self.assertEqual(details.get('reason'), 'a non-administrator can modify this object')
-            self.assertIn(details.get('writer_sid'),
-                          {'S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', 'S-1-3-0'})
+            # Which check fails first depends on the identity running the suite:
+            # a standard user owns the temp directory and stops at 'owner',
+            # while an administrator reaches the DACL check. Both are correct
+            # rejections, so the invariant is the rejection plus its reason.
+            stage = details.get('stage')
+            self.assertIn(stage, {'owner', 'dacl'})
+            if stage == 'dacl':
+                self.assertEqual(details.get('reason'), 'a non-administrator can modify this object')
+                self.assertIn(details.get('writer_sid'),
+                              {'S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', 'S-1-3-0'})
+            else:
+                self.assertEqual(details.get('reason'), 'owner is not an administrator/system identity')
 
     def test_installation_outside_program_files_is_rejected_by_location(self):
         issue = windows.installation_trust_issue()

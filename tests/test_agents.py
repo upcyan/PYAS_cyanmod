@@ -2,7 +2,8 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from PYAS_Agents import AgentMonitorMixin, _match_agent_connections, match_agent_name
+from PYAS_Agents import (AgentMonitorMixin, _endpoint_identity,
+                         _match_agent_connections, match_agent_name)
 
 
 class Owner(AgentMonitorMixin):
@@ -36,6 +37,41 @@ class MatchTests(unittest.TestCase):
 class ScanTests(unittest.TestCase):
     def setUp(self):
         self.owner = Owner()
+
+    def test_endpoint_identity_normalizes_loopback(self):
+        """首见判定:回环只按主机判身份,端口翻动不算新端点;远程仍精确到端口"""
+        for endpoint in ("127.0.0.1:11434", "127.0.0.1:63745", "::1:8080", "[::1]:8080",
+                         "localhost:5000"):
+            self.assertIn(_endpoint_identity(endpoint), ("127.0.0.1", "::1", "localhost"),
+                          f"{endpoint} 应归为回环主机身份")
+
+        self.assertEqual(_endpoint_identity("1.2.3.4:443"), "1.2.3.4:443")
+        self.assertEqual(_endpoint_identity("8.8.8.8:53"), "8.8.8.8:53")
+        self.assertEqual(_endpoint_identity("1.2.3.4:8443"), "1.2.3.4:8443")
+
+    def test_loopback_port_churn_is_not_a_new_endpoint(self):
+        """回环随机端口不再反复入账,远程新端点仍必须记录(负向守卫)"""
+
+        def scan(rows):
+            with patch('PYAS_Agents._query_tcp_rows', return_value=rows), \
+                 patch('PYAS_Agents._process_image_path', return_value=''), \
+                 patch('PYAS_Agents._process_is_elevated', return_value=False), \
+                 patch('PYAS_Agents.verify_agent_identity', return_value=False):
+                return self.owner.scan_agent_processes(lister=lambda: [('kimi.exe', 2)])
+
+        def net_details():
+            return [kw.get('detail', '') for (args, kw) in self.owner.logs
+                    if args[1] == 'Agent Network']
+
+        scan([('127.0.0.1', 11434, 2)])          # 首见本机服务:入账
+        self.assertEqual(len(net_details()), 1)
+        self.assertIn('127.0.0.1:11434', net_details()[0])
+
+        scan([('127.0.0.1', 63745, 2)])          # 同主机新端口:不算首见
+        self.assertEqual(len(net_details()), 1, '回环随机端口不该重复入账')
+
+        scan([('203.0.113.9', 443, 2)])          # 新远程端点:必须仍入账
+        self.assertEqual(len(net_details()), 2, '远程新端点必须仍被记录')
 
     def test_scan_groups_and_logs_first_sighting(self):
         activity = self.owner.scan_agent_processes(

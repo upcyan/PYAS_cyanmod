@@ -40,7 +40,9 @@ class BrokerIntegrationTests(unittest.TestCase):
         popen = subprocess.Popen
         def isolated_script(request, digest):
             text = base64.b64decode(script(request, digest)).decode('utf-16-le')
-            fixed = "$root=Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'PYAS.Policy'"
+            # Redirect only the final $root: the machine-scope lookup above it is
+            # part of what this test must exercise.
+            fixed = "$root=[IO.Path]::Combine($programData,'PYAS.Policy')"
             self.assertEqual(text.count(fixed), 1)
             text = text.replace(fixed, "$root='" + str(self.root).replace("'", "''") + "'")
             # Until the production diagnostic channel exists, expose the original

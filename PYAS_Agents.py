@@ -213,6 +213,30 @@ def _match_agent_connections(rows, pid_product):
     return matched
 
 
+def _endpoint_identity(endpoint):
+    """首见判定的端点身份。
+
+    回环连接的两端都在本机,每次连接的端口都会翻动(127.0.0.1:63745 → :51484 → …),
+    按完整 host:port 判「首见」会把本机 IPC 反复记成新端点——实测回环条目占
+    Agent Network 的 41%(2026-10-16 实况核对)。回环只按主机判身份:本机存在过该
+    peer 就算已见,既保留「发现本机服务」的审计价值,又不再被随机端口刷屏。
+    非回环仍按 host:port 精确判定(远程服务端口稳定,是有效信号)。
+    """
+    host, sep, _port = endpoint.rpartition(":")
+
+    if sep:
+        # [::1]:8080 与 ::1:8080 是同一身份的两种写法,方括号归一化掉,
+        # 保证「同主机」判定不随表示法漂移
+        normalized = host.strip("[]")
+
+        if normalized in ("127.0.0.1", "::1", "localhost"):
+            return normalized
+
+    return endpoint
+
+    return endpoint
+
+
 def verify_agent_identity(exe_path):
     """身份分档:Authenticode 有效签名=已验证;缺失/失败=未验证(名字级弱证据)。
 
@@ -479,7 +503,7 @@ class AgentMonitorMixin:
             behavior.setdefault(item["name"], {})["connections"] = item["connections"]
 
             known_eps = seen_eps.setdefault(item["name"], set())
-            fresh = [endpoint for endpoint in conns if endpoint not in known_eps]
+            fresh = [endpoint for endpoint in conns if _endpoint_identity(endpoint) not in known_eps]
 
             if enabled and hasattr(self, "write_log"):
                 for endpoint in fresh[:4]:  # 每轮最多记 4 条新端点,防端口翻动刷屏
@@ -488,10 +512,10 @@ class AgentMonitorMixin:
                         detail=f"{item['name']} → {endpoint}")
 
             if fresh:
-                known_eps.update(fresh)
+                known_eps.update(_endpoint_identity(endpoint) for endpoint in fresh)
 
                 if len(known_eps) > 128:  # 防膨胀:重置重学
-                    seen_eps[item["name"]] = set(fresh)
+                    seen_eps[item["name"]] = {_endpoint_identity(endpoint) for endpoint in fresh}
 
             item["events"] = getattr(self, "_agent_event_counts", {}).get(item["name"], 0)
 

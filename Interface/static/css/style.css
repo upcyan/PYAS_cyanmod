@@ -73,6 +73,20 @@
     --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.14);
     --shadow-3: 0 16px 40px rgba(0, 0, 0, 0.18);
 
+    /* ===== Windows 11 材质层(Mica / Acrylic 的 CSS 等价物) =====
+       原生材质用不了:pywebview 的 WinForms 宿主是 GDI 重定向位图,
+       DWM 的 Mica/Acrylic 被整幅盖住(三模式抓屏像素零差异,已实证)。
+       观感只能在 CSS 层造,三件套缺一不可:
+         1) 色调分层   —— 导航层带一层随主题走的淡色,不是一块平涂的白
+         2) 受光边缘   —— 顶部 1px 高光 + 更淡的分隔线,像被上方光源照着
+         3) 极细颗粒   —— 消除纯色平涂的塑料感;「材质」与「颜色」的分界就在这
+       颗粒烘在 data URI 里(rect opacity),不靠 mix-blend-mode:
+       后者会把噪点压到子元素(图标)上,得不偿失。 */
+    --material-tint: 7%;                                    /* 强调色薄染比例 */
+    --material-sheen: rgba(255, 255, 255, 0.22);            /* 受光 */
+    --material-edge: rgba(255, 255, 255, 0.65);             /* 顶部 1px 高光 */
+    --material-hairline: rgba(0, 0, 0, 0.07);               /* 与内容区的分隔线 */
+
     /* ===== 动效:时长 + 缓动 ===== */
     --dur-fast: 150ms;
     --dur-base: 250ms;
@@ -94,6 +108,11 @@
     --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.5);
     --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.55);
     --shadow-3: 0 16px 40px rgba(0, 0, 0, 0.65);
+    /* 暗色下「受光」要反过来:高光压到 6% 以内,否则表面会发灰发白 */
+    --material-tint: 6%;
+    --material-sheen: rgba(255, 255, 255, 0.055);
+    --material-edge: rgba(255, 255, 255, 0.075);
+    --material-hairline: rgba(255, 255, 255, 0.075);
 }
 
 body {
@@ -118,14 +137,36 @@ body {
     background-color: var(--bg-window);
 }
 
+/* 导航层(标题栏 + 侧栏)共用的材质:
+   底色仍是不透明的 --bg-nav(主题切换要靠它,测试也直接比对这个计算值),
+   材质感由 background-image 的三层叠加提供 —— 背景永远画在内容之下,
+   比用 ::before 浮层安全(浮层会盖住图标和标题栏按钮,还得逐个加 z-index):
+     ① 白色受光,220px 内衰减:表面「被上方光源照着」,不是一整块平色
+     ② 强调色薄染,200px 内衰减:Mica 从壁纸取色的等价物。只染导航层、
+        不染内容区,否则整扇窗读完像蒙了层蓝灰滤镜
+     ③ 颗粒:透明度烘在 data URI 的 rect opacity 上,不用 mix-blend-mode,
+        避免噪点压到图标上
+   另加顶部 1px 高光 + 更淡的发丝分隔线,这是 Win11 表面「受光边缘」的画法。 */
+.navigate-window,
+.options-window {
+    position: relative;
+    background-color: var(--bg-nav);
+    background-image:
+        linear-gradient(180deg, var(--material-sheen), transparent 220px),
+        linear-gradient(180deg, color-mix(in srgb, var(--accent-color) var(--material-tint), transparent), transparent 200px),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.08'/%3E%3C/svg%3E");
+    background-repeat: no-repeat, no-repeat, repeat;
+    background-size: 100% 100%, 100% 100%, 160px 160px;
+    box-shadow: inset 0 1px 0 var(--material-edge);
+}
+
 .navigate-window {
     height: 44px;
-    background-color: var(--bg-nav);
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 0 var(--space-2) 0 var(--space-5);
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--material-hairline);
     transition: background-color 0.3s;
 }
 
@@ -146,17 +187,21 @@ body {
     height: 32px;
     border: none;
     background: transparent;
-    border-radius: var(--radius-control);
+    /* Windows 11 标题栏按钮是 4px 小圆角,不是胶囊:这里收到最紧的一档圆角令牌 */
+    border-radius: var(--radius-sm);
     cursor: pointer;
     display: flex;
     justify-content: center;
     align-items: center;
-    transition: background-color 0.15s;
+    transition: background-color 0.15s, color 0.15s;
     color: var(--text-secondary);
 }
 
 .ctrl-btn:hover { background-color: var(--bg-hover); color: var(--text-primary); }
+.ctrl-btn:active { background-color: color-mix(in srgb, var(--text-primary) 14%, transparent); }
+.ctrl-btn:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
 #close_button:hover { background-color: var(--color-danger); color: var(--text-on-accent); }
+#close_button:active { background-color: var(--color-danger-strong); color: var(--text-on-accent); }
 
 .theme-svg {
     width: 16px;
@@ -170,13 +215,12 @@ body {
 
 .options-window {
     width: 64px;
-    background-color: var(--bg-nav);
     display: flex;
     flex-direction: column;
     align-items: center;
     padding: var(--space-4) 0;
     gap: var(--space-3);
-    border-right: 1px solid var(--border-color);
+    border-right: 1px solid var(--material-hairline);
     transition: background-color 0.3s;
 }
 
@@ -962,6 +1006,41 @@ select.hidden + .custom-select-wrapper {
 
 .app-container.fade-in {
     opacity: 1 !important;
+}
+
+/* ===== 最大化 / 最小化的「窗口动画」 =====
+   为什么在 CSS 层做:无边框窗口的最大化/还原走 pywebview 的
+   `Form.WindowState`,而本机系统动画是关着的(ClientAreaAnimation=False,
+   threat.css 的流光那段也踩过同一条),所以原生只会「啪」地换尺寸。
+   HWND 本身没法在这里动,但可以让**内容**先落定:窗口尺寸瞬间变化后,
+   标题栏与内容区从 .972 缩放 + 半透明归位,读起来就是 Windows 的
+   「放大/收起」而不是硬切。
+   不按 prefers-reduced-motion 关掉,理由同 threat.css:该媒体查询在本机
+   恒为真,一关就等于没做;两段动画都在 200ms 内、只改 opacity/transform,
+   属于装饰性过渡,不承载任何状态信息。 */
+@keyframes win-surface-grow {
+    from { opacity: .35; transform: scale(.972); }
+    to   { opacity: 1;   transform: scale(1); }
+}
+
+@keyframes win-surface-shrink {
+    from { opacity: 1;   transform: scale(1); }
+    to   { opacity: 0;   transform: scale(.94); }
+}
+
+.app-container > .navigate-window,
+.app-container > .main-layout {
+    transform-origin: 50% 34%;
+}
+
+.app-container.win-anim-grow > .navigate-window,
+.app-container.win-anim-grow > .main-layout {
+    animation: win-surface-grow 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.app-container.win-anim-shrink > .navigate-window,
+.app-container.win-anim-shrink > .main-layout {
+    animation: win-surface-shrink 160ms cubic-bezier(0.4, 0, 1, 1) both;
 }
 
 .manage-list-header {

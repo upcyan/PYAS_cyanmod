@@ -624,6 +624,16 @@ class PEFeatureMixin:
             if fsize == 0 or fsize > 4294967296:
                 return None
 
+            # 预筛:非 PE 文件(无 MZ 头)直接跳过。目录/落盘扫描会把 .txt、.log、资源文件
+            # 一并送进来,交给 pefile 解析必然抛 PEFormatError——实测这类报错占
+            # extract_features 异常的 96/103(2026-10-16 实况核对),既刷日志又白烧解析 CPU。
+            try:
+                with open(file_path, "rb") as header_probe:
+                    if header_probe.read(2) != b"MZ":
+                        return None
+            except OSError:
+                return None
+
             base = self._base_defaults()
             dlls = set()
             apis = set()
@@ -941,6 +951,9 @@ class PEFeatureMixin:
 
             return {"Base": base, "DLLs": list(dlls), "APIs": list(apis)}
 
+        except pefile.PEFormatError:
+            # MZ 头在但结构损坏/被截断(部分下载、占位文件):属扫描噪音,静默返回,不记异常
+            return None
         except Exception:
             log_exception("PYAS_Features.PEFeatureMixin.extract_features:782")
             return None

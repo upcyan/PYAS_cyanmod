@@ -9,13 +9,14 @@ import ctypes.wintypes as wt
 import hashlib
 import json
 import os
+import re
 import struct
 import subprocess
 import sys
 import threading
 import time
 from uuid import uuid4
-from PYAS_DataPaths import policy_data_dir, user_data_dir, legacy_config_path
+from PYAS_DataPaths import known_folder, policy_data_dir, user_data_dir, legacy_config_path
 from PYAS_FileTrust import locked_read, system_directory
 from PYAS_Policy import (POLICY_KEYS, BOOL_KEYS, STRING_KEYS, NUMBER_KEYS, LIST_KEYS,
                          FORMAT, MAX_BYTES, PolicyDenied, PolicyCancelled, PolicyPending, bounded_json)
@@ -214,8 +215,13 @@ def secure_path(path, directory=False, installation=False, ancestor=False, detai
 
 def _environment():
     directory = system_directory()
-    env = {'SystemRoot': os.path.dirname(directory), 'WINDIR': os.path.dirname(directory),
+    root = os.path.dirname(directory)
+    env = {'SystemRoot': root, 'WINDIR': root, 'SystemDrive': os.path.splitdrive(root)[0],
         'PATH': directory, 'PSModulePath': os.path.join(directory, 'WindowsPowerShell', 'v1.0', 'Modules')}
+    # PowerShell resolves machine folders from these; without them .NET's
+    # GetFolderPath returns an empty string and Join-Path throws.
+    try: env['ProgramData'] = known_folder(0x23)
+    except OSError: pass
     for key in ('TEMP', 'TMP'):
         if os.environ.get(key): env[key] = os.environ[key]
     return directory, env
@@ -257,11 +263,19 @@ def installed_helper_trusted():
     return installation_trust_issue() is None
 
 
+# Machine scope is read from the registry, never from the process environment:
+# the helper deliberately hands PowerShell a minimal environment, and in it
+# [Environment]::GetFolderPath('CommonApplicationData') returns an empty string,
+# so Join-Path throws before the stage counter exists (exit 1, no output at all).
+# Comments stay out of BROKER because the whole script travels as -EncodedCommand,
+# which is bounded by the Windows command-line limit.
 BROKER = r'''
 $ErrorActionPreference='Stop'
-
-
- $root=Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'PYAS.Policy'
+$stage=40
+ $programData=[Environment]::GetEnvironmentVariable('ProgramData','Machine')
+ if(-not $programData){$programData=$env:ProgramData}
+ if(-not $programData){exit 43}
+ $root=[IO.Path]::Combine($programData,'PYAS.Policy')
  $target=Join-Path $root 'Config.json'
  $utf8=New-Object Text.UTF8Encoding($false)
 $allowed=@(__ALL_KEYS__)
@@ -269,7 +283,7 @@ $bools=@(__BOOL_KEYS__)
 $strings=@(__STRING_KEYS__)
 $numbers=@(__NUMBER_KEYS__)
 $lists=@(__LIST_KEYS__)
-$nonce='';$ack='';$ackCreated=$false;$held=$false;$reader=$null;$mutex=$null;$stage=40
+$nonce='';$ack='';$ackCreated=$false;$held=$false;$reader=$null;$mutex=$null
 function Secure($path,$directory) {
  if( -not  (Test-Path -LiteralPath $path)){return $false}
  if(([IO.File]::GetAttributes($path) -band  [IO.FileAttributes]::ReparsePoint) -ne  0){return $false}
@@ -373,7 +387,32 @@ try{
  Write-New $temporary $values
  if((Test-Path -LiteralPath $target) -and ( -not $latest)){[IO.File]::Move($target,(Join-Path $root ('.untrusted-config-'+$nonce+'.json')))}
  $stage=49
- if(Test-Path -LiteralPath $target){[IO.File]::Replace($temporary,$target,$null)}else{[IO.File]::Move($temporary,$target)}
+ $failed=''
+ for($attempt=1;$attempt -le 8;$attempt++){
+  try{
+   if(Test-Path -LiteralPath $target){[IO.File]::Replace($temporary,$target,[NullString]::Value)}else{[IO.File]::Move($temporary,$target)}
+   $failed='';break
+  }catch{
+   $h=$_.Exception.HResult;$inner=0
+   if($_.Exception.InnerException){$inner=$_.Exception.InnerException.HResult}
+   $failed=('win32=0x{0:X8} hresult=0x{1:X8} attempt={2}' -f $inner,$h,$attempt)
+   $done=$false
+   try{
+    if(Test-Path -LiteralPath $target){
+     $check=$utf8.GetString([IO.File]::ReadAllBytes($target))|ConvertFrom-Json
+     $done=($check._request -ceq $nonce)
+    }
+   }catch{}
+   if($done){$failed='';break}
+   if(-not (Test-Path -LiteralPath $temporary)){break}
+   Start-Sleep -Milliseconds (120+180*$attempt)
+  }
+ }
+ if($failed){
+  if(Test-Path -LiteralPath $temporary){try{[IO.File]::Delete($temporary)}catch{}}
+  [Console]::Error.WriteLine('policy replace failed '+$failed)
+  throw 'policy replace failed'
+ }
  exit 0
 }catch{exit $stage}finally{
  if($reader){$reader.Dispose()}
@@ -413,6 +452,44 @@ def read_helper_log(request_path, limit=2048):
     return ' '.join(raw.decode('utf-8', 'replace').split())
 
 
+BOOTSTRAP_LOG_NAME = 'policy-helper-bootstrap.log'
+
+
+def bootstrap_log_path():
+    """Fixed path where the native launcher redirects the elevated helper's stderr.
+
+    A helper that dies inside the frozen bootloader never reaches Python, so no
+    code here can record its cause; the launcher's redirect is the only channel.
+    The launcher owns the location, so nothing in this module can redirect it.
+    """
+    try: return os.path.join(known_folder(0x23), 'PYAS', 'Logs', BOOTSTRAP_LOG_NAME)
+    except OSError: return ''
+
+
+def bootstrap_diagnostic(limit=8192):
+    path = bootstrap_log_path()
+    if not path: return ''
+    try:
+        with open(path, 'rb') as stream:
+            stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, stream.tell() - limit))
+            raw = stream.read(limit)
+    except OSError: return ''
+    return raw.decode('utf-8', 'replace')
+
+
+def bootstrap_summary(text):
+    """Last line written by the helper itself, never our own launch/exit marks."""
+    marker = '--- child output ---'
+    start = text.rfind(marker)
+    if start < 0: return ''
+    tail = text[start + len(marker):]
+    end = tail.find('==== [')
+    if end >= 0: tail = tail[:end]
+    lines = [' '.join(line.split()) for line in tail.splitlines() if line.strip()]
+    return lines[-1][:240] if lines else ''
+
+
 def _script(request, digest):
     script = BROKER.replace('__REQUEST__', base64.b64encode(request.encode('utf-8')).decode('ascii')).replace('__HEADER_HASH__', digest)
     for marker, keys in (('__ALL_KEYS__', POLICY_KEYS), ('__BOOL_KEYS__', BOOL_KEYS),
@@ -428,7 +505,7 @@ def _run_broker(request, digest, stdout=subprocess.DEVNULL, stderr=subprocess.DE
     command = [os.path.join(directory, 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
         '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', _script(request, digest)]
     return subprocess.Popen(command, cwd=directory, env=env, creationflags=0x08000000,
-                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr)
 
 
 class WindowsPolicyBackend:
@@ -568,7 +645,7 @@ class WindowsPolicyLease:
                 except (OSError, ValueError): pass
             code = self._poll()
             if code is not None:
-                raise PolicyDenied(helper_failure(code, 'before authorization readiness'))
+                raise PolicyDenied(self._denied(code, 'before authorization readiness'))
             self.backend.pause()
         raise PolicyDenied('Administrator authorization timed out')
 
@@ -582,6 +659,21 @@ class WindowsPolicyLease:
             self.launch_done.set()
             if self.closed and self.native_process:
                 _close(self.native_process); self.native_process = None
+
+    def _denied(self, code, phase):
+        """Broker 的失败原因只在它自己的 stderr 里(helper 日志),把 win32 码捞出来。
+
+        没有这一句,用户只能看到「atomic policy replacement failed」,分不清是
+        共享冲突(别的进程正读着)、权限还是磁盘问题。
+        """
+        message = helper_failure(code, phase)
+        if code and (code & 0xFFFF0000) != 0x10000:
+            detail = read_helper_log(self.path, 8192)
+            marker = detail.find('policy replace failed')
+            if marker >= 0:
+                match = re.search(r'win32=0x[0-9A-F]{8}', detail[marker:])
+                if match: message += ' (' + match.group(0) + ')'
+        return message
 
     def _poll(self):
         if self.process is not None: return self.process.poll()
@@ -602,7 +694,7 @@ class WindowsPolicyLease:
             if code is not None:
                 document = self.backend.read_policy()
                 if code != 0 and (not document or document.get('_request') != self.nonce):
-                    raise PolicyDenied(helper_failure(code, 'during policy commit'))
+                    raise PolicyDenied(self._denied(code, 'during policy commit'))
                 if not document or document.get('_request') != self.nonce: raise PolicyDenied('Policy commit could not be confirmed')
                 self.committed = True
                 return document
@@ -643,16 +735,29 @@ HELPER_FAILURES = {
 
 
 def helper_failure(code, phase):
+    broker = 'broker' in phase
     if code & 0xFFFF0000 == 0x10000:
         reason = 'request verification failed (WinError ' + str(code & 0xFFFF) + ')'
+    elif broker:
+        # Broker stages report their own number (40-49); a bare 1 means the
+        # PowerShell host itself died before the script reached its reporting.
+        reason = ('PowerShell broker exited before reporting a stage' if code == 1
+                  else 'PowerShell broker exited ' + str(code))
     else:
         reason = HELPER_FAILURES.get(code, 'unexpected process exit')
-    return 'Administrator helper exited ' + str(code) + ' ' + phase + ': ' + reason
+    message = 'Administrator helper exited ' + str(code) + ' ' + phase + ': ' + reason
+    if code == 1 and not broker:
+        # Exit 1 comes from the frozen bootloader, which reports the real cause
+        # on stderr. The hidden helper has no console, so the launcher's redirect
+        # is what preserves it; surface that line instead of guessing.
+        summary = bootstrap_summary(bootstrap_diagnostic())
+        if summary: message += ' | bootloader: ' + summary
+        else:
+            path = bootstrap_log_path()
+            if path: message += ' | bootstrap log: ' + path
+    return message
 
 
-def helper_main(arguments):
-    request = arguments[0] if len(arguments) >= 2 else ''
-    if os.name != 'nt' or not getattr(sys, 'frozen', False) or len(arguments) != 2: return 2
 def helper_main(arguments):
     request = arguments[0] if len(arguments) >= 2 else ''
     if os.name != 'nt' or not getattr(sys, 'frozen', False) or len(arguments) != 2: return 2
@@ -662,6 +767,7 @@ def helper_main(arguments):
     started = _time.time()
     code = 11; phase = 'exited before helper initialization'
     process = None
+    stdout_text = stderr_text = ''
     try:
         import PYAS_PolicyNative
         phase = 'during request verification'
@@ -671,10 +777,17 @@ def helper_main(arguments):
             except OSError as error: code = 0x20000 | (getattr(error, 'winerror', 0) or 0); return code
             except Exception: code = 12; return code
             phase = 'while waiting for the PowerShell broker'
-            try: code = process.wait(timeout=150)
+            # communicate() drains both pipes. Waiting first and reading after
+            # deadlocks as soon as the broker fills the pipe buffer, which is why
+            # the broker used to be detached from its own error output.
+            try:
+                out, err = process.communicate(timeout=150)
+                code = process.returncode
             except subprocess.TimeoutExpired:
-                process.kill(); process.wait()
+                process.kill(); process.communicate()
                 code = 4; return code
+            stdout_text = (out or b'').decode('utf-8', 'replace')[-1200:]
+            stderr_text = (err or b'').decode('utf-8', 'replace')[-1200:]
         finally:
             for handle in reversed(handles): _close(handle)
     except OSError as error:
@@ -694,14 +807,6 @@ def helper_main(arguments):
     except Exception:
         code = 11
     finally:
-        if process is not None and process.stdout is not None:
-            try:
-                stdout_text = (process.stdout.read() or b'').decode('utf-8', 'replace')[-1200:]
-                stderr_text = (process.stderr.read() or b'').decode('utf-8', 'replace')[-1200:]
-            except Exception:
-                stdout_text = stderr_text = 'log capture failed'
-        else:
-            stdout_text = stderr_text = ''
         write_helper_log(request, 'exit=' + str(code) + ' phase=' + phase
                          + ' seconds=' + str(round(_time.time() - started, 1))
                          + '\nstdout:\n' + stdout_text + '\nstderr:\n' + stderr_text)

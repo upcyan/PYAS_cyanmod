@@ -252,8 +252,48 @@ const baseCfg = (overrides) => Object.assign({
         assert.equal(brand.glyph, '#i-shield', '7c: 豁免关闭时应是素盾');
         await strictPage.close();
 
+        // ---------- 8. 首页隐藏驱动灯(忽略驱动防护状态的二级选项,默认关) ----------
+        // 8a 默认不隐藏:同一份四开一关的配置,驱动灯仍要在
+        const defaultPage = await openPage(baseCfg(fourOn));
+        assert.equal(await defaultPage.locator('#light_driver').isHidden(), false,
+            '8a: driver_home_hidden 默认关,驱动灯必须还在');
+        await defaultPage.close();
+
+        // 8b 配置为开:灯消失,但元素还在(只加 hidden 类,不删节点)
+        const hiddenPage = await openPage(baseCfg(Object.assign({}, fourOn, { driver_home_hidden: true })));
+        brand = await readBrand(hiddenPage);
+        assert.equal(await hiddenPage.locator('#light_driver').count(), 1,
+            '8b: 隐藏应走 hidden 类,不该把灯从 DOM 里删掉');
+        assert.equal(await hiddenPage.locator('#light_driver').isHidden(), true,
+            '8b: driver_home_hidden 开启后首页不该显示驱动灯');
+        assert.equal(brand.title, '此设备已受到防护',
+            '8b: 灯都看不见了就不能再拿它参与总述,否则会出现「看不见的那格拖后腿」');
+        assert.equal(brand.onLights, 4, '8b: 亮灯数仍是 4,只是第五格不显示');
+
+        // 8c 二级行只在父开关打开时出现,点一下立刻反映到首页(不用重启)
+        await hiddenPage.click('.nav-btn[data-target="setting_window"]');
+        await hiddenPage.waitForFunction(() => document.getElementById('setting_window').classList.contains('active'));
+        const childRow = hiddenPage.locator('[data-setting-parent="driver_alert_exempt"]');
+        await childRow.waitFor({ state: 'visible' });
+        assert.equal(await hiddenPage.locator('input[data-config-key="driver_home_hidden"]').isChecked(), true,
+            '8c: 二级开关状态要跟随配置');
+        await hiddenPage.locator('label.toggle-switch:has([data-config-key="driver_home_hidden"]) .slider').click();
+        await hiddenPage.waitForFunction(() => !document.getElementById('light_driver').classList.contains('hidden'));
+        // 此刻停在设置页,首页整页 visibility:hidden,isHidden() 恒真 —— 只能看类
+        assert.equal(await hiddenPage.evaluate(() => document.getElementById('light_driver').classList.contains('hidden')), false,
+            '8c: 关掉二级开关后驱动灯要立刻回来');
+        await hiddenPage.close();
+
+        // 8d 父开关关掉时,二级行必须收起来(它是「忽略驱动防护状态」的从属选项)
+        const parentOffPage = await openPage(baseCfg(Object.assign({}, fourOn, { driver_alert_exempt: false })));
+        await parentOffPage.click('.nav-btn[data-target="setting_window"]');
+        await parentOffPage.waitForFunction(() => document.getElementById('setting_window').classList.contains('active'));
+        assert.equal(await parentOffPage.locator('[data-setting-parent="driver_alert_exempt"]').isHidden(), true,
+            '8d: 父开关关闭时二级行应隐藏');
+        await parentOffPage.close();
+
         assert.deepEqual(errors, []);
-        console.log('Home status UI: PASS (三态总述/换素盾/空态两种文案/图标按钮同口径/控件高度/缩放补偿/切换语言/驱动豁免)');
+        console.log('Home status UI: PASS (三态总述/换素盾/空态两种文案/图标按钮同口径/控件高度/缩放补偿/切换语言/驱动豁免/驱动灯隐藏)');
     } finally {
         if (browser) await browser.close();
         await new Promise(resolve => server.close(resolve));

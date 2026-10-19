@@ -2286,17 +2286,89 @@ document.addEventListener('DOMContentLoaded', () => {
         updateCustomSelectUI('log_export_select', 'none');
     });
 
-    document.getElementById('minimize_button')?.addEventListener('click', () => window.pywebview?.api.minimize());
+    // 窗口状态过渡:尺寸由原生窗口瞬间改完后,内容再「落定」一次。
+    // 返回本次动画的可等待时长,最小化要等这段走完再真正收窗(否则内容直接消失)。
+    const WINDOW_ANIM_MS = { grow: 200, shrink: 160 };
+    let windowAnimTimer = 0;
+    const playWindowAnimation = (kind) => {
+        const app = document.querySelector('.app-container');
+        if (!app) return 0;
+        app.classList.remove('win-anim-grow', 'win-anim-shrink');
+        void app.offsetWidth;   // 强制回流,连点同一按钮也能重播
+        app.classList.add(kind === 'shrink' ? 'win-anim-shrink' : 'win-anim-grow');
+        const duration = WINDOW_ANIM_MS[kind === 'shrink' ? 'shrink' : 'grow'];
+        window.clearTimeout(windowAnimTimer);
+        // 动画一结束就摘类(留 140ms 余量),否则残留的类会让下一次点击不重播
+        windowAnimTimer = window.setTimeout(
+            () => app.classList.remove('win-anim-grow', 'win-anim-shrink'), duration + 140);
+        return duration;
+    };
+    window.playWindowAnimation = playWindowAnimation;
 
-    const syncMaximizeIcon = (maximized) => {
+    // 兜底:最小化会立刻把页面置为 hidden,定时器可能被节流,万一没跑到,
+    // 残留的 win-anim-shrink 会把内容按 fill-mode:both 钉在 opacity:0 ——
+    // 从托盘还原时就是一片空白。重新可见时无条件清掉。
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            document.querySelector('.app-container')?.classList.remove('win-anim-grow', 'win-anim-shrink');
+        }
+    });
+
+    // 拖动仍然由 pywebview 的 .pywebview-drag-region 负责(改走 WM_NCLBUTTONDOWN 的
+    // 原生移动循环在 WebView2 上试过:窗口完全拖不动,已回退),但把它每个 mousemove
+    // 一次的「JS → 宿主 → SetWindowPos」压到每帧最多一次:
+    //   原来一个 mousemove 就排一次跨进程调用,高刷屏/机器忙时会积压 ——
+    //   队列越拖越长,窗口落后于光标、一跳一跳的,体感就是掉帧。
+    // 这里只保留「最后一帧的位置」,中间的直接丢弃,永远不排队。
+    const coalesceWindowMoves = () => {
+        const bridge = window.pywebview;
+        if (!bridge || typeof bridge._jsApiCallback !== 'function' || bridge.__pyasMoveCoalesced) return;
+        const original = bridge._jsApiCallback;
+        let pending = null;
+        let scheduled = false;
+        bridge._jsApiCallback = function (name, params, id) {
+            if (name !== 'pywebviewMoveWindow') return original.call(this, name, params, id);
+            pending = { params: params, id: id };
+            if (scheduled) return undefined;
+            scheduled = true;
+            window.requestAnimationFrame(() => {
+                scheduled = false;
+                const next = pending;
+                pending = null;
+                if (next) original.call(bridge, 'pywebviewMoveWindow', next.params, next.id);
+            });
+            return undefined;
+        };
+        bridge.__pyasMoveCoalesced = true;
+    };
+    coalesceWindowMoves();
+    window.addEventListener('pywebviewready', coalesceWindowMoves);
+
+    document.getElementById('minimize_button')?.addEventListener('click', () => {
+        const bridge = window.pywebview?.api;
+        const delay = playWindowAnimation('shrink');
+        if (!bridge) return;
+        // 动画没跑起来(拿不到 .app-container)时 delay 为 0,直接收窗
+        if (!delay) { bridge.minimize(); return; }
+        window.setTimeout(() => bridge.minimize(), delay);
+    });
+
+    const applyMaximizeIcon = (maximized) => {
         document.getElementById('icon_maximize')?.classList.toggle('hidden', !!maximized);
         document.getElementById('icon_restore')?.classList.toggle('hidden', !maximized);
         refreshIconButtonLabels();
     };
-    window.syncMaximizeIcon = syncMaximizeIcon;
+    // 原生路径(系统菜单 / Alt+Space / 快捷键)会直接调这个函数同步图标,
+    // 顺手补一次落定动画,免得只有按钮点击有过渡、其它入口还是硬切
+    window.syncMaximizeIcon = (maximized) => {
+        applyMaximizeIcon(maximized);
+        playWindowAnimation('grow');
+    };
 
     document.getElementById('maximize_button')?.addEventListener('click', () => {
-        window.pywebview?.api.toggle_maximize().then(state => syncMaximizeIcon(!!state)).catch(() => {});
+        window.pywebview?.api.toggle_maximize()
+            .then(state => { applyMaximizeIcon(!!state); playWindowAnimation('grow'); })
+            .catch(() => {});
     });
     document.getElementById('close_button')?.addEventListener('click', () => window.pywebview?.api.hide_window());
 
@@ -2337,13 +2409,19 @@ document.addEventListener('DOMContentLoaded', () => {
             const enabled = !!(cfg && cfg[key + '_switch']);
             document.getElementById('light_' + key)?.classList.toggle('on', enabled);
         });
+        // driver_home_hidden(默认关)把驱动灯整个从首页拿掉。
+        // 灯都不显示了就不能再拿它参与总述:否则会出现「其余四格全亮、文案却写
+        // 未完全开启」——用户看不到是哪一格在拖后腿。所以隐藏时一并从计数集合里摘掉。
+        const driverHidden = !!(cfg && cfg.driver_home_hidden);
+        document.getElementById('light_driver')?.classList.toggle('hidden', driverHidden);
         const brand = document.querySelector('.status-brand');
         if (!brand) return;
         const judged = (cfg && cfg.driver_alert_exempt)
             ? PROTECT_LIGHT_KEYS.filter((key) => key !== 'driver')
             : PROTECT_LIGHT_KEYS;
-        const judgedOn = judged.filter((key) => !!(cfg && cfg[key + '_switch'])).length;
-        const full = judgedOn === judged.length;
+        const counted = driverHidden ? judged.filter((key) => key !== 'driver') : judged;
+        const judgedOn = counted.filter((key) => !!(cfg && cfg[key + '_switch'])).length;
+        const full = judgedOn === counted.length;
         brand.classList.toggle('state-warn', !full);
         const title = brand.querySelector('.state-title');
         if (title) {

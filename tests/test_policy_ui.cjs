@@ -17,7 +17,7 @@ const fs = require('node:fs'), path = require('node:path'), http = require('node
   const page = await browser.newPage({viewport:{width:1000,height:850}});
   const errors=[];page.on('pageerror',e=>errors.push(String(e)));
   await page.addInitScript(() => {
-   window.p = {status:{state:'not_initialized',initialized:false,error:''}, calls:[], writes:[], statusCalls:0,
+   window.p = {status:{state:'not_initialized',initialized:false,error:''}, calls:[], writes:[], statusCalls:0, restartCalls:0,
       mode:'cancel', legacy:true, statusMode:'normal'};
    window.pywebview={api:{
     get_config:async()=>({first_launch:true, language:'simplified_switch',theme:'white_switch',version:'fixture',
@@ -44,6 +44,7 @@ const fs = require('node:fs'), path = require('node:path'), http = require('node
       window.p.status={state:'not_initialized',initialized:false,error:'cancelled'};return {ok:false,cancelled:true};
     },
     show_alert:async()=>true, get_context_menu_status:async()=>({mode:'disabled'}),
+    restart_application:async()=>{window.p.restartCalls++;return window.p.restartMode!=='fail';},
    }};
   });
   await page.goto('http://127.0.0.1:'+server.address().port+'/templates/index.html');
@@ -148,6 +149,32 @@ const fs = require('node:fs'), path = require('node:path'), http = require('node
    assert.equal(await processToggle.isDisabled(),true);
    assert.equal(await page.locator('#policy_initialize_btn').isVisible(),false);
    assert.equal(await page.evaluate(()=>window.p.writes.length),5);
+  });
+  await check('restart state offers exactly one action and relaunches on confirm',async()=>{
+   await page.evaluate(()=>{window.dispatchEvent(new Event('pyas-policy-refresh'));});
+   await page.locator('#policy_restart_btn').waitFor({state:'visible'});
+   // "Only confirm": no initialize/legacy button may compete with the restart.
+   const visible=await page.evaluate(()=>[...document.querySelectorAll('#policy_status_panel button')]
+     .filter(node=>node.offsetParent!==null).map(node=>node.id));
+   assert.deepEqual(visible,['policy_restart_btn']);
+   assert.equal(await page.locator('#policy_initialize_btn').isVisible(),false);
+   assert.equal(await page.locator('#policy_migrate_btn').isVisible(),false);
+   await page.locator('#policy_restart_btn').click();
+   await page.waitForFunction(()=>document.getElementById('policy_status_text').textContent.includes('正在重新启动'));
+   assert.equal(await page.locator('#policy_restart_btn').isDisabled(),true);
+   assert.equal(await page.evaluate(()=>window.p.restartCalls),1);
+  });
+  await check('a refused restart restores the only button instead of leaving it dead',async()=>{
+   await page.evaluate(()=>{window.p.restartMode='fail';window.pyasPolicyRestartFailed();});
+   await page.waitForFunction(()=>!document.getElementById('policy_restart_btn').disabled);
+   const before=await page.evaluate(()=>window.p.restartCalls);
+   await page.locator('#policy_restart_btn').click();
+   await page.waitForFunction(()=>document.getElementById('policy_status_text').textContent.includes('重新启动失败'));
+   assert.equal(await page.locator('#policy_restart_btn').isDisabled(),false);
+   const visible=await page.evaluate(()=>[...document.querySelectorAll('#policy_status_panel button')]
+     .filter(node=>node.offsetParent!==null).map(node=>node.id));
+   assert.deepEqual(visible,['policy_restart_btn'],'失败后仍只能看到重启按钮');
+   assert.equal(await page.evaluate(()=>window.p.restartCalls),before+1);
   });
   await check('status polling is single-flight and stale page responses are discarded',async()=>{
    await page.evaluate(()=>{window.p.statusMode='hang';window.dispatchEvent(new Event('pyas-policy-refresh'));});

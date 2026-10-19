@@ -121,7 +121,7 @@
        所在軌一起動**(試過只移線不移鈕:旋鈕掛到線上緣外,且與下軌黏連)。空心圓試過,
        16px 內洞不可見、40px 下環相對長 8 的軌道過重,已棄;實心點是本檔既有做法
        (i-palette 色點同款),不改描邊契約。 -->
-  <symbol id="i-custom-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M8 9h8M8 14h8"/><circle cx="11" cy="9" r="2" fill="currentColor" stroke="none"/><circle cx="13" cy="14" r="2" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-custom-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M8 9h8M8 14h8"/><rect x="9" y="7" width="2" height="4" rx="1" fill="currentColor" stroke="none"/><rect x="13" y="12" width="2" height="4" rx="1" fill="currentColor" stroke="none"/></symbol>
 
   <!-- 工具 -->
   <symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="4"/><path d="M6 7h12v4a6 6 0 0 1-6 6 6 6 0 0 1-6-6V7zM12 17v4"/></symbol>
@@ -460,12 +460,21 @@
                             </div>
                             <label class="toggle-switch"><input type="checkbox" data-config-key="dnd_switch"><span class="slider"></span></label>
                         </div>
+                        <div class="settings-group">
                         <div class="list-item">
                             <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-shield-check"/></svg>
                             <div class="item-info">
-                                <h2 data-i18n="driver_alert_exempt">驅動防護狀態不納入警報</h2><p data-i18n="driver_alert_exempt_desc">開啟後驅動防護未開啟不影響首頁防護狀態</p>
+                                <h2 data-i18n="driver_alert_exempt">忽略驅動防護狀態</h2><p data-i18n="driver_alert_exempt_desc">開啟後驅動防護未開啟不影響首頁防護狀態</p>
                             </div>
                             <label class="toggle-switch"><input type="checkbox" checked data-config-key="driver_alert_exempt"><span class="slider"></span></label>
+                        </div>
+                        <div class="list-item settings-child hidden" data-setting-parent="driver_alert_exempt">
+                            <div class="item-info">
+                                <h2 data-i18n="driver_home_hidden">首頁隱藏驅動防護狀態</h2>
+                                <p data-i18n="driver_home_hidden_desc">開啟後首頁不顯示驅動防護指示燈</p>
+                            </div>
+                            <label class="toggle-switch"><input type="checkbox" data-config-key="driver_home_hidden"><span class="slider"></span></label>
+                        </div>
                         </div>
                         <div class="list-item">
                             <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-monitor-power"/></svg>

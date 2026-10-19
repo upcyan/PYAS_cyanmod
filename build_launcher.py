@@ -18,7 +18,7 @@ def compile_launcher():
     command=[str(cl),'/nologo','/O2','/W3','/EHsc','/MT','/std:c++17','/utf-8','/DUNICODE','/D_UNICODE',
         '/I'+str(include/'um'),'/I'+str(include/'shared'),'/I'+str(include/'ucrt'),'/I'+str(msvc/'include'),
         str(ROOT/'Plugins'/'Bootstrap'/'PYAS_Launcher.cpp'),'/Fe:'+str(TARGET),'/Fo:'+str(STAGE/'PYAS_Launcher.obj'),
-        'user32.lib','/link','/LIBPATH:'+str(msvc/'lib'/'x64'),'/LIBPATH:'+str(lib/'um'/'x64'),
+        'user32.lib','shell32.lib','advapi32.lib','/link','/LIBPATH:'+str(msvc/'lib'/'x64'),'/LIBPATH:'+str(lib/'um'/'x64'),
         '/LIBPATH:'+str(lib/'ucrt'/'x64'),'/SUBSYSTEM:WINDOWS','/ENTRY:wWinMainCRTStartup']
     result=subprocess.run(command,capture_output=True,text=True,encoding='utf-8',errors='replace')
     if result.returncode or not TARGET.is_file():
@@ -26,7 +26,21 @@ def compile_launcher():
     return TARGET
 
 
+def pyas_running():
+    """A running PYAS suspends the launcher this smoke test starts.
+
+    That is process protection doing its job on an unsigned build artifact, not a
+    bootstrap failure; reporting it as one sends people chasing the wrong bug.
+    """
+    result = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq PYAS.exe', '/NH'],
+                            capture_output=True, text=True, errors='replace')
+    return 'PYAS.exe' in result.stdout
+
+
 def smoke_launch(launcher):
+    if pyas_running():
+        print('[启动检查] SKIP: PYAS 正在运行，其进程防护会暂停本测试拉起的 launcher')
+        return
     executable=launcher.parent/'PYAS.exe'
     if not executable.is_file(): raise RuntimeError('Frozen PYAS.exe is missing')
     with tempfile.TemporaryDirectory(prefix='PYAS bootstrap smoke ') as directory:

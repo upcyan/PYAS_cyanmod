@@ -213,6 +213,10 @@ document.addEventListener('DOMContentLoaded', () => {
         byId('threat_process').classList.add('hidden');
         byId('threat_repeat_hint').classList.add('hidden');
         byId('threat_event_details').open = false;
+        // 空态把「事件与文件身份」整块收起:没有告警时它展开是空的,
+        // 折叠标题却还挂在那里,读起来像坏了。重复确认那行同理(CSS 按空文案隐藏)
+        byId('threat_event_details').hidden = true;
+        setText('threat_repeat_text', '');
         byId('threat_queue_list').replaceChildren();
         setText('queue_count', '0'); setText('threat_title', message(latestLanguage, failed ? 'evidence_unavailable' : 'evidence_idle'));
         setText('threat_status', message(latestLanguage, failed ? 'evidence_unavailable' : 'evidence_idle'));
@@ -251,6 +255,7 @@ document.addEventListener('DOMContentLoaded', () => {
             setText('queue_count', String(data.count ?? data.events.length));
             setText('threat_title', data.title);
             setText('threat_message', data.message);
+            byId('threat_event_details').hidden = false;
             const repeatHint = byId('threat_repeat_hint');
             if (repeatHint) {
                 if (data.repeat_hint) {

@@ -31,7 +31,8 @@ BASE = 'traditional'
 # (driver_alert_exempt 属于设置页而非首屏,但同属本轮新增、同样必须 11 段齐平且非空)
 REQUIRED = ('status_protected', 'status_partial', 'status_off',
             'log_realtime', 'log_empty', 'log_filter_empty',
-            'driver_alert_exempt', 'driver_alert_exempt_desc')
+            'driver_alert_exempt', 'driver_alert_exempt_desc',
+            'driver_home_hidden', 'driver_home_hidden_desc')
 
 
 def read(path):

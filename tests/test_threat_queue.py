@@ -302,3 +302,80 @@ class QueueTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ContentDedupTests(unittest.TestCase):
+    """同一份文件内容的多个副本只该弹一次窗(2026-10-19:4 个 EICAR 副本弹了 4 个)。"""
+
+    def test_identical_content_shares_one_decision(self):
+        opened = threading.Event()
+
+        class FakeSession:
+            hwnd = None
+            def __init__(self, *args, **kwargs): opened.set()
+            def run(self): time.sleep(0.3)
+            def close(self): pass
+
+        queue = _ThreatPromptQueue(session_factory=FakeSession)
+        results = []
+
+        def submit(key, title):
+            request = _DecisionRequest("english_switch", title, "body", None,
+                                       dedup_key=key, action="File Block")
+            results.append(queue.submit(request))
+
+        first = threading.Thread(target=submit, args=(("same",), "first"))
+        first.start()
+        self.assertTrue(opened.wait(2))
+        second = threading.Thread(target=submit, args=(("same",), "second"))
+        second.start()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            with queue.condition:
+                if queue.active is not None and queue.active.followers:
+                    break
+            time.sleep(0.02)
+        with queue.condition:
+            self.assertIsNotNone(queue.active)
+            self.assertEqual(len(queue.active.followers), 1, "第二份副本应作为 follower 并入同一决策")
+            self.assertEqual(len(queue.pending), 0, "不应再排一条独立请求")
+        queue.complete("block")
+        first.join(3)
+        second.join(3)
+        self.assertEqual(results, ["block", "block"])
+        queue.close()
+
+
+class SnapshotProcessTests(unittest.TestCase):
+    """文件告警查不到发起进程时要显式说明,而不是整行消失。"""
+
+    def _session(self, action, process_name=""):
+        owner = ConfigApp(theme="white_switch", language="simplified_switch")
+        queue = _ThreatPromptQueue()
+        request = _DecisionRequest("simplified_switch", "t", "m", None,
+                                   action=action, process_name=process_name)
+        queue.pending.append(request)
+        queue.take_next()
+        session = _WebThreatDialogSession("zh", "t", "m", None, str, queue, owner)
+        session.api.ready()
+        return queue, session
+
+    def test_file_alert_without_opener_says_unidentified(self):
+        queue, session = self._session("File Block")
+        name = session.api.snapshot()["process"]["name"]
+        self.assertIn("未识别", name)
+        queue.close()
+
+    def test_known_process_is_shown_unchanged(self):
+        queue, session = self._session("File Block", process_name="python.exe")
+        self.assertEqual(session.api.snapshot()["process"]["name"], "python.exe")
+        queue.close()
+
+    def test_process_alert_without_process_stays_empty(self):
+        queue, session = self._session("Process Block")
+        self.assertEqual(session.api.snapshot()["process"]["name"], "")
+        queue.close()
+
+
+if __name__ == "__main__":
+    unittest.main()

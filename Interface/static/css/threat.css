@@ -53,15 +53,16 @@
 .threat-meta .threat-repeat { margin-bottom: 0; }
 .fp-link { background: none; border: none; padding: 2px 0; color: var(--text-secondary); font-size: var(--text-xs); cursor: pointer; flex-shrink: 0; text-align: left; }
 .fp-link:hover:not(:disabled) { color: var(--accent-color); }
-#threat_fp_panel { padding: 12px; border: 1px solid var(--border-color); border-radius: var(--radius-panel); background: var(--bg-panel); margin-bottom: 10px; font-size: var(--text-sm); line-height: 1.5; }
-#threat_fp_title { font-weight: 600; margin-bottom: 6px; }
-.fp-identity { color: var(--text-secondary); font-size: var(--text-xs); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 64px; overflow-y: auto; margin-bottom: 8px; }
-.fp-scope { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+#threat_fp_panel { padding: 8px 10px; border: 1px solid var(--border-color); border-radius: var(--radius-panel); background: var(--bg-panel); margin-bottom: 10px; font-size: var(--text-sm); line-height: 1.5; }
+#threat_fp_title { font-weight: 600; margin-bottom: 4px; }
+.fp-identity { color: var(--text-secondary); font-size: var(--text-2xs); line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40px; overflow-y: auto; margin-bottom: 5px; }
+.fp-scope { display: flex; flex-direction: column; gap: 2px; margin-bottom: 5px; font-size: var(--text-xs); }
 .fp-scope label { display: flex; gap: 8px; align-items: center; }
-.fp-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.fp-row { display: flex; gap: 8px; align-items: center; margin-bottom: 5px; }
 .fp-row label { flex-shrink: 0; color: var(--text-secondary); font-size: var(--text-xs); }
-.fp-note { width: 100%; margin-bottom: 8px; padding: 8px 10px; border: 1px solid var(--border-color); border-radius: var(--radius-control); background: var(--bg-panel); color: var(--text-primary); font-size: var(--text-sm); text-align: left; }
+.fp-note { width: 100%; margin-bottom: 6px; padding: 6px 10px; border: 1px solid var(--border-color); border-radius: var(--radius-control); background: var(--bg-panel); color: var(--text-primary); font-size: var(--text-sm); text-align: left; }
 .fp-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.fp-actions .modern-btn { min-height: 34px; }
 /* 永久允许:语义=放行,绿色实底;拦截保持主色,本次允许/AI 建议保持描边,形成三级视觉层级 */
 #threat_permanent {
   margin-right: auto;
@@ -107,12 +108,6 @@
 #threat_confirmation { padding: 12px; border: 1px solid var(--border-color); border-radius: var(--radius-panel); background: var(--bg-panel); margin-bottom: 10px; font-size: var(--text-sm); line-height: 1.5; }
 #threat_confirmation p { margin-bottom: 8px; max-height: 100px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .threat-window button:disabled { opacity: .55; cursor: wait; }
-@media (max-width: 620px) {
-    .threat-layout { grid-template-columns: 140px minmax(0, 1fr); gap: 12px; padding: 12px; }
-    .threat-detail { padding: 14px; }
-    .threat-actions button { flex: 0 1 auto; min-width: 82px; }
-    .threat-footer { padding: 0 12px 12px; }
-}
 
 .threat-process {
     margin-top: 8px;
@@ -139,42 +134,67 @@
     overflow-wrap: anywhere;
 }
 
-/* Evidence-first layout. Facts remain selectable and long paths never widen the window. */
-.threat-layout { grid-template-columns: 162px minmax(0, 1fr); gap: 10px; padding: 12px; }
-.threat-detail { padding: 12px; gap: 8px; min-width: 0; overflow-y: auto; }
+/* Evidence-first layout. Facts remain selectable and long paths never widen the window.
+   2026-10-19 密度重构(用户:信息要尽量不用滚动就能看全)。
+   真机 720×600 下原布局溢出 142px,三处结构性浪费:
+     ① 左栏「待处理告警」只有 1 条时仍吃掉 148px 宽度 → 证据/AI 文案被迫多折两三行;
+     ② 检测证据两列两行,六个短字段占了 76px 高;
+     ③ 摘要/卡片/页脚的内边距与行距各比正文大一档。
+   现在:单条告警不出左栏(两条以上才出现,此时列表才有信息量)、证据四列一行、
+   全局收一档间距。字体只降 1~2px,字号层级(--text-*)照旧走令牌。 */
+.threat-layout { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px; }
+/* 按防护类型分组后仍有 ≥2 条时才显示队列栏 */
+.threat-layout:has(#threat_queue_list > li:nth-child(2)) { grid-template-columns: 118px minmax(0, 1fr); }
+.threat-queue { display: none; }
+.threat-layout:has(#threat_queue_list > li:nth-child(2)) .threat-queue { display: flex; }
+.threat-queue li { padding: 8px 10px; margin-bottom: 6px; font-size: var(--text-xs); }
+.threat-detail {
+    padding: 10px 12px 8px; gap: 5px; min-width: 0; overflow-y: auto;
+    /* 卡片贴合内容:窗口比内容高时,空白留在卡片外(背景),而不是把卡片撑出一片空腔。
+       内容超长时由 max-height 兜住、在卡片内滚动 —— 不能只写 height:auto,
+       那样内容会撑出容器被 app-container 的 overflow:hidden 直接裁掉 */
+    align-self: start; max-height: 100%;
+    /* 尺寸容器:证据格按「详情区自己的宽度」决定列数,而不是按窗口宽度 ——
+       有队列栏时详情区会窄 148px,用视口媒体查询会判断错 */
+    container-type: inline-size; container-name: detail;
+}
 .threat-detail > * { flex-shrink: 0; }
-.threat-summary { align-items: flex-start; gap: 10px; }
+.threat-summary { align-items: center; gap: 8px; }
 .threat-summary > div { min-width: 0; }
-.threat-summary svg { width: 26px; height: 26px; }
-.threat-summary h1 { font-size: 18px; line-height: 1.35; }
-.threat-context { margin-top: 3px; font-size: var(--text-sm); line-height: 1.5; color: var(--text-secondary); overflow-wrap: anywhere; }
-.detection-card { padding: 8px 12px; background: var(--bg-hover); border: 1px solid var(--border-color); border-radius: var(--radius-panel); }
-.detection-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.detection-head h2 { font-size: var(--text-sm); font-weight: 600; }
-.detection-score { display: flex; align-items: baseline; gap: 5px; }
-.detection-score > span:first-child { font-size: var(--text-xs); color: var(--text-secondary); margin-inline-end: 6px; }
-.detection-score strong { font-size: 22px; font-weight: 700; line-height: 1.2; color: var(--color-danger-strong); }
-.detection-score.is-unscored strong { font-size: var(--text-sm); color: var(--text-primary); }
-#threat_score_scale { font-size: var(--text-xs); color: var(--text-secondary); }
-.score-track { height: 4px; background: var(--border-color); border-radius: 4px; margin-top: 6px; overflow: hidden; }
+.threat-summary svg { width: 22px; height: 22px; }
+.threat-summary h1 { font-size: var(--text-lg); line-height: 1.3; }
+.threat-context { margin-top: 2px; font-size: var(--text-xs); line-height: 1.45; color: var(--text-secondary); overflow-wrap: anywhere; }
+.detection-card { padding: 7px 10px; background: var(--bg-hover); border: 1px solid var(--border-color); border-radius: var(--radius-panel); }
+.detection-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.detection-head h2 { font-size: var(--text-xs); font-weight: 600; }
+.detection-score { display: flex; align-items: baseline; gap: 4px; /* 分数是纯数字,固定 LTR:否则阿语界面里会排成「100/ 83」 */ direction: ltr; }
+.detection-score > span:first-child { font-size: var(--text-2xs); color: var(--text-secondary); margin-inline-end: 4px; }
+.detection-score strong { font-size: 20px; font-weight: 700; line-height: 1.1; color: var(--color-danger-strong); }
+.detection-score.is-unscored strong { font-size: var(--text-xs); color: var(--text-primary); }
+#threat_score_scale { font-size: var(--text-2xs); color: var(--text-secondary); }
+.score-track { height: 3px; background: var(--border-color); border-radius: 3px; margin-top: 4px; overflow: hidden; }
 #threat_score_fill { height: 100%; width: 0; background: var(--color-danger-strong); border-radius: inherit; }
-.detection-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px 14px; margin: 8px 0; }
+.detection-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px 14px; margin: 4px 0 2px; }
 .detection-grid > div { min-width: 0; }
-.detection-grid dt, .detection-raw > span, .detection-rules > span, .file-heading > span, .file-hash > span { font-size: var(--text-xs); color: var(--text-secondary); }
-.detection-grid dd { font-size: var(--text-sm); font-weight: 600; margin: 2px 0 0; overflow-wrap: anywhere; }
+.detection-grid dt, .detection-raw > span, .detection-rules > span, .file-heading > span, .file-hash > span { font-size: var(--text-2xs); color: var(--text-secondary); }
+.detection-grid dd { font-size: var(--text-sm); font-weight: 600; margin: 1px 0 0; overflow-wrap: anywhere; }
 /* 空值折叠成一行:label+value 并排,把 .detection-grid 从 6 行压到 3 行。
    只在"证据不可用/未评分"的空态生效,有真实值时保持原有上下堆叠。 */
 .detection-grid dd.is-empty {
     display: flex;
     align-items: baseline;
     gap: 6px;
+    /* 四列时一格里放不下「label + Not provided」:允许换行,别让 flex 把
+       "Not provided" 从单词中间劈开(空态曾显示成 Not provid / ed) */
+    flex-wrap: wrap;
+    row-gap: 0;
     margin: 0;
     font-weight: 400;
     color: var(--text-secondary);
 }
 .detection-grid dd.is-empty::before {
     content: attr(data-label);
-    font-size: var(--text-xs);
+    font-size: var(--text-2xs);
     color: var(--text-secondary);
     flex-shrink: 0;
 }
@@ -182,58 +202,117 @@
 .detection-grid > div:has(> dd.is-empty) dt { display: none; }
 /* 关闭按钮悬停红底,与主窗口 #close_button 一致 */
 #threat_close:hover { background-color: var(--color-danger); color: var(--text-on-accent); }
-.detection-raw, .detection-rules { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
-.detection-card code, .file-hash code { font-family: Consolas, ui-monospace, monospace; font-size: var(--text-xs); line-height: 1.5; overflow-wrap: anywhere; user-select: text; }
-.evidence-note { margin-top: 6px; font-size: var(--text-xs); line-height: 1.55; color: var(--text-secondary); overflow-wrap: anywhere; }
+.detection-raw, .detection-rules { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.detection-card code, .file-hash code { font-family: Consolas, ui-monospace, monospace; font-size: var(--text-2xs); line-height: 1.45; overflow-wrap: anywhere; user-select: text; }
+.evidence-note { margin-top: 4px; font-size: var(--text-2xs); line-height: 1.45; color: var(--text-secondary); overflow-wrap: anywhere; }
 .threat-file { min-width: 0; }
-.file-heading { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: var(--text-sm); overflow-wrap: anywhere; }
-.file-path { font-family: Consolas, ui-monospace, monospace; font-size: var(--text-xs); line-height: 1.6; color: var(--text-secondary); overflow-wrap: anywhere; user-select: text; margin-top: 3px; }
-.threat-process { margin: 0; }
-.ai-result { padding: 8px 12px; background: var(--accent-alpha); }
-.ai-result-head { flex-wrap: wrap; }
-.ai-result-verdict { margin-inline-start: auto; margin-left: 0; max-width: 100%; overflow-wrap: anywhere; }
+.file-heading { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: var(--text-sm); overflow-wrap: anywhere; }
+.file-path { font-family: Consolas, ui-monospace, monospace; font-size: var(--text-2xs); line-height: 1.45; color: var(--text-secondary); overflow-wrap: anywhere; user-select: text; margin-top: 2px; }
+.threat-process { margin: 0; font-size: var(--text-xs); }
+.ai-result { padding: 7px 10px; background: var(--accent-alpha); }
+.ai-result-head { flex-wrap: wrap; gap: 6px; }
+.ai-result-head svg { width: 14px; height: 14px; }
+.ai-result-title { font-size: var(--text-xs); }
+.ai-result-verdict { margin-inline-start: auto; margin-left: 0; max-width: 100%; overflow-wrap: anywhere; font-size: var(--text-2xs); }
 .ai-result-reason {
-  margin-top: 4px;
-  /* 滚动上限:AI 理由长度不可控,放任撑高会把证据/详情区挤出去(整列滚动) */
-  max-height: 64px;
+  margin-top: 3px;
+  /* 上限收到两行:AI 理由长度不可控,放任撑高会把证据/按钮挤出视野。
+     超出部分在卡片内滚动 —— 它本来就是「建议」,不该占掉操作区的位置 */
+  max-height: 36px;   /* = 2 行 × 18px,必须是整行高度,否则末行会被切一半 */
   overflow-y: auto;
+  font-size: var(--text-xs);
+  line-height: 1.5;
 }
-.event-details { font-size: var(--text-xs); color: var(--text-secondary); }
-.event-details summary { cursor: pointer; padding: 4px 0; }
+.event-details { font-size: var(--text-2xs); color: var(--text-secondary); }
+.event-details summary { cursor: pointer; padding: 2px 0; }
 .event-details summary:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 3px; }
-.file-hash { display: flex; flex-direction: column; gap: 3px; margin: 6px 0; }
-.threat-message { max-height: 88px; font-size: var(--text-sm); flex: none; }
-.threat-footer { padding: 0 12px 12px; max-height: 54vh; overflow-y: auto; }
-.threat-status { padding: 9px 0; border-top: 1px solid var(--border-color); font-weight: 500; }
-.threat-meta { margin-bottom: 10px; }
+.file-hash { display: flex; flex-direction: column; gap: 2px; margin: 4px 0; }
+.threat-message { max-height: 88px; font-size: var(--text-xs); flex: none; }
+.threat-footer { padding: 0 10px 10px; max-height: 54vh; overflow-y: auto; }
+.threat-status { padding: 6px 0; border-top: 1px solid var(--border-color); font-size: var(--text-xs); font-weight: 500; }
+.threat-meta { margin-bottom: 8px; gap: 4px; }
+.threat-repeat { font-size: var(--text-2xs); line-height: 1.45; }
+.fp-link { font-size: var(--text-2xs); }
 .threat-actions { align-items: center; }
 /* Layout only: preserve the green fill and hover/active colours defined above. */
 #threat_permanent { margin-right: 0; margin-inline-end: auto; font-size: var(--text-sm); }
 .threat-window [hidden] { display: none !important; }
+/* 没有待处理告警时,"重复确认"这一行只剩一个没文案的空复选框(首次进入尤其明显) */
+.threat-meta:has(#threat_repeat_text:empty) { display: none; }
 
-/* The mask combines four continuous inward alpha fades. No opaque inner cutout. */
+/* 误报面板自带「提交/取消」:打开时收起常规决策区与重复确认。
+   否则页脚要同时容纳两套动作(实测 600px 高的窗口里,拦截/允许被顶到可视区外,
+   用户得在页脚里再滚一次才能点到) */
+body:has(#threat_fp_panel:not(.hidden)) .threat-meta,
+body:has(#threat_fp_panel:not(.hidden)) .threat-actions { display: none; }
+
+/* 详情区够宽(≥520px)就把证据摊成四列一行:类别/引擎/平台/家族都是短值,
+   两列两行纯属浪费。窄窗(有队列栏、或窗口被拉窄)自动退回两列。 */
+@container detail (min-width: 520px) {
+    .detection-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px 12px; }
+}
+
+/* The mask combines four continuous inward alpha fades. No opaque inner cutout.
+   渐隐距离:34px -> 64px,中间档位从 4 档加密到 8 档。旧的四档(0/10/21/34px,
+   .55/.14/0)在前 20px 就把亮度砍掉 86%,读起来是「一圈硬边 + 突然断开」。
+   现在按近似 ease-out 铺开,过渡自然变长变柔和;最亮处不到 1,边缘不会顶成实色。 */
 .ai-window-glow {
     position: fixed; inset: 0; z-index: 100; pointer-events: none; overflow: hidden;
     opacity: 0; transition: opacity .32s ease; contain: paint;
-    --glow-top: linear-gradient(to bottom, #000 0, #000 2px, rgba(0,0,0,.55) 10px, rgba(0,0,0,.14) 21px, transparent 34px);
-    --glow-bottom: linear-gradient(to top, #000 0, #000 2px, rgba(0,0,0,.55) 10px, rgba(0,0,0,.14) 21px, transparent 34px);
-    --glow-start: linear-gradient(to right, #000 0, #000 2px, rgba(0,0,0,.55) 10px, rgba(0,0,0,.14) 21px, transparent 34px);
-    --glow-end: linear-gradient(to left, #000 0, #000 2px, rgba(0,0,0,.55) 10px, rgba(0,0,0,.14) 21px, transparent 34px);
+    --glow-top: linear-gradient(to bottom, #000 0, #000 3px, rgba(0,0,0,.88) 8px, rgba(0,0,0,.74) 16px, rgba(0,0,0,.58) 26px, rgba(0,0,0,.42) 36px, rgba(0,0,0,.28) 46px, rgba(0,0,0,.14) 55px, transparent 64px);
+    --glow-bottom: linear-gradient(to top, #000 0, #000 3px, rgba(0,0,0,.88) 8px, rgba(0,0,0,.74) 16px, rgba(0,0,0,.58) 26px, rgba(0,0,0,.42) 36px, rgba(0,0,0,.28) 46px, rgba(0,0,0,.14) 55px, transparent 64px);
+    --glow-start: linear-gradient(to right, #000 0, #000 3px, rgba(0,0,0,.88) 8px, rgba(0,0,0,.74) 16px, rgba(0,0,0,.58) 26px, rgba(0,0,0,.42) 36px, rgba(0,0,0,.28) 46px, rgba(0,0,0,.14) 55px, transparent 64px);
+    --glow-end: linear-gradient(to left, #000 0, #000 3px, rgba(0,0,0,.88) 8px, rgba(0,0,0,.74) 16px, rgba(0,0,0,.58) 26px, rgba(0,0,0,.42) 36px, rgba(0,0,0,.28) 46px, rgba(0,0,0,.14) 55px, transparent 64px);
     -webkit-mask-image: var(--glow-top), var(--glow-bottom), var(--glow-start), var(--glow-end);
     mask-image: var(--glow-top), var(--glow-bottom), var(--glow-start), var(--glow-end);
     mask-composite: add;
 }
-.ai-window-glow::before {
+/* 两层同心圆盘:
+   ① 主层 4.8s 正向 — 提供扫色;
+   ② 副层 7.6s 反向 + screen 叠加 — 两层角速度不成倍数,叠出来的颜色是
+      「对流」而非整圈刚性扫过。单层 conic 无论多快都像转盘,这是「不够灵动」
+      的根因;副层成本只有一次同尺寸合成。 */
+.ai-window-glow::before,
+.ai-window-glow::after {
     content: ''; position: absolute; top: 50%; left: 50%; width: 200vmax; height: 200vmax;
-    background: conic-gradient(#ff3b30, #ff9500, #ffcc00, #34c759, #00c7be, #007aff, #5856d6, #ff2d55, #ff3b30);
-    filter: blur(3px); transform: translate(-50%, -50%);
-    animation: ai-window-spectrum 6s linear infinite; animation-play-state: paused;
+    transform: translate(-50%, -50%);
+    filter: blur(3.5px) saturate(1.15);
+    animation-play-state: paused;
+}
+.ai-window-glow::before {
+    /* 比旧版的三原色提亮一档、降饱和一档:全饱和色在几十像素的渐隐带里会积成
+       深色块,半透明时读作「脏」;这一版是流光,不是色带 */
+    background: conic-gradient(from 0deg, #ff8f85, #ffbe7d, #ffe98a, #94e8ac, #86e4de, #8cc3ff, #b6abff, #ffa3cd, #ff8f85);
+    animation: ai-window-spectrum 4.8s linear infinite;
+    animation-play-state: paused;
+}
+.ai-window-glow::after {
+    background: conic-gradient(from 180deg, #8cc3ff, #ffa3cd, #ffe98a, #86e4de, #b6abff, #94e8ac, #ffbe7d, #8cc3ff);
+    opacity: .55;
+    mix-blend-mode: screen;
+    /* 呼吸放在副层:它缩放的是 200vmax 的圆盘(被 overflow 裁掉),
+       容器几何不受影响 —— 挂容器上会把整个光晕连同 inset:0 一起缩放,
+       「覆盖整窗」这件事就不再成立了。 */
+    animation: ai-window-spectrum-reverse 7.6s linear infinite, ai-window-breathe 7.4s ease-in-out infinite;
+    /* shorthand 会把 play-state 重置成 running,必须紧跟着补回 paused ——
+       否则静态帧也在跑,「分析结束就停」的语义就没了 */
+    animation-play-state: paused;
 }
 .ai-window-glow.is-analyzing { opacity: .66; }
-.ai-window-glow.is-analyzing::before { animation-play-state: running; }
+.ai-window-glow.is-analyzing::before,
+.ai-window-glow.is-analyzing::after { animation-play-state: running; }
 @keyframes ai-window-spectrum {
     from { transform: translate(-50%, -50%) rotate(0deg); }
     to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+@keyframes ai-window-spectrum-reverse {
+    from { transform: translate(-50%, -50%) rotate(360deg); }
+    to { transform: translate(-50%, -50%) rotate(0deg); }
+}
+/* 呼吸:用独立 scale 属性,不和 transform 里的位移/旋转打架(组合属性优先级更高) */
+@keyframes ai-window-breathe {
+    0%, 100% { scale: .985; }
+    50% { scale: 1.015; }
 }
 @media (prefers-reduced-motion: reduce) {
     .ai-window-glow { transition: none; }
@@ -242,19 +321,30 @@
        animation:none 让流光变纯静态,被用户当成故障上报。它是装饰性的
        小面积旋转、pointer-events:none,这里豁免;过渡动画仍尊重系统设置 */
 }
+/* 窄窗(≤620):队列改成顶部横条,详情区独占整宽。
+   560px 窗口里竖栏会吃掉 148px,四格证据只能全部折行 —— 横向条只花 ~30px 高度,
+   换回来的是每条文案少折两三行,净赚。没有第二条告警时整条都不出现。 */
 @media (max-width: 620px) {
-    .threat-layout { grid-template-columns: 118px minmax(0, 1fr); gap: 10px; padding: 12px; }
-    .threat-detail { padding: 12px; }
-    .detection-grid { gap: 8px; }
-    .threat-footer { padding: 0 12px 12px; }
+    .threat-layout,
+    .threat-layout:has(#threat_queue_list > li:nth-child(2)) {
+        display: flex; flex-direction: column; gap: 6px; padding: 8px;
+    }
+    .threat-layout:has(#threat_queue_list > li:nth-child(2)) .threat-queue {
+        flex-direction: row; align-items: center; gap: 8px; min-height: 0; flex-shrink: 0;
+    }
+    .threat-queue ol { display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden; }
+    .threat-queue li { margin: 0; padding: 5px 8px; white-space: nowrap; }
+    /* 这里 .threat-layout 是纵向 flex:align-self 管的是「横向」,
+       若沿用基线的 start 会把详情区压成内容宽(实测 20px)。
+       必须显式 stretch,让它重新占满整行 */
+    .threat-detail { flex: 1; min-height: 0; padding: 10px; align-self: stretch; }
+    .detection-grid { gap: 4px 10px; }
+    .threat-footer { padding: 0 8px 8px; }
+    .threat-actions button { flex: 0 1 auto; min-width: 82px; }
 }
 @media (max-width: 460px) {
-    .threat-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 8px; }
-    .threat-queue { max-height: 90px; gap: 5px; }
-    .threat-queue ol { display: flex; gap: 6px; overflow-x: auto; }
-    .threat-queue li { min-width: 140px; padding: 6px 8px; margin: 0; }
-    .threat-summary h1 { font-size: 19px; }
-    .detection-card { padding: 10px; }
+    .threat-summary h1 { font-size: var(--text-xl); }
+    .detection-card { padding: 6px 8px; }
     .threat-meta { flex-direction: column; gap: 5px; }
     #threat_permanent { margin-inline-end: 0; }
     .threat-actions button { flex: 1; min-width: 90px; }

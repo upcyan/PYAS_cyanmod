@@ -2,19 +2,25 @@
 document.addEventListener('DOMContentLoaded', () => {
     const copy = {
         en: { title: 'Administrator security policy', missing: 'No trusted policy is initialized. Review defaults or the old settings before authorizing them.',
-            pending: 'Waiting for administrator authorization or policy commit…', restart: 'Policy saved. Restart PYAS to apply it; protections are not shown as active before they start.',
+            pending: 'Waiting for administrator authorization or policy commit…', restart: 'Policy saved. PYAS must restart before it applies.',
+            restartNow: 'Restart now', restarting: 'Restarting…',
+            restartFailed: 'Restart failed. Close and reopen PYAS manually.',
             failed: 'Policy authorization or saving failed. No automatic retry was sent.', unknown: 'The commit result is unknown. Restart and check the policy before making more changes.',
             defaults: 'Review default policy', legacy: 'Review old settings', review: 'Review all security settings before saving.',
             warning: 'Old settings were user-writable and are not automatically trusted.', confirm: 'I have reviewed these settings', approve: 'Authorize and save', cancel: 'Cancel',
             unavailable: 'No valid settings are available to import.', cancelled: 'Administrator authorization was cancelled.' },
         zh: { title: '管理员安全策略', missing: '尚未初始化可信策略。请审核默认设置或旧配置，再由管理员授权保存。',
-            pending: '正在等待管理员授权或确认保存结果…', restart: '策略已保存，请重新启动 PYAS 后应用；尚未启动的防护不会显示为已开启。',
+            pending: '正在等待管理员授权或确认保存结果…', restart: '策略已保存，需要重新启动 PYAS 后生效。',
+            restartNow: '立即重新启动', restarting: '正在重新启动…',
+            restartFailed: '重新启动失败，请手动关闭并重新打开 PYAS。',
             failed: '策略授权或保存失败，未自动重试。', unknown: '保存结果尚无法确认，请重新启动并核对策略后再操作。',
             defaults: '审核默认策略', legacy: '审核旧配置', review: '请逐项核对安全设置后再授权保存。',
             warning: '旧配置曾允许普通用户修改，不会被自动信任。', confirm: '我已审核以上设置', approve: '授权并保存', cancel: '取消',
             unavailable: '没有可导入的有效配置。', cancelled: '已取消管理员授权，未提交策略。' },
         tw: { title: '管理員安全策略', missing: '尚未初始化可信策略。請審核預設設定或舊配置，再由管理員授權儲存。',
-            pending: '正在等待管理員授權或確認儲存結果…', restart: '策略已儲存，請重新啟動 PYAS 後套用；尚未啟動的防護不會顯示為已開啟。',
+            pending: '正在等待管理員授權或確認儲存結果…', restart: '策略已儲存，需要重新啟動 PYAS 後生效。',
+            restartNow: '立即重新啟動', restarting: '正在重新啟動…',
+            restartFailed: '重新啟動失敗，請手動關閉並重新開啟 PYAS。',
             failed: '策略授權或儲存失敗，未自動重試。', unknown: '儲存結果尚無法確認，請重新啟動並核對策略後再操作。',
             defaults: '審核預設策略', legacy: '審核舊配置', review: '請逐項核對安全設定後再授權儲存。',
             warning: '舊配置曾允許普通使用者修改，不會被自動信任。', confirm: '我已審核以上設定', approve: '授權並儲存', cancel: '取消',
@@ -28,12 +34,16 @@ document.addEventListener('DOMContentLoaded', () => {
     message.id = 'policy_status_text';
     const actions = document.createElement('div'); actions.className = 'policy-status-actions';
     const defaults = document.createElement('button'), legacy = document.createElement('button');
+    const restart = document.createElement('button');
     defaults.id = 'policy_initialize_btn'; legacy.id = 'policy_migrate_btn';
-    for (const button of [defaults, legacy]) { button.type = 'button'; button.className = 'action-btn modern-btn'; actions.appendChild(button); }
+    restart.id = 'policy_restart_btn';
+    for (const button of [defaults, legacy, restart]) { button.type = 'button'; button.className = 'action-btn modern-btn'; }
+    restart.classList.add('hidden');
+    actions.append(defaults, legacy, restart);
     panel.append(heading, message, actions); document.body.appendChild(panel);
-    let active = true, epoch = 0, flight = null, status = null, busy = false, notice = '';
+    let active = true, epoch = 0, flight = null, status = null, busy = false, notice = '', restarting = false;
     const disabled = new Map();
-    const userKeys = new Set(['driver_alert_exempt', 'dnd_switch']);
+    const userKeys = new Set(['driver_alert_exempt', 'driver_home_hidden', 'dnd_switch']);
     const api = () => window.pywebview?.api;
     const updateControls = blocked => {
         for (const element of document.querySelectorAll('[data-config-key]')) {
@@ -57,15 +67,25 @@ document.addEventListener('DOMContentLoaded', () => {
         const visible = waiting || value.state !== 'ready' || !!value.error;
         panel.classList.toggle('hidden', !visible);
         heading.textContent = t.title;
+        // A saved policy is only read at startup, so this state offers exactly
+        // one action: confirm and restart. Nothing else can move it forward.
+        const needsRestart = value.state === 'restart_required';
         let text = !value.initialized ? t.missing : t.failed;
         if (waiting) text = t.pending;
-        else if (value.state === 'restart_required') text = t.restart;
+        else if (needsRestart) text = t.restart;
         else if (value.state === 'commit_unknown') text = t.unknown;
         else if (value.error) text = t.failed + ' ' + String(value.error);
-        if (notice && !waiting && value.state !== 'restart_required') text = notice;
+        if (restarting) text = t.restarting;
+        else if (notice) text = notice;
         if (message.textContent !== text) message.textContent = text;
         defaults.textContent = t.defaults; legacy.textContent = t.legacy;
-        actions.classList.toggle('hidden', value.initialized || waiting || value.state === 'commit_unknown');
+        defaults.classList.toggle('hidden', needsRestart);
+        legacy.classList.toggle('hidden', needsRestart);
+        restart.classList.toggle('hidden', !needsRestart);
+        restart.textContent = restarting ? t.restarting : t.restartNow;
+        restart.disabled = restarting;
+        const showActions = needsRestart || (!value.initialized && !waiting && value.state !== 'commit_unknown');
+        actions.classList.toggle('hidden', !showActions);
         defaults.disabled = legacy.disabled = waiting;
     };
     const refresh = () => {
@@ -126,8 +146,28 @@ document.addEventListener('DOMContentLoaded', () => {
             if (view === epoch && active) notice = texts().failed;
         } finally { busy = false; if (status) render(status); refresh(); }
     };
+    // Reached two ways: the backend reports that shutdown was refused, or the
+    // guard below expires because this page is still alive long after a restart
+    // should have destroyed it. Either way the button must not stay stuck off.
+    const restartFailed = () => {
+        restarting = false; notice = texts().restartFailed;
+        render({ state: 'restart_required', initialized: true });
+    };
+    window.pyasPolicyRestartFailed = restartFailed;
     defaults.addEventListener('click', () => setup(false));
     legacy.addEventListener('click', () => setup(true));
+    restart.addEventListener('click', () => {
+        if (restarting) return;
+        // The only action this state offers: confirm and restart. It stays
+        // disabled while the process tears down, so it cannot be pressed twice.
+        restarting = true; notice = '';
+        render({ state: 'restart_required', initialized: true });
+        setTimeout(() => { if (restarting) restartFailed(); }, 25000);
+        Promise.resolve().then(() => api()?.restart_application?.()).then(result => {
+            if (result === true) return;   // the launcher takes over after this process exits
+            restartFailed();
+        }).catch(restartFailed);
+    });
     window.addEventListener('pywebviewready', refresh);
     window.addEventListener('pyas-policy-refresh', refresh);
     let timer = setInterval(refresh, 1000);

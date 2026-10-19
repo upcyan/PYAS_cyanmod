@@ -47,7 +47,16 @@ class NativeContractTests(unittest.TestCase):
     def test_script_has_fixed_target_scoped_fields_cas_and_no_eval(self):
         script=base64.b64decode(windows._script('C:/Users/test/request','0'*64)).decode('utf-16-le')
         self.assertIn("'PYAS.Policy'",script)
-        self.assertIn('CommonApplicationData',script)
+        # Machine scope must come from the registry: in the minimal environment
+        # the helper hands PowerShell, GetFolderPath('CommonApplicationData')
+        # returns '' and Join-Path throws before any stage is recorded.
+        self.assertIn("GetEnvironmentVariable('ProgramData','Machine')",script)
+        self.assertNotIn('GetFolderPath',script)
+        # $stage must exist before the first statement that can throw, otherwise
+        # the catch block exits with $null (a bare 1) and hides the real stage.
+        head = script.split('try{')[0]
+        self.assertIn('$stage=40', head)
+        self.assertLess(head.index('$stage=40'), head.index('$programData='))
         self.assertIn('$h.scope',script)
         self.assertIn('policy conflict',script)
         self.assertIn('AbandonedMutexException',script)
@@ -64,16 +73,59 @@ class NativeContractTests(unittest.TestCase):
 class WindowsParserTests(unittest.TestCase):
     @unittest.skipUnless(os.name=='nt','requires Windows PowerShell parser')
     def test_broker_parses_without_execution(self):
+        # Parse from a .ps1 file: nesting the whole broker inside another
+        # -EncodedCommand doubled its size and hit WinError 206 (command line too
+        # long), which says nothing about the script itself.
         import subprocess
+        import tempfile
         directory,env=windows._environment()
         script=base64.b64decode(windows._script('C:/Users/test/request','0'*64)).decode('utf-16-le')
-        raw=base64.b64encode(script.encode('utf-8')).decode()
-        parser=("$s=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('"+raw+"'));"
-          "$t=$null;$e=$null;[Management.Automation.Language.Parser]::ParseInput($s,[ref]$t,[ref]$e)|Out-Null;"
-          "if($e.Count){$e|ForEach-Object{$_.Message};exit 1}")
-        result=subprocess.run([os.path.join(directory,'WindowsPowerShell','v1.0','powershell.exe'),'-NoProfile','-NonInteractive',
-          '-EncodedCommand',base64.b64encode(parser.encode('utf-16-le')).decode()],env=env,capture_output=True,text=True,timeout=20)
+        with tempfile.TemporaryDirectory() as workspace:
+            path=os.path.join(workspace,'parse.ps1')
+            with open(path,'w',encoding='utf-8-sig') as stream: stream.write(script)
+            parser=("$t=$null;$e=$null;"
+              "[Management.Automation.Language.Parser]::ParseFile('"+path.replace("'","''")+"',[ref]$t,[ref]$e)|Out-Null;"
+              "if($e.Count){$e|ForEach-Object{$_.Message};exit 1}")
+            result=subprocess.run([os.path.join(directory,'WindowsPowerShell','v1.0','powershell.exe'),
+              '-NoProfile','-NonInteractive','-Command',parser],env=env,capture_output=True,text=True,timeout=20)
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
+    def test_broker_replacement_uses_a_real_null_backup_and_retries(self):
+        """替换策略文件时第三个参数必须写 [NullString]::Value,不能写 $null。
+
+        脚本宿主会把 $null 绑成空字符串,File.Replace 判为非法参数(E_INVALIDARG)
+        直接抛 —— 2026-10-19 白名单移除每次都在这里失败:初始化走 Move 分支所以没事,
+        任何一次「更新」都必然失败,失败的 .config-*.tmp 还留在策略目录里。
+        一并锁住:共享冲突的重试、回读确认(1177:已落地但旧文件删不掉)、失败清理。
+        """
+        text = windows.BROKER
+        self.assertIn('[IO.File]::Replace($temporary,$target,[NullString]::Value)', text)
+        self.assertNotIn('Replace($temporary,$target,$null)', text)
+        self.assertIn('for($attempt=1;$attempt -le 8;$attempt++)', text)
+        self.assertIn('$done=($check._request -ceq $nonce)', text)
+        self.assertIn("[Console]::Error.WriteLine('policy replace failed '+$failed)", text)
+        self.assertIn('[IO.File]::Delete($temporary)', text)
+
+    def test_commit_failure_surfaces_the_broker_win32_code(self):
+        """退出码只说「替换失败」,真正的 Win32 码在 broker 的 stderr 里(helper 日志)。
+
+        共享冲突(0x80070020)和权限问题(0x80070005)要能分开,否则线上只能猜。
+        """
+        item = object.__new__(windows.WindowsPolicyLease)
+        item.path = os.path.join('/test', 'PolicyRequests', 'a' * 32 + '.request')
+        log = ('exit=49 phase=while waiting for the policy broker seconds=1.8 '
+               'stderr: policy replace failed win32=0x80070020 hresult=0x80131501 attempt=8')
+        with patch.object(windows, 'read_helper_log', return_value=log):
+            message = item._denied(49, 'during policy commit')
+        self.assertIn('atomic policy replacement failed', message)
+        self.assertIn('(win32=0x80070020)', message)
+
+    def test_commit_failure_without_diagnostic_stays_short(self):
+        item = object.__new__(windows.WindowsPolicyLease)
+        item.path = os.path.join('/test', 'PolicyRequests', 'a' * 32 + '.request')
+        with patch.object(windows, 'read_helper_log', return_value='exit=49 phase=x'):
+            message = item._denied(49, 'during policy commit')
+        self.assertNotIn('win32=', message)
 
 class HelperFailureTests(unittest.TestCase):
     def test_helper_preserves_verification_and_broker_launch_stages(self):
@@ -120,7 +172,10 @@ class HelperFailureTests(unittest.TestCase):
 
     def test_helper_preserves_broker_exit_stage_and_releases_pinned_handles(self):
         process = Mock()
-        process.wait.return_value = 45
+        # The helper drains both pipes through communicate(); waiting first would
+        # deadlock once the broker fills the pipe buffer.
+        process.communicate.return_value = (b'', b'')
+        process.returncode = 45
         with patch.object(windows.os, 'name', 'nt'), \
              patch.object(windows.sys, 'frozen', True, create=True), \
              patch.object(native, 'verify_request_owner', return_value=[123, 456]), \
@@ -158,9 +213,11 @@ class HelperFailureTests(unittest.TestCase):
         class Shell:
             ShellExecuteExW = Function()
 
+        # ctypes.sizeof is not mocked: Python 3.14 evaluates it while laying out
+        # nested structures, so replacing it breaks the class body itself. The
+        # real SHELLEXECUTEINFO size is already what the call sets.
         with patch.object(native, 'launcher_path', return_value='C:/Program Files/PYAS/PYAS_Launcher.exe'), \
              patch.object(native.ctypes, 'WinDLL', return_value=Shell()), \
-             patch.object(native.ctypes, 'sizeof', return_value=152), \
              patch.object(native.ctypes, 'byref', side_effect=lambda value: value):
             handle = native.elevate_helper('request', 'a' * 64)
         self.assertEqual(handle, 4321)

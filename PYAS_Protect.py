@@ -118,6 +118,8 @@ class ProtectMixin(DialogMixin, DriverMixin, SystemMixin, RealtimeMixin, PopupWi
 
     def init_whitelist(self):
         files = [self.file_pyas]
+        # 启动器不写进 white_list:那是策略项,写入要管理员授权,等于每次启动
+        # 弹一次 UAC。自身组件在 PYAS_Realtime.is_own_process_image 里硬判断。
         # Only trust our installed helper, never every file with this basename.
         menu_component = os.path.join(self.path_pyas, "PYAS_Menu.exe")
         # Learn only from our installed component, never from a scanned candidate.

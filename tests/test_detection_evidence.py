@@ -34,7 +34,11 @@ Scanner = load_methods("PYAS_Scanner.py", "ScannerMixin",
 Rules = load_methods("PYAS_Rules.py", "RuleScanner",
                      {"__init__", "last_description", "yara_scan", "yara_mem_scan"})
 Realtime = load_methods("PYAS_Realtime.py", "RealtimeMixin", {"handle_new_process"},
-                        PYAS_PROCESS_SCAN_ACCESS=1)
+                        PYAS_PROCESS_SCAN_ACCESS=1,
+                        # handle_new_process 会先过「己方组件」判断,这个断言在模块
+                        # 全局里,AST 抽方法时不会一起带过来 —— 必须显式注入,
+                        # 否则执行到那一行就是 NameError(不是产品代码的问题)
+                        is_own_process_image=lambda path, install: False)
 
 
 class Match:

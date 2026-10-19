@@ -629,6 +629,65 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
         if self._window:
             self._window.hide()
 
+    def restart_application(self):
+        """Relaunch so a saved policy takes effect; policy is read only at start.
+
+        The launcher waits for this process to disappear before starting the new
+        instance. Starting it immediately would hit the single-instance mutex and
+        forward to the dying process, which looks exactly like a failed restart.
+        """
+        if getattr(self, "closing", False):
+            return False
+
+        launcher = os.path.join(os.path.dirname(sys.executable), "PYAS_Launcher.exe")
+
+        # A development run has no launcher, so it has no way to wait for this
+        # process to exit; report failure instead of pretending to restart.
+        if not getattr(sys, "frozen", False) or not os.path.isfile(launcher):
+            return False
+
+        try:
+            subprocess.Popen(
+                [launcher, "--restart", str(os.getpid())],
+                cwd=os.path.dirname(launcher),
+                creationflags=0x00000008 | 0x08000000,  # DETACHED_PROCESS | CREATE_NO_WINDOW
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+            )
+        except Exception:
+            log_exception("PYAS._MainMixin.restart_application")
+            return False
+
+        logging.getLogger("PYAS.Policy").info(
+            "Restart requested to apply the saved policy (pid %s)", os.getpid()
+        )
+        self.start_daemon_thread(self._restart_after_reply)
+        return True
+
+    def _restart_after_reply(self):
+        # The bridge delivers this call's result over the same channel; exiting
+        # sooner leaves the page with a rejected promise and a dead button.
+        time.sleep(0.6)
+
+        try:
+            closed = self.close()
+        except Exception:
+            log_exception("PYAS._MainMixin._restart_after_reply")
+            os._exit(0)
+
+        if closed is False:
+            # close() refused to exit (a driver could not be stopped), so the page
+            # is still waiting on "Restarting…" with its only button disabled.
+            try:
+                window = getattr(self, "_window", None)
+
+                if window:
+                    window.evaluate_js("window.pyasPolicyRestartFailed && window.pyasPolicyRestartFailed()")
+            except Exception:
+                log_exception("PYAS._MainMixin._restart_after_reply.notify")
+
     def destroy_window_with_timeout(self, window, timeout=1.0):
         if not window:
             return

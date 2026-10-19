@@ -1,4 +1,5 @@
 from PYAS_Diagnostics import log_exception
+import copy
 import os
 import time
 import shutil
@@ -64,9 +65,13 @@ class ThreatMixin:
                 self.remove_list_items("white_list", norm_paths)
 
         acted_items = []
+        # 策略提交可能失败(磁盘还是旧列表),那时内存必须一起退回,
+        # 否则界面显示"已加入/已移除"、重启后又冒出来 —— 2026-10-19 白名单移除即此
+        synced = []
 
         with self.lock_config:
             target_list = self.pyas_config.setdefault(list_key, [])
+            snapshot = copy.deepcopy(target_list)
 
             if action == "add":
                 for path in norm_paths:
@@ -97,6 +102,7 @@ class ThreatMixin:
 
                         if list_key == "white_list":
                             self.sync_driver_whitelist(path, True, is_directory)
+                            synced.append((path, is_directory))
 
             elif action == "remove":
                 norm_paths_case = {os.path.normcase(p) for p in norm_paths}
@@ -119,6 +125,7 @@ class ThreatMixin:
                                     item.get("is_dir") if isinstance(item, dict) else None
                                 )
                                 self.sync_driver_whitelist(val, False, is_directory)
+                                synced.append((val, is_directory))
 
                             continue
 
@@ -127,10 +134,19 @@ class ThreatMixin:
                 target_list[:] = new_list
 
             if acted_items:
+                if not self.save_config():
+                    self.pyas_config[list_key] = snapshot
+                    for value, is_directory in synced:
+                        self.sync_driver_whitelist(value, action != "add", is_directory)
+                    self.write_log(
+                        "WARN", "Config Update",
+                        detail=f"List [{list_key}] {action} not saved: {acted_items}",
+                        success=False,
+                    )
+                    return 0
                 self.write_log(
                     "INFO", "Config Update", detail=f"List [{list_key}] {action}: {acted_items}"
                 )
-                self.save_config()
 
         return len(acted_items)
 
@@ -141,6 +157,8 @@ class ThreatMixin:
         with self.lock_config:
             target_list = self.pyas_config.get(list_key, [])
             original_len = len(target_list)
+            snapshot = copy.deepcopy(target_list)
+            synced = []
 
             norm_paths_to_remove = set()
 
@@ -179,6 +197,7 @@ class ThreatMixin:
                         if list_key == "white_list":
                             is_directory = item.get("is_dir") if isinstance(item, dict) else None
                             self.sync_driver_whitelist(val, False, is_directory)
+                            synced.append((val, is_directory))
 
                         continue
 
@@ -187,10 +206,21 @@ class ThreatMixin:
             self.pyas_config[list_key] = new_list
 
             if len(self.pyas_config[list_key]) < original_len:
+                # 提交失败时磁盘仍是旧列表:内存退回,并把驱动规则补回去,
+                # 否则界面显示"已移除"、重启后又出现(2026-10-19 实测)
+                if not self.save_config():
+                    self.pyas_config[list_key] = snapshot
+                    for value, is_directory in synced:
+                        self.sync_driver_whitelist(value, True, is_directory)
+                    self.write_log(
+                        "WARN", "Config Update",
+                        detail=f"List [{list_key}] remove not saved: {removed_items}",
+                        success=False,
+                    )
+                    return False
                 self.write_log(
                     "INFO", "Config Update", detail=f"List [{list_key}] remove: {removed_items}"
                 )
-                self.save_config()
                 return True
 
         return False

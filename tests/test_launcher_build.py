@@ -13,7 +13,8 @@ class LauncherBuildTests(unittest.TestCase):
             launcher=Path(directory)/'PYAS_Launcher.exe'
             (Path(directory)/'PYAS.exe').write_bytes(b'fixture')
             process=Mock(returncode=0);process.communicate.return_value=(b'',b'')
-            with patch.object(subprocess,'Popen',return_value=process) as popen:
+            with patch.object(build_launcher,'pyas_running',return_value=False), \
+                 patch.object(subprocess,'Popen',return_value=process) as popen:
                 build_launcher.smoke_launch(launcher)
             self.assertEqual(popen.call_count,2)
             first,second=[call.kwargs['env'] for call in popen.call_args_list]
@@ -27,10 +28,12 @@ class LauncherBuildTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             launcher=Path(directory)/'PYAS_Launcher.exe';(Path(directory)/'PYAS.exe').write_bytes(b'fixture')
             process=Mock(returncode=1);process.communicate.return_value=(b'',b'')
-            with patch.object(subprocess,'Popen',return_value=process),self.assertRaises(RuntimeError):
+            with patch.object(build_launcher,'pyas_running',return_value=False), \
+                 patch.object(subprocess,'Popen',return_value=process),self.assertRaises(RuntimeError):
                 build_launcher.smoke_launch(launcher)
             process=Mock();process.communicate.side_effect=[subprocess.TimeoutExpired('probe',40),(b'',b'')]
-            with patch.object(subprocess,'Popen',return_value=process),self.assertRaises(RuntimeError):
+            with patch.object(build_launcher,'pyas_running',return_value=False), \
+                 patch.object(subprocess,'Popen',return_value=process),self.assertRaises(RuntimeError):
                 build_launcher.smoke_launch(launcher)
             process.kill.assert_called_once();self.assertEqual(process.communicate.call_count,2)
 

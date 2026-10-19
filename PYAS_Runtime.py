@@ -159,6 +159,9 @@ class RuntimeMixin:
             # 驱动防护只影响「首页是否算作已受防护」的判断,不影响驱动本身;
             # 内核驱动装不上的机器不该永远挂着「防护未完全开启」,故默认开
             "driver_alert_exempt": True,
+            # 首页连驱动灯一起隐藏(忽略驱动防护状态的二级选项),默认关:
+            # 绝大多数机器看得见五盏灯更有说服力,只有确实不关心驱动的人才会关掉
+            "driver_home_hidden": False,
             "network_switch": False,
             "extension_switch": False,
             "sensitive_switch": False,

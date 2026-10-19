@@ -22,6 +22,67 @@ from PYAS_WinAPI import (
     PYAS_PROCESS_SCAN_ACCESS,
 )
 
+# 标准 EICAR 测试串:分段保存,否则本文件会被自己的探针命中。
+# 它是公开的无害标记,用来验证检测→拦截→隔离整条链路,不属于恶意样本。
+EICAR_HEAD = b'X5O!P%@AP[4'
+EICAR_TAIL = b'PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*'
+# 标记通常就在文件开头;超过这个体积的文本不再探针,避免退化成通用扫描
+EICAR_PROBE_BYTES = 4096
+
+
+def looks_like_eicar(path):
+    """EICAR 是自测标记而不是恶意样本:无论后缀是否在扫描列表里都要放行。
+
+    没有这条旁路时,后缀过滤会把它整份挡在扫描之外——用户按文档建一个
+    .txt 写 EICAR 串,防护看起来「毫无反应」,而这恰恰是自测最常见的用法。
+    只读很小的文件,因此不会变成第二条全量扫描路径。
+    """
+    try:
+        if os.path.getsize(path) > EICAR_PROBE_BYTES:
+            return False
+        with open(path, 'rb') as stream:
+            sample = stream.read(EICAR_PROBE_BYTES)
+    except OSError:
+        return False
+    return EICAR_HEAD in sample and EICAR_TAIL in sample
+
+
+def file_needs_scan(path, ext_filter, suffixes):
+    """后缀过滤 + EICAR 旁路,单独成函数以便直接验证放行/拦下的边界。"""
+    if not ext_filter:
+        return True
+
+    if os.path.splitext(path)[-1].lower() in suffixes:
+        return True
+
+    # 自测标记不在后缀表里也要扫:否则 .txt 的 EICAR 永远进不了扫描队列,
+    # 用户按文档自测时看到的是「完全没反应」
+    return looks_like_eicar(path)
+
+
+# 本应用自己的可执行文件。启动器是**每次启动的入口**(快捷方式、自启动、更新
+# 都走它),启动器被自己拦下时,用户点开图标看到的就是自己的拦截弹窗。
+# 这些名字只在安装目录下才算数,见 is_own_process_image。
+OWN_PROCESS_NAMES = frozenset({'pyas.exe', 'pyas_launcher.exe', 'pyas_menu.exe'})
+
+
+def is_own_process_image(path, install_dir):
+    """安装目录下的己方组件不算可疑进程。
+
+    只认「同目录 + 已知文件名」:安装目录归管理员所有,普通用户无法在这里投放
+    同名文件;不去放行整棵目录,避免将来目录权限变化时被顺带绕过。
+    """
+    if not path or not install_dir:
+        return False
+
+    candidate = os.path.abspath(path)
+
+    if os.path.normcase(os.path.dirname(candidate)) != os.path.normcase(os.path.abspath(install_dir)):
+        return False
+
+    return os.path.basename(candidate).lower() in OWN_PROCESS_NAMES
+
+
 # 全量重扫的三种触发共用一个动作,但含义与级别不同(此前文案硬编码,
 # 队列慢/OS 丢事件/读失败无法区分)。两次全量重扫之间至少间隔 RECOVERY_MIN_INTERVAL,
 # 持续高压下背靠背重扫会把仅有的 4 个扫描 worker 长期占死。
@@ -120,6 +181,11 @@ class RealtimeMixin:
             process_file = self.get_process_file(h)
 
             if "-scan" in cmdline and self.path_equal(process_file, self.file_pyas):
+                return
+
+            # 己方组件直接放行:否则启动器(每次启动的入口)会被自己的进程防护
+            # 暂停并弹窗,更新器同理。finally 会恢复可能已挂起的进程。
+            if is_own_process_image(process_file, getattr(self, "path_pyas", "")):
                 return
 
             raw_targets = self.extract_paths_from_cmdline(cmdline)
@@ -465,10 +531,7 @@ class RealtimeMixin:
                                 norm_path.startswith(temp_prefix)
                                 and norm_path[len(temp_prefix) :].startswith("_mei")
                             ):
-                                if (
-                                    not ext_filter
-                                    or os.path.splitext(file_path)[-1].lower() in suffix
-                                ):
+                                if file_needs_scan(file_path, ext_filter, suffix):
                                     self._queue_file_scan(file_path)
             except ValueError:
                 log_exception("PYAS_Realtime.RealtimeMixin.protect_file_thread:parse")

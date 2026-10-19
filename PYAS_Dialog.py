@@ -185,6 +185,20 @@ DIALOG_TEXTS = {
         "russian_switch": "Процесс",
         "slovenian_switch": "Proces",
     },
+    # 文件类告警查不到发起进程时的显式说明(Restart Manager 查不到占用方)
+    "process_unknown": {
+        "traditional_switch": "未識別（檔案已關閉或無進程佔用）",
+        "simplified_switch": "未识别（文件已关闭或无进程占用）",
+        "english_switch": "Not identified (file closed or no process holds it)",
+        "japanese_switch": "特定できません（ファイルが閉じられているか、占有プロセスがありません）",
+        "korean_switch": "식별되지 않음(파일이 닫혔거나 점유 프로세스 없음)",
+        "french_switch": "Non identifié (fichier fermé ou aucun processus ne le détient)",
+        "spanish_switch": "No identificado (archivo cerrado o sin proceso que lo retenga)",
+        "hindi_switch": "पहचान नहीं हुई (फ़ाइल बंद है या कोई प्रक्रिया इसे नहीं रखती)",
+        "arabic_switch": "غير محدد (الملف مغلق أو لا توجد عملية تحتجزه)",
+        "russian_switch": "Не определён (файл закрыт или процесс не удерживает его)",
+        "slovenian_switch": "Ni prepoznano (datoteka je zaprta ali je ne zadržuje noben proces)",
+    },
     "countdown_auto_block": {
         "traditional_switch": "{0} 秒後自動攔截",
         "simplified_switch": "{0} 秒后自动拦截",
@@ -1025,13 +1039,19 @@ class _WebDecisionAPI:
             invalidate_stale_ai(request, config, getattr(session.owner, '_ai_config_epoch', 0))
             remaining = max(0, math.ceil(request.deadline - time.monotonic())) if request.deadline else None
             events = session.queue.describe()
+            # 文件类告警的发起进程靠 Restart Manager 反查,文件写后即关就查不到;
+            # 整行不显示会被当成"漏了发起方",这里显式说明未识别。
+            process_name = request.process_name or ""
+            process_path = request.process_path or ""
+            if not process_name and request.action in ("File Block", "Deferred Scan Block"):
+                process_name = loc_dialog_text(request.lang, "process_unknown")
             result = {
                 "id": request.id, "title": request.title, "message": request.message,
                 "remaining": remaining,
                 "events": events, "count": session.queue.count,
                 "can_remember": request.rule is not None,
                 "identity_summary": (f"{request.rule['source']}\nSHA-256: {request.rule['sha256']}\n{request.rule['target']}" if request.rule else ''),
-                "process": {"name": request.process_name, "path": request.process_path},
+                "process": {"name": process_name, "path": process_path},
                 "agent": getattr(request, "agent", "") or "",
                 "agent_verified": bool(getattr(request, "agent_verified", False)),
                 "evidence": request.evidence or detection_view(None),
@@ -2284,7 +2304,10 @@ class DialogMixin(AlertPolicyMixin):
             log_exception("PYAS_Dialog.request_block_decision.agent_audit")
             agent, agent_verified = '', False
         request = _DecisionRequest(lang, title, "\r\n".join(lines), timeout, category=category, rule=rule,
-            dedup_key=(rule['key'], pid) if rule else None,
+            # 队列去重按"内容"而不是路径:rule['key'] 含 source(完整路径),
+            # 同一份内容的多个副本(自测按 4 个文件名各写一份 EICAR)会各自弹窗。
+            # sha256 + 检测结果相同就该只问一次,后续副本作为 follower 共享裁决。
+            dedup_key=(rule['action'], rule['sha256'], rule['target'], rule['detection'], pid) if rule else None,
             process_name=str(process_name or ''), process_path=str(process_path or ''),
             repeat_count=repeat_count, action=action, source=source, target=target, evidence=evidence,
             agent=str(agent or ''), agent_verified=bool(agent_verified))

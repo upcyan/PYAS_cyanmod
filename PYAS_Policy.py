@@ -10,6 +10,7 @@ import threading
 import time
 
 USER_KEYS = frozenset({'language', 'theme', 'first_launch', 'driver_alert_exempt',
+    'driver_home_hidden',
     'notify_channel', 'dnd_switch', 'ai_token_usage', 'ai_rule_drafts', 'ai_guide_seen',
     'quarantine'})
 BOOL_KEYS = frozenset({'process_switch', 'suspend_switch', 'load_switch', 'document_switch',
