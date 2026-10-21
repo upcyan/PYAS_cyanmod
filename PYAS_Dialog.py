@@ -242,6 +242,33 @@ DIALOG_TEXTS = {
         "russian_switch": "Не определён (файл закрыт или процесс не удерживает его)",
         "slovenian_switch": "Ni prepoznano (datoteka je zaprta ali je ne zadržuje noben proces)",
     },
+    # 内核驱动没开时,写进程只能靠「文件是否仍被占用」判断,不能笼统说"文件已关闭"
+    "process_unknown_driver": {
+        "traditional_switch": "未識別（核心驅動未啟用，無法追溯寫入進程）",
+        "simplified_switch": "未识别（内核驱动未启用，无法追溯写入进程）",
+        "english_switch": "Not identified (kernel driver is off, write history unavailable)",
+        "japanese_switch": "特定できません（カーネルドライバが無効のため書き込み履歴なし）",
+        "korean_switch": "식별되지 않음(커널 드라이버가 꺼져 있어 기록 없음)",
+        "french_switch": "Non identifié (pilote noyau désactivé, historique indisponible)",
+        "spanish_switch": "No identificado (controlador del núcleo desactivado)",
+        "hindi_switch": "पहचान नहीं हुई (कर्नेल ड्राइवर बंद है)",
+        "arabic_switch": "غير محدد (برنامج Kernel غير مفعّل)",
+        "russian_switch": "Не определён (драйвер ядра отключён)",
+        "slovenian_switch": "Ni prepoznano (gonilnik jedra je izklopljen)",
+    },
+    "rule_description_label": {
+        "traditional_switch": "規則說明（英文原文）",
+        "simplified_switch": "规则说明（英文原文）",
+        "english_switch": "Rule description (original English)",
+        "japanese_switch": "ルール説明（英語原文）",
+        "korean_switch": "규칙 설명(영문 원문)",
+        "french_switch": "Description de la règle (anglais d’origine)",
+        "spanish_switch": "Descripción de la regla (inglés original)",
+        "hindi_switch": "नियम विवरण (मूल अंग्रेज़ी)",
+        "arabic_switch": "وصف القاعدة (النص الإنجليزي الأصلي)",
+        "russian_switch": "Описание правила (оригинал на английском)",
+        "slovenian_switch": "Opis pravila (izvirnik v angleščini)",
+    },
     "countdown_auto_block": {
         "traditional_switch": "{0} 秒後自動攔截",
         "simplified_switch": "{0} 秒后自动拦截",
@@ -1346,7 +1373,13 @@ class _WebDecisionAPI:
             process_name = request.process_name or ""
             process_path = request.process_path or ""
             if not process_name and request.action in ("File Block", "Deferred Scan Block"):
-                process_name = loc_dialog_text(request.lang, "process_unknown")
+                # 驱动关着就只能靠 Restart Manager 看"现在还开着吗",结论不一样:
+                # 说成"文件已关闭"会让用户以为是偶发,其实是没有写入历史可查。
+                config_driver = bool(config.get("driver_switch")) if isinstance(config, dict) else False
+                process_name = loc_dialog_text(
+                    request.lang,
+                    "process_unknown" if config_driver else "process_unknown_driver",
+                )
             fp_view = fp_snapshot_view(request, signer_ok=True)
 
             # 文件告警却没有误报入口,多半是这条告警没带可锚定的规则/内容身份。
@@ -1370,6 +1403,7 @@ class _WebDecisionAPI:
                 "agent": getattr(request, "agent", "") or "",
                 "agent_verified": bool(getattr(request, "agent_verified", False)),
                 "evidence": request.evidence or detection_view(None),
+                "description_label": loc_dialog_text(request.lang, "rule_description_label"),
                 "file": {"path": request.source or "", "name": ntpath.basename(request.source or ""),
                          "sha256": request.rule.get("sha256", "") if request.rule else ""},
                 # 目标(网络地址/写入点)单独给出来,界面用它代替消息里的"目标：..."重复行

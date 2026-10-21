@@ -796,3 +796,13 @@ body:has(#threat_fp_panel:not(.hidden)) .threat-decide { display: none; }
 
 .threat-footer .decide-actions #threat_allow:disabled,
 .threat-footer .decide-actions #threat_block:disabled { opacity: .55; }
+
+/* 规则描述:标注「英文原文」,正文略降一级,避免和结构化字段抢注意力 */
+.rule-description { margin-top: 6px; }
+.rule-description-label {
+    display: block;
+    font-size: var(--text-2xs);
+    color: var(--text-secondary);
+    letter-spacing: .01em;
+}
+.rule-description .evidence-note { margin-top: 2px; }

@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const currentMode = () => document.querySelector('input[name="decision_mode"]:checked')?.value || 'once';
     const modeAllowed = { permanent: false, temp: false, once: true };
     let lastLabels = null;
+    let descriptionLabel = '';  // 「规则说明(英文原文)」这类标注由后端本地化后下发
 
     // 档位切换只改两个字:允许/拦截 的文案。决策仍然在点按钮时发生。
     const refreshLabels = () => {
@@ -173,8 +174,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const rules = Array.isArray(e.rules) ? e.rules : [];
         byId('threat_rules_row').hidden = !rules.length;
         setText('threat_rules', rules.join(' · '));
-        byId('threat_rule_description').hidden = !e.description;
+        byId('threat_rule_description_wrap').hidden = !e.description;
         setText('threat_rule_description', e.description || '');
+        setText('threat_rule_description_label', descriptionLabel || '');
         setText('threat_score_note', message(lang, ruleMatch ? 'evidence_rule_note'
             : scored ? (e.engine === 'ml' ? 'evidence_ml_note' : 'evidence_cloud_note') : 'evidence_unknown_note'));
         const file = data?.file || {};
@@ -410,6 +412,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!allowed && input.checked) { document.querySelector('input[name="decision_mode"][value="once"]').checked = true; }
             });
 
+            descriptionLabel = data.description_label || '';
             lastLabels = {
                 decide,
                 allow: data.allow,

@@ -177,7 +177,11 @@
                     </dl>
 
                     <div id="threat_rules_row" class="detection-rules" hidden><span id="evidence_rules_label">Matched rules</span><code id="threat_rules" dir="ltr"></code></div>
-                    <p id="threat_rule_description" class="evidence-note" hidden></p>
+                    <!-- 规则描述是规则作者写的英文原文:标出来,别让它看起来像漏翻 -->
+                    <div id="threat_rule_description_wrap" class="rule-description" hidden>
+                        <span id="threat_rule_description_label" class="rule-description-label"></span>
+                        <p id="threat_rule_description" class="evidence-note"></p>
+                    </div>
 
                 </section>
                 <section id="threat_file" class="threat-file hidden" aria-labelledby="evidence_file_label">

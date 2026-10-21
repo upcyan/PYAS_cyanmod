@@ -284,6 +284,25 @@ class AlertPolicyTests(unittest.TestCase):
         self.assertIn('进程被拦截', file_alert.message, '正文要合入另一类拦截的内容')
         self.assertEqual(file_alert.message.count('来源'), 1, '相同的来源行不应重复')
 
+    def test_file_alert_says_why_owner_is_unknown(self):
+        """驱动关着就说驱动没开;开了才轮到"文件已关闭"这种解释。"""
+        queue = _ThreatPromptQueue()
+        self.addCleanup(queue.close)
+        request = self.request()
+        request.lang = 'simplified_switch'
+        request.action = 'File Block'
+        request.process_name = ''
+        queue.pending.append(request)
+        queue.take_next()
+        queue.worker = object()
+        session = _WebThreatDialogSession('simplified_switch', 't', 'm', None, str, queue, self.owner)
+
+        self.owner.pyas_config['driver_switch'] = False
+        self.assertIn('内核驱动未启用', session.api.snapshot()['process']['name'])
+
+        self.owner.pyas_config['driver_switch'] = True
+        self.assertIn('文件已关闭', session.api.snapshot()['process']['name'])
+
     def test_shutdown_releases_deduplicated_waiter(self):
         queue = _ThreatPromptQueue()
         first, second = self.request(), self.request()
