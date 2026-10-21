@@ -140,6 +140,11 @@
     <div class="app-container">
         <header class="navigate-window pywebview-drag-region">
             <div class="navigate-title">PYAS Security Cyanmod</div>
+            <!-- 待处理数量紧跟标题:一行读完,不用扫到右边找 -->
+            <span class="queue-chip">
+                <h2 id="queue_heading" class="queue-chip-label">Pending alerts</h2>
+                <b id="queue_count" class="queue-chip-count" aria-live="polite">0</b>
+            </span>
             <div class="window-controls">
                 <button class="ctrl-btn" id="threat_close" aria-label="Close" title="Close">
                     <svg class="theme-svg"><use href="#i-close"/></svg>
@@ -147,8 +152,9 @@
             </div>
         </header>
         <main class="threat-layout">
-            <aside class="threat-queue" aria-labelledby="queue_heading">
-                <div class="threat-queue-heading"><h2 id="queue_heading">Pending alerts</h2><span id="queue_count" class="version-chip" aria-live="polite">0</span></div>
+            <!-- 队列明细不再展示(逐条 FIFO 处理,数量已在标题栏);
+                 列表节点保留,threat.js 仍按原样渲染,便于回归与将来恢复 -->
+            <aside class="threat-queue" aria-labelledby="queue_heading" hidden>
                 <ol id="threat_queue_list"></ol>
             </aside>
             <section class="threat-detail" aria-labelledby="threat_title">
@@ -161,6 +167,7 @@
                         <h2 id="evidence_heading">Detection evidence</h2>
                         <div class="detection-score"><span id="evidence_score_label">Threat score</span><strong id="threat_score">—</strong><span id="threat_score_scale" hidden>/100</span></div>
                     </div>
+                    <p id="threat_score_note" class="evidence-note"></p>
                     <div id="threat_score_track" class="score-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden><div id="threat_score_fill"></div></div>
                     <dl class="detection-grid">
                         <div><dt id="evidence_category_label">Category</dt><dd id="threat_category" class="is-empty" data-label="">—</dd></div>
@@ -168,30 +175,44 @@
                         <div><dt id="evidence_platform_label">Platform</dt><dd id="threat_platform" class="is-empty" data-label="">—</dd></div>
                         <div><dt id="evidence_family_label">Family</dt><dd id="threat_family" class="is-empty" data-label="">—</dd></div>
                     </dl>
-                    <div class="detection-raw"><span id="evidence_raw_label">Raw finding</span><code id="threat_raw_label" dir="ltr">—</code></div>
+
                     <div id="threat_rules_row" class="detection-rules" hidden><span id="evidence_rules_label">Matched rules</span><code id="threat_rules" dir="ltr"></code></div>
                     <p id="threat_rule_description" class="evidence-note" hidden></p>
-                    <p id="threat_score_note" class="evidence-note"></p>
+
                 </section>
                 <section id="threat_file" class="threat-file hidden" aria-labelledby="evidence_file_label">
-                    <div class="file-heading"><span id="evidence_file_label">File</span><strong id="threat_file_name"></strong></div>
-                    <p id="threat_file_path" class="file-path" dir="ltr"></p>
+                    <div class="file-heading">
+                        <span id="evidence_file_label">File</span>
+                        <span class="file-heading-value">
+                            <strong id="threat_file_name"></strong>
+                            <button class="file-open-btn" id="threat_file_open" type="button" aria-label="Open containing folder" title="Open containing folder">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-folder"/></svg>
+                            </button>
+                        </span>
+                    </div>
+                    <!-- 完整路径只在悬停时提示,正文不再占一行 -->
+                    <p id="threat_file_path" class="file-path" dir="ltr" hidden></p>
+                    <!-- 顺序:文件 → 它的哈希 → 目标 → 操作进程(先说完文件,再说去哪、谁操作) -->
+                    <div class="file-hash"><span id="evidence_hash_label">SHA-256</span><code id="threat_file_hash" dir="ltr">—</code></div>
+                    <div class="file-target hidden" id="threat_target_row"><span id="evidence_target_label">Target</span><code id="threat_target" dir="ltr"></code></div>
+                    <p id="threat_process" class="threat-process hidden"></p>
                 </section>
-                <p id="threat_process" class="threat-process hidden"></p>
+                <!-- 事件详情独立成块:驱动/进程告警没有文件,但事件描述必须能显示 -->
+                <details id="threat_event_details" class="event-details" open>
+                    <summary id="evidence_event_label">Event and file identity</summary>
+                    <div id="threat_message" class="threat-message" tabindex="0"></div>
+                </details>
                 <div id="ai_result" class="ai-result hidden" role="status" aria-live="polite">
                     <div class="ai-result-head">
                         <svg aria-hidden="true" focusable="false"><use href="#i-sparkles"/></svg>
                         <span class="ai-result-title" id="ai_result_title"></span>
                         <span class="ai-result-verdict" id="ai_result_verdict"></span>
+                        <span id="ai_result_note" class="ai-result-note"></span>
                     </div>
                     <p class="ai-result-reason" id="ai_result_reason"></p>
-                    <p id="ai_result_note" class="evidence-note"></p>
+
                 </div>
-                <details id="threat_event_details" class="event-details" open>
-                    <summary id="evidence_event_label">Event and file identity</summary>
-                    <div class="file-hash"><span id="evidence_hash_label">SHA-256</span><code id="threat_file_hash" dir="ltr">—</code></div>
-                    <div id="threat_message" class="threat-message" tabindex="0"></div>
-                </details>
+
                 <p id="threat_repeat_hint" class="threat-repeat-hint hidden" role="note"></p>
             </section>
         </main>
@@ -227,7 +248,9 @@
             <div class="threat-actions">
                 <button id="threat_permanent" class="action-btn modern-btn" type="button" disabled>Always allow</button>
                 <button id="threat_allow" class="action-btn modern-btn" type="button" disabled>Allow this time</button>
-                <button id="threat_block" class="action-btn modern-btn primary-btn" type="button" disabled>Block</button>
+                <!-- 拦截=按重复规则记住;本次阻止=只处理这一次(默认动作,在默认倒计时里执行) -->
+                <button id="threat_block" class="action-btn modern-btn" type="button" disabled>Block</button>
+                <button id="threat_block_once" class="action-btn modern-btn primary-btn" type="button" disabled>Block once</button>
             </div>
         </footer>
     </div>

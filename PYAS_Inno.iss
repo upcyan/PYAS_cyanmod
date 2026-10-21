@@ -1,6 +1,6 @@
-#define AppId "{{a7d7bac3-93b8-4630-8308-c7a56bf7fdf4}"
+﻿#define AppId "{{a7d7bac3-93b8-4630-8308-c7a56bf7fdf4}"
 #define AppName "PYAS"
-#define AppVersion "3.7.1.16"
+#define AppVersion "3.7.1.17"
 #define AppPublisher "PYAS Security"
 #define AppURL "https://github.com/upcyan/PYAS_cyanmod"
 #define AppExeName "PYAS.exe"
@@ -23,7 +23,13 @@ DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppPublisher}\{#AppName}
 AllowNoIcons=yes
 LicenseFile=SetupResources\licence.rtf
-ShowLanguageDialog=yes
+; 语言不询问:按系统语言自动匹配(应用内可切换);目录不询问:固定 {autopf},
+; 升级时 UsePreviousAppDir 装回原目录 —— 升级全程只剩 UAC + 进度条
+; Ready 页必须用指令禁:ShouldSkipPage 对「有内容要展示的 Ready 页」无效(Inno 规则,
+; 任务列表会顶在 Ready 页上),这正是升级时它仍然出现的原因
+ShowLanguageDialog=no
+DisableDirPage=yes
+DisableReadyPage=yes
 WizardStyle=modern
 WizardImageFile=SetupResources\wizardImage.bmp
 WizardSmallImageFile=SetupResources\headerImage.png
@@ -39,7 +45,7 @@ Compression=lzma2/max
 SolidCompression=yes
 OutputDir=Output
 OutputBaseFilename=PYAS_Setup
-UsePreviousTasks=no
+UsePreviousTasks=yes
 SetupLogging=yes
 RestartApplications=no
 
@@ -57,7 +63,10 @@ Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 Name: "slovenian"; MessagesFile: "compiler:Languages\Slovenian.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+; 升级安装不给 Ready 页留任何可展示内容:Inno 对「有内容的 Ready 页」
+; 拒绝 DisableReadyPage/ShouldSkipPage 的跳过(实测 6.7.3),任务条目
+; 不存在后 Ready 页为空,禁用指令才真正生效。桌面图标沿用既有设置。
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Check: ShowTasksPage
 
 [Files]
 Source: "Redist\VC_redist.x64.exe"; DestDir: "{tmp}\PYAS_Redist"; Flags: deleteafterinstall ignoreversion; AfterInstall: EnsureVCRedist
@@ -108,6 +117,10 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 ; 只对提权进程生效,提权 postinstall 启动存在祖先进程退出时序竞态,会弹
 ; "Security validation failure: invalid originating onefile parent process"
 Filename: "{app}\PYAS_Launcher.exe"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent runasoriginaluser; Check: CanLaunchApp
+; 应用内静默升级(/VERYSILENT /PYASAUTO=1)专用:静默模式没有完成页,
+; 带 postinstall 的条目不会执行,skipifsilent 又会再挡一次 —— 所以单列一条,
+; 只认显式传入的 PYASAUTO 参数,不影响企业管理化部署时的静默安装。
+Filename: "{app}\PYAS_Launcher.exe"; Flags: nowait runasoriginaluser; Check: WantsSilentAutoLaunch
 
 [CustomMessages]
 english.InstallingVCRuntime=Installing Microsoft Visual C++ Runtime...
@@ -121,6 +134,11 @@ english.QuitRetry=PYAS could not be closed automatically (attempt %1 of 3). Righ
 english.QuitRestart=PYAS is still running, so Setup cannot replace its files. Restart Windows and run Setup again.
 english.DependencyInstallFailed=Required Microsoft runtime installation failed. Setup cannot continue.
 english.WebView2InstallFailed=Microsoft Edge WebView2 Runtime could not be detected. Check your connection or install the Evergreen Runtime manually, then retry Setup.%n%nDetails: %1
+english.UpdateWizardTitle=Update - %1 %2
+english.UpdatePageName=Ready to Update
+english.UpdateReadyLabel=Setup is ready to update %1 to %2. Your current settings and autostart configuration will be kept.
+english.UpdateButton=&Update
+english.UpdatingPageName=Updating
 chinesesimplified.InstallingVCRuntime=正在安装 Microsoft Visual C++ 运行库...
 chinesesimplified.InstallingWebView2Runtime=正在安装 Microsoft Edge WebView2 运行时...
 chinesesimplified.Dependencies=依赖组件:
@@ -132,6 +150,11 @@ chinesesimplified.QuitRetry=无法自动关闭 PYAS（第 %1 次尝试，共 3 �
 chinesesimplified.QuitRestart=PYAS 进程仍在运行，安装程序无法替换文件。请重启 Windows 后再次运行安装程序。
 chinesesimplified.DependencyInstallFailed=必需的 Microsoft 运行库安装失败，安装程序无法继续。
 chinesesimplified.WebView2InstallFailed=无法检测到 Microsoft Edge WebView2 运行时。请检查网络或手动安装常青版运行时，然后重试安装。%n%n详细信息：%1
+chinesesimplified.UpdateWizardTitle=更新 - %1 %2
+chinesesimplified.UpdatePageName=准备更新
+chinesesimplified.UpdateReadyLabel=安装程序已就绪，点击“更新”升级到 %1 %2。现有设置与自启动配置将全部保留。
+chinesesimplified.UpdateButton=更新(&U)
+chinesesimplified.UpdatingPageName=正在更新
 chinesetraditional.InstallingVCRuntime=正在安裝 Microsoft Visual C++ 執行庫...
 chinesetraditional.InstallingWebView2Runtime=正在安裝 Microsoft Edge WebView2 執行環境...
 chinesetraditional.Dependencies=相依元件:
@@ -143,6 +166,11 @@ chinesetraditional.QuitRetry=無法自動關閉 PYAS（第 %1 次嘗試，共 3 
 chinesetraditional.QuitRestart=PYAS 處理程序仍在執行，安裝程式無法取代檔案。請重新啟動 Windows 後再執行安裝程式。
 chinesetraditional.DependencyInstallFailed=必要的 Microsoft 執行庫安裝失敗，安裝程式無法繼續。
 chinesetraditional.WebView2InstallFailed=無法偵測到 Microsoft Edge WebView2 執行環境。請檢查網路或手動安裝常青版執行環境，再重試安裝。%n%n詳細資訊：%1
+chinesetraditional.UpdateWizardTitle=更新 - %1 %2
+chinesetraditional.UpdatePageName=準備更新
+chinesetraditional.UpdateReadyLabel=安裝程式已就緒，點擊「更新」升級到 %1 %2。現有設定與自啟動配置將全部保留。
+chinesetraditional.UpdateButton=更新(&U)
+chinesetraditional.UpdatingPageName=正在更新
 japanese.InstallingVCRuntime=Microsoft Visual C++ ランタイムをインストールしています...
 japanese.InstallingWebView2Runtime=Microsoft Edge WebView2 ランタイムをインストールしています...
 japanese.Dependencies=依存コンポーネント:
@@ -236,6 +264,7 @@ slovenian.WebView2InstallFailed=Microsoft Edge WebView2 Runtime ni bilo mogoče 
 var
   DependencyRestartRequired: Boolean;
   DependenciesReady: Boolean;
+  UpgradeMode: Boolean;
 
 function FindWindow(lpClassName: LongWord; lpWindowName: string): HWND;
   external 'FindWindowW@user32.dll stdcall';
@@ -582,6 +611,19 @@ begin
     RaiseException(CustomMessage('QuitFailed'));
 end;
 
+function IsUpgradeInstall(): Boolean;
+begin
+  Result :=
+    RegKeyExists(HKLM, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\' + ExpandConstant('{#AppId}') + '_is1') or
+    RegKeyExists(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\' + ExpandConstant('{#AppId}') + '_is1');
+end;
+
+function ShowTasksPage(): Boolean;
+begin
+  { 升级模式不注册任何任务条目:让 Ready 页「无内容可展示」,禁用指令才能生效 }
+  Result := not UpgradeMode;
+end;
+
 function InitializeSetup(): Boolean;
 var
   OldInstallPath: string;
@@ -589,6 +631,7 @@ var
 begin
   DependencyRestartRequired := False;
   DependenciesReady := True;
+  UpgradeMode := IsUpgradeInstall();
   LegacyPath := ExpandConstant('{pf32}\{#AppName}');
   if DirExists(LegacyPath) and FileExists(LegacyPath + '\{#AppExeName}') then
   begin
@@ -597,17 +640,36 @@ begin
     Exit;
   end;
 
-  if RegQueryStringValue(HKLM, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\' + ExpandConstant('{#AppId}') + '_is1', 'InstallLocation', OldInstallPath) or
-     RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\' + ExpandConstant('{#AppId}') + '_is1', 'InstallLocation', OldInstallPath) then
+  if UpgradeMode then
   begin
-    if not EnsureOldInstanceStopped(OldInstallPath) then
+    { 升级安装:旧实例必须先退出(文件替换),失败时仍给手动重试通道 }
+    if RegQueryStringValue(HKLM, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\' + ExpandConstant('{#AppId}') + '_is1', 'InstallLocation', OldInstallPath) or
+       RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\' + ExpandConstant('{#AppId}') + '_is1', 'InstallLocation', OldInstallPath) then
     begin
-      Result := False;
-      Exit;
+      if not EnsureOldInstanceStopped(OldInstallPath) then
+      begin
+        Result := False;
+        Exit;
+      end;
     end;
   end;
 
   Result := True;
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  { 升级安装(检测到已装版本)全程免向导:许可/任务/就绪/完成页全跳,
+    只保留安装进度页。完成后沿用 [Run] 的 runasoriginaluser 条目自动启动新版
+    (onefile 防篡改校验要求以原始用户令牌启动,不能用提权令牌直接 Exec)。 }
+  Result := UpgradeMode and (PageID <> wpInstalling);
+  Log('ShouldSkipPage page=' + IntToStr(PageID) + ' upgrade=' + IntToStr(Ord(UpgradeMode)) + ' skip=' + IntToStr(Ord(Result)));
+end;
+
+function WantsSilentAutoLaunch(): Boolean;
+begin
+  { 只有本应用发起的静默升级才会带 /PYASAUTO=1;其它静默安装不自动拉起 }
+  Result := CompareText(ExpandConstant('{param:PYASAUTO|0}'), '1') = 0;
 end;
 
 function InitializeUninstall(): Boolean;
@@ -662,6 +724,32 @@ var
 begin
   GetWindowsVersionEx(Version);
   Result := Version.Build >= 22000;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+var
+  UpdateTitle: string;
+begin
+  { 升级安装的文案口径:出现过的向导页一律说「更新」,不说「安装」。
+    Ready 页的任务列表隐藏 —— 升级沿用既有快捷方式/任务设置(UsePreviousTasks=yes)。
+    注意 pascal 字符串拼接必须单行:iss 解析器把行首 [ 当 section 标签。 }
+  if (not UpgradeMode) or ((CurPageID <> wpReady) and (CurPageID <> wpInstalling)) then
+    Exit;
+
+  { {#AppName}/{#AppVersion} 是 ISPP 预处理器常量,编译期就地展开成字面值;
+    ExpandConstant 不认识 AppName —— 它是 [Setup] 指令名,不是运行时常量 }
+  UpdateTitle := FmtMessage(CustomMessage('UpdateWizardTitle'), ['{#AppName}', '{#AppVersion}']);
+  WizardForm.Caption := UpdateTitle;
+
+  if CurPageID = wpReady then
+  begin
+    WizardForm.PageNameLabel.Caption := CustomMessage('UpdatePageName');
+    WizardForm.ReadyLabel.Caption := FmtMessage(CustomMessage('UpdateReadyLabel'), ['{#AppName}', '{#AppVersion}']);
+    WizardForm.TasksList.Visible := False;
+    WizardForm.NextButton.Caption := CustomMessage('UpdateButton');
+  end
+  else
+    WizardForm.PageNameLabel.Caption := CustomMessage('UpdatingPageName');
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

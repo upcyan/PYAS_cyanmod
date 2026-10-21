@@ -106,9 +106,14 @@ const HIDDEN_ACTIONS = ['Exception', 'Diagnostic'];
 
         // 详情句式翻译:后端固定英文模板 + 内嵌路径,应整体渲染成中文
         const translated = await page.evaluate(() =>
-            window.translateLogDetail('Real-time file protection is monitoring C:\\Users\\Admin'));
-        assert.equal(translated, '文件实时防护已开启，正在监控：C:\\Users\\Admin',
-            'watching 详情应译为中文并保留路径');
+            window.translateLogDetail('Real-time file protection is on (watching the user profile for file changes)'));
+        assert.equal(translated, '文件实时防护已开启',
+            '开启详情不再重复行动作名里已经说明的监听范围');
+
+        const warnText = await page.evaluate(() =>
+            window.translateLogDetail('Real-time file protection cannot watch D:/demo; will retry'));
+        assert.equal(warnText, '文件实时防护无法监听 D:/demo，稍后重试',
+            '无法监听时的告警要有中文,并保留路径');
         assert.equal(find('Suppression Hit'), '命中抑制规则', 'Suppression Hit 应译为中文');
         assert.equal(find('AI Token Usage'), 'Token 用量', 'AI Token Usage 应译为中文');
         assert.equal(find('Alert Decision Remembered'), '已记住放行决定', 'Alert Decision Remembered 应译为中文');

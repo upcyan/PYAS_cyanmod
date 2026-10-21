@@ -139,3 +139,72 @@ class FileBlockDecisionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EarlyOwnerSnapshotTests(unittest.TestCase):
+    """目录监听侧在事件刚到时抄下发起方,弹窗优先用它。
+
+    背景:扫描要等 0.35s 防抖,写后即关的文件到弹窗时已无占用,
+    Restart Manager 只能返回空 —— 表现为「进程:未识别」。
+    """
+
+    def _owner(self):
+        from PYAS_Realtime import RealtimeMixin
+
+        class Owner(RealtimeMixin):
+            pass
+
+        return Owner()
+
+    def test_cached_pid_is_returned_within_ttl(self):
+        from PYAS_Realtime import FILE_OWNER_TTL_SECONDS
+
+        owner = self._owner()
+        owner._file_owner_state()
+        path = r"C://demo//pull-requests.js"
+
+        with owner._file_owner_lock:
+            owner._file_owner_cache[os.path.normcase(path)] = (4321, "node.exe", time.monotonic())
+
+        self.assertEqual(owner._file_owner_for(path), (4321, "node.exe"))
+        self.assertEqual(owner._file_owner_for(path.upper()), (4321, "node.exe"), "路径大小写不敏感")
+
+        with owner._file_owner_lock:
+            owner._file_owner_cache[os.path.normcase(path)] = (
+                4321, "node.exe", time.monotonic() - FILE_OWNER_TTL_SECONDS - 1)
+
+        self.assertIsNone(owner._file_owner_for(path), "过期条目不得再用")
+
+    def test_empty_snapshot_is_negative(self):
+        owner = self._owner()
+        owner._file_owner_state()
+        path = r"C://demo//none.js"
+
+        with owner._file_owner_lock:
+            owner._file_owner_cache[os.path.normcase(path)] = (0, "", time.monotonic())
+
+        self.assertIsNone(owner._file_owner_for(path))
+
+    def test_block_decision_prefers_early_snapshot_over_late_query(self):
+        from unittest.mock import patch
+
+        from PYAS_Realtime import RealtimeMixin
+
+        class _Owner(_DecisionOwner, RealtimeMixin):
+            """真实引擎同时具备两套 mixin:弹窗侧通过 _file_owner_for 取快照。"""
+
+            pass
+
+        owner = _Owner()
+        path = r"C://demo//pull-requests.js"
+        owner._file_owner_state()
+
+        with owner._file_owner_lock:
+            owner._file_owner_cache[os.path.normcase(path)] = (9876, "codex.exe", time.monotonic())
+
+        with patch("PYAS_Dialog._query_file_users", return_value=[]) as late_query:
+            owner.request_block_decision("File Block", source=path, detection={"name": "YARA"})
+            late_query.assert_not_called()
+
+        self.assertEqual(len(owner.submitted), 1)
+        self.assertIn(9876, owner.exe_lookups, "应使用事件时刻记下的 PID")

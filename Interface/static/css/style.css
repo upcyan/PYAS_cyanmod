@@ -104,7 +104,10 @@
 }
 
 /* 深色主题:阴影换环境色(纯黑阴影在暗底上不可见) */
-[data-theme="black"] {
+/* ⚠️ 选择器必须与 theme.js 写入的值一致:apply() 写的是主题键名 black_switch,
+   写成 [data-theme="black"] 永远不命中 —— 高光/描边/发丝线一直用亮色值,
+   表现为侧边栏发灰、标题栏下缘一条突兀亮线。 */
+[data-theme="black_switch"] {
     --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.5);
     --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.55);
     --shadow-3: 0 16px 40px rgba(0, 0, 0, 0.65);
@@ -638,20 +641,7 @@ body {
 .icon-action-btn:hover { background-color: var(--bg-hover); color: var(--text-primary); }
 .icon-action-btn svg { width: 20px; height: 20px; }
 
-.sub-header-toolbar {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    margin-bottom: var(--space-4);
-    width: 100%;
-}
-
-.sub-header-toolbar h2 {
-    font-size: clamp(var(--text-3xl), 2.4vw, var(--text-5xl));
-    font-weight: 600;
-    letter-spacing: -0.5px;
-    white-space: nowrap;
-}
+/* 标题区规则统一放在 A 型段落(见文件末尾),这里不再重复定义 */
 
 .icon-btn {
     width: 32px; height: 32px;
@@ -1459,17 +1449,28 @@ body.resizing-active * {
     content: none;
     position: absolute;
     inset: 0;
-    background: linear-gradient(90deg, transparent, var(--accent-color), rgba(255,255,255,.85), var(--accent-color), transparent);
+    /* 半透明扫光:只留一个峰。写成"两侧 accent + 中间留白"时,
+       在 8px 高的轨道上会被读成两三段独立的光块 */
+    background: linear-gradient(90deg,
+        transparent 0%,
+        transparent 26%,
+        color-mix(in srgb, var(--accent-color) 34%, transparent) 50%,
+        transparent 74%,
+        transparent 100%);
     transform: translateX(-100%);
     animation: none;
 }
 .modal-progress-bar.is-downloading .modal-progress-remaining::after {
     content: '';
-    animation: progress-shimmer 1.4s linear infinite;
+    /* 一个周期只扫一条:前 55% 扫完,剩下 45% 停在可视区外 */
+    animation: progress-shimmer 1.8s linear infinite;
 }
 .modal-progress-bar.is-complete .modal-progress-remaining::after,
 #update_modal.hidden .modal-progress-remaining::after { content: none; animation: none; }
-@keyframes progress-shimmer { to { transform: translateX(100%); } }
+@keyframes progress-shimmer {
+    0% { transform: translateX(-100%); }
+    55%, 100% { transform: translateX(100%); }
+}
 @media (prefers-reduced-motion: reduce) {
     .modal-progress-bar.is-downloading .modal-progress-remaining::after { content: none; animation: none; }
     .modal-progress-fill, .modal-progress-remaining { transition: none; }
@@ -1901,13 +1902,16 @@ body.resizing-active * {
     color: var(--text-secondary);
 }
 
+/* 外面已经是卡片了,里面再套一层带边框的盒子 = 矩形套矩形。
+   条目之间本来就有发丝线,这里只留一条上边线做与标题行的分隔。 */
 .changelog-body {
     flex: 1;
     min-height: 120px;
     overflow-y: auto;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-panel);
-    padding: 4px;
+    border: 0;
+    border-top: 1px solid var(--border-color);
+    border-radius: 0;
+    padding: var(--space-2) 0 0;
 }
 
 .changelog-placeholder {
@@ -2227,3 +2231,441 @@ body.resizing-active * {
     box-shadow: none;
     transform: none;
 }
+
+/* ============================================================
+   首页视觉刷新(2026-10-20)
+   只作用在 #home_window,不动其它页面;**颜色/圆角/阴影一律用现有 token**,
+   只调整间距、字重、层次与交互反馈,避免"换了主题"的观感。
+   ============================================================ */
+#home_window .home-status-widget {
+    padding: 2px 6px 18px;
+    align-items: flex-start;
+}
+
+#home_window .status-brand {
+    gap: 18px;
+    align-items: center;
+}
+
+#home_window .status-brand .state-icon {
+    width: 56px;
+    height: 56px;
+}
+
+#home_window .state-title {
+    margin: 0;
+    font-size: 21px;
+    font-weight: 600;
+    letter-spacing: .2px;
+}
+
+#home_window .protection-lights {
+    gap: 18px;
+    margin-top: 8px;
+}
+
+#home_window .protect-light {
+    font-size: 12px;
+    letter-spacing: .1px;
+}
+
+#home_window .protect-light i {
+    width: 8px;
+    height: 8px;
+}
+
+#home_window .quick-actions-row {
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+#home_window .quick-item {
+    padding: 15px 16px;
+    box-shadow: var(--shadow-1);
+    transition: box-shadow .18s ease, transform .18s ease, border-color .18s ease;
+}
+
+#home_window .quick-item:hover {
+    box-shadow: var(--shadow-2);
+    transform: translateY(-1px);
+}
+
+#home_window .quick-item .item-info h2 {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: .1px;
+}
+
+#home_window .log-toolbar {
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+#home_window .log-title {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: .1px;
+}
+
+#home_window .log-filters {
+    gap: 6px;
+}
+
+#home_window .log-filter {
+    padding: 5px 13px;
+    border-radius: var(--radius-pill);
+    font-size: 12px;
+    border-color: transparent;
+}
+
+#home_window .home-log-item {
+    padding: 9px 14px;
+    border-bottom-color: rgba(0, 0, 0, .055);
+}
+
+#home_window .home-log-item .hl-time {
+    font-size: 12.5px;
+}
+
+#home_window .home-log-item .hl-action {
+    font-weight: 500;
+}
+
+/* ============================================================
+   全局层次刷新(2026-10-20)
+   只补"投影"与"悬停反馈",不改尺寸/颜色/圆角 —— 与首页那次同一口径。
+   阴影走 --shadow-1/2 令牌,暗色主题随主题表自动切换,不会出现黑投影糊死。
+   ============================================================ */
+.app-container .virus-widget,
+.app-container .manage-widget,
+.app-container .settings-group,
+.app-container .page > .list-item {
+    box-shadow: var(--shadow-1);
+}
+
+/* 独立卡片(不在 settings-group 里的行)悬停抬一层;组内行保持原样,避免整组抖动 */
+.app-container .page > .list-item {
+    transition: box-shadow var(--dur-base) var(--ease-standard);
+}
+
+.app-container .page > .list-item:hover {
+    box-shadow: var(--shadow-2);
+}
+
+/* 组内分隔线减淡:密集列表里全强度描边会显得吵。用 border-color 的 55%,
+   暗色主题下同样成立(不要写死黑色)。 */
+.app-container .settings-group > .settings-child {
+    border-top-color: color-mix(in srgb, var(--border-color) 55%, transparent);
+}
+
+/* 表头与数据区分层:表头用极淡的底色,滚动时更容易辨认哪一行是列名 */
+.app-container .col-header,
+.app-container .manage-list-header {
+    background-color: color-mix(in srgb, var(--border-color) 16%, var(--bg-panel));
+}
+
+/* 扫描页空态:盖在结果网格上的一层占位(有结果时由 main.js 收起) */
+.scan-content { position: relative; }
+
+.grid-empty {
+    position: absolute;
+    inset: 0;
+    /* 表头是 sticky 的,会盖在普通绝对定位之上,这里抬一层 */
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    padding-bottom: var(--space-5);
+    background-color: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-1);
+}
+
+.grid-empty-icon {
+    width: 56px;
+    height: 56px;
+    color: var(--accent-color);
+    opacity: .9;
+}
+
+.grid-empty-text {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+
+/* 空态时连表头一起收起:只剩一圈空白比"有表头没数据"更清楚 */
+.virus-widget.is-empty .manage-list-header { visibility: hidden; }
+
+/* ============================================================
+   页面骨架统一:标题区 / 工具条 / 内容区
+   ------------------------------------------------------------
+   A 型(带工具条,10 页):.sub-header-toolbar + .manage-widget
+   B 型(设置/列表,5 页):.page-head + .list-widget
+   C 型(扫描页):.progress-widget + .scan-content
+   三型共用一套尺度:标题 20/600、标题区 56px、区距 16px、控件 40px。
+   只调尺度与层次,不动结构。
+   ============================================================ */
+
+/* —— 标题区:两套 DOM(.page-head / .sub-header-toolbar)共用一份定义 ——
+   历史上它们是两份独立规则,结果高度 44 vs 52 各走各的,切换页面标题会跳 8px。
+   现在统一在这里:改一处两边同时生效,不再有漂移。 */
+.page-head,
+.sub-header-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    width: 100%;
+    min-height: 52px;
+    margin-bottom: var(--space-3);
+}
+
+.page-title,
+.sub-header-toolbar h2 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.2px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    /* 字身补偿:20px 中文墨迹约 27px,盒居中后会偏低 2px */
+    line-height: 1;
+    position: relative;
+    top: -2px;
+}
+
+/* —— C 型:扫描页标题区 —— */
+.progress-widget {
+    height: 64px;
+    margin-bottom: var(--space-3);
+}
+
+.header-group h2 {
+    font-size: 20px;
+    letter-spacing: -0.2px;
+}
+
+.header-group p {
+    font-size: 12.5px;
+    margin-top: 2px;
+}
+
+/* —— 内容区:B 型列表补了标题后,列表要能吃掉剩余高度 —— */
+.page > .list-widget {
+    flex: 1;
+    min-height: 0;
+    height: auto;
+}
+
+/* 动作条内部容器:按钮与计数排成一行,不影响同级的隐藏 select */
+.action-buttons {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+/* ============================================================
+   选中态摘要:顶替搜索框的位置,把"已选 N 项"说成人话,
+   而不是在搜索框与按钮之间塞一个裸数字。
+   ============================================================ */
+.selection-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    /* 高度跟随文字:原来固定 40px,竖线比标题高出一截,像没对齐 */
+    height: auto;
+    /* 紧贴标题:用左侧细线做分隔,不靠空隙 */
+    margin-left: var(--space-2);
+    padding-left: var(--space-4);
+    border-left: 0;
+    position: relative;
+    color: var(--text-secondary);
+    font-size: var(--text-md);
+    white-space: nowrap;
+}
+
+.selection-summary[hidden] { display: none; }
+
+/* 分隔细线按文字高度画,与标题视觉等高 */
+.selection-summary::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 1px;
+    height: 16px;
+    background: var(--border-color);
+}
+
+
+.selection-text { color: var(--text-primary); font-weight: 600; }
+
+.link-btn {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    font: inherit;
+    font-size: var(--text-sm);
+    color: var(--accent-color);
+    cursor: pointer;
+}
+
+.link-btn:hover { text-decoration: underline; }
+
+/* 选中态下搜索框让位,避免一行里挤三组元素 */
+.search-box.is-hidden { display: none; }
+
+/* ============================================================
+   列表密度与表头(2026-10-20)
+   行高收紧到 ~36px,表头吸顶并压低对比 —— 让表格读起来像一张表,
+   而不是一堆卡片。只调间距与层次,颜色仍走令牌。
+   ============================================================ */
+.app-container .manage-list-item {
+    padding: var(--space-2) var(--space-4);
+    border-bottom-color: color-mix(in srgb, var(--border-color) 60%, transparent);
+}
+
+.app-container .manage-list-item:hover {
+    background-color: var(--bg-hover);
+}
+
+.app-container .manage-list-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    padding: var(--space-2) var(--space-4);
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* 时间列:等宽数字 + 次级色,不再和路径抢注意力 */
+.row-col--date {
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.1px;
+    white-space: nowrap;
+}
+
+/* 窄窗口(<900px):动作多的页面(进程/启动项等 4 个动作)会挤出工具栏,
+   按钮与摘要同步收紧一档,而不是让内容横向溢出。 */
+@media (max-width: 900px) {
+    .app-container .sub-header-toolbar { gap: var(--space-2); }
+
+    /* 标题也降一档:4 个动作 + 摘要 + 标题在 720px 下只差几像素 */
+    .app-container .sub-header-toolbar h2 { font-size: 18px; }
+
+    .app-container .action-buttons { gap: var(--space-1); }
+
+    .app-container .action-buttons .modern-btn {
+        padding: 0 var(--space-3);
+        font-size: var(--text-sm);
+    }
+
+    .app-container .selection-summary {
+        gap: var(--space-2);
+        padding-left: var(--space-2);
+        font-size: var(--text-sm);
+    }
+}
+
+/* ============================================================
+   列表空态(2026-10-20):没有数据时给一行说明,而不是只留表头。
+   表头在空态下隐藏,避免"有列名没内容"的错觉。
+   ============================================================ */
+.manage-list-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 120px;
+    padding: var(--space-5);
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+    list-style: none;
+}
+
+.page.active .manage-widget.is-empty .manage-list-header { visibility: hidden; }
+
+/* 空态在容器里垂直居中,而不是贴在顶部 */
+.page.active .manage-widget.is-empty .manage-list {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ============================================================
+   B 型页(防护/工具/设置/AI/关于)只做"间距"这一档:
+   卡片高度不变(改行高会让组内 toggle 的相对定位漂移,点击会落到组容器上),
+   仅把列表项之间的空隙从 12px 收到 8px,再多看一项半。
+   ============================================================ */
+.app-container .list-widget { gap: var(--space-2); }
+
+/* 未选中任何行的列表页:动作按钮常驻但置灰 —— 要有可见的"禁用"外观,
+   否则用户以为按钮可以点,点了却没反应 */
+.app-container .action-buttons .modern-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+/* 字身补偿已并入标题区统一规则 */
+
+/* .list-widget 是 height:100% 的纵向 flex:子项默认 flex-shrink:1,
+   内容超出容器时会被**压扁**而不是滚动 —— 开关滑块因此被 overflow:hidden 裁掉,
+   点击落点跑到组容器上(实测 Playwright 报 settings-group intercepts pointer events)。
+   固定子项不被压缩,让容器自己滚。 */
+.app-container .list-widget > * { flex-shrink: 0; }
+
+/* B 型页行高收紧(子项不再被压缩后,改高度是安全的) */
+.app-container .list-widget .list-item { padding: 10px var(--space-4); }
+.app-container .list-widget .item-icon { width: 20px; height: 20px; }
+
+/* 日志条目内部原本没有任何样式:标题、说明、条目挤成一片同色文字。 */
+.changelog-desc {
+    margin-top: 4px;
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+}
+
+.changelog-list {
+    margin: 6px 0 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 3px;
+}
+
+.changelog-list li {
+    font-size: var(--text-sm);
+    line-height: 1.55;
+    color: var(--text-primary);
+}
+
+/* 条目之间靠留白分隔即可,不要再多画线 */
+.changelog-entry + .changelog-entry { padding-top: var(--space-3); }
+
+/* ============================================================
+   无边框窗口的边缘缩放热区。
+   只覆盖 6px 边带:中间区域 pointer-events:none,绝不抢页面点击。
+   光标用系统缩放箭头,悬停时给一条高亮,让"这里能拉"可见。
+   ============================================================ */
+.resize-layer { position: fixed; inset: 0; z-index: 2147483000; pointer-events: none; }
+
+.resize-edge { position: absolute; pointer-events: auto; }
+
+.resize-edge[data-dir="n"], .resize-edge[data-dir="s"] { left: 10px; right: 10px; height: 8px; cursor: ns-resize; }
+.resize-edge[data-dir="n"] { top: 0; }
+.resize-edge[data-dir="s"] { bottom: 0; }
+
+.resize-edge[data-dir="w"], .resize-edge[data-dir="e"] { top: 10px; bottom: 10px; width: 8px; cursor: ew-resize; }
+.resize-edge[data-dir="w"] { left: 0; }
+.resize-edge[data-dir="e"] { right: 0; }
+
+.resize-edge[data-dir="nw"], .resize-edge[data-dir="ne"],
+.resize-edge[data-dir="sw"], .resize-edge[data-dir="se"] { width: 16px; height: 16px; }
+.resize-edge[data-dir="nw"] { top: 0; left: 0; cursor: nwse-resize; }
+.resize-edge[data-dir="se"] { right: 0; bottom: 0; cursor: nwse-resize; }
+.resize-edge[data-dir="ne"] { top: 0; right: 0; cursor: nesw-resize; }
+.resize-edge[data-dir="sw"] { left: 0; bottom: 0; cursor: nesw-resize; }

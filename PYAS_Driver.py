@@ -1449,6 +1449,14 @@ class DriverMixin:
                     exe_info = self.get_exe_info(pid)
                     safe_source = exe_info[1] if exe_info and exe_info[1] else "Unknown"
 
+                    # 记下「这个路径是谁写的」:驱动事件是唯一在文件关闭后仍可回溯的来源
+                    try:
+                        from PYAS_Attribution import get_layer
+
+                        get_layer().record_driver(target, pid, safe_source)
+                    except Exception:
+                        log_exception('PYAS_Driver.record_attribution')
+
                     if not self.is_in_whitelist(safe_source):
                         self.write_log(
                             "BLOCK",

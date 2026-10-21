@@ -69,7 +69,6 @@
   background-color: var(--color-success-btn);
   border-color: var(--color-success-btn);
   color: #fff;
-  font-weight: 600;
 }
 #threat_permanent:hover:not(:disabled) { background-color: var(--color-success-btn-hover); border-color: var(--color-success-btn-hover); }
 #threat_permanent:active:not(:disabled) { background-color: var(--color-success-btn-active); border-color: var(--color-success-btn-active); }
@@ -142,7 +141,7 @@
      ③ 摘要/卡片/页脚的内边距与行距各比正文大一档。
    现在:单条告警不出左栏(两条以上才出现,此时列表才有信息量)、证据四列一行、
    全局收一档间距。字体只降 1~2px,字号层级(--text-*)照旧走令牌。 */
-.threat-layout { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px; }
+.threat-layout { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px var(--space-5); }
 /* 按防护类型分组后仍有 ≥2 条时才显示队列栏 */
 .threat-layout:has(#threat_queue_list > li:nth-child(2)) { grid-template-columns: 118px minmax(0, 1fr); }
 .threat-queue { display: none; }
@@ -228,14 +227,14 @@
 .event-details summary:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 3px; }
 .file-hash { display: flex; flex-direction: column; gap: 2px; margin: 4px 0; }
 .threat-message { max-height: 88px; font-size: var(--text-xs); flex: none; }
-.threat-footer { padding: 0 10px 10px; max-height: 54vh; overflow-y: auto; }
+.threat-footer { padding: 0 var(--space-5) 10px; max-height: 54vh; overflow-y: auto; }
 .threat-status { padding: 6px 0; border-top: 1px solid var(--border-color); font-size: var(--text-xs); font-weight: 500; }
 .threat-meta { margin-bottom: 8px; gap: 4px; }
 .threat-repeat { font-size: var(--text-2xs); line-height: 1.45; }
 .fp-link { font-size: var(--text-2xs); }
 .threat-actions { align-items: center; }
 /* Layout only: preserve the green fill and hover/active colours defined above. */
-#threat_permanent { margin-right: 0; margin-inline-end: auto; font-size: var(--text-sm); }
+#threat_permanent { margin-right: 0; margin-inline-end: 0; font-size: var(--text-md); }
 .threat-window [hidden] { display: none !important; }
 /* 没有待处理告警时,"重复确认"这一行只剩一个没文案的空复选框(首次进入尤其明显) */
 .threat-meta:has(#threat_repeat_text:empty) { display: none; }
@@ -327,7 +326,7 @@ body:has(#threat_fp_panel:not(.hidden)) .threat-actions { display: none; }
 @media (max-width: 620px) {
     .threat-layout,
     .threat-layout:has(#threat_queue_list > li:nth-child(2)) {
-        display: flex; flex-direction: column; gap: 6px; padding: 8px;
+        display: flex; flex-direction: column; gap: 6px; padding: 8px var(--space-5);
     }
     .threat-layout:has(#threat_queue_list > li:nth-child(2)) .threat-queue {
         flex-direction: row; align-items: center; gap: 8px; min-height: 0; flex-shrink: 0;
@@ -337,9 +336,9 @@ body:has(#threat_fp_panel:not(.hidden)) .threat-actions { display: none; }
     /* 这里 .threat-layout 是纵向 flex:align-self 管的是「横向」,
        若沿用基线的 start 会把详情区压成内容宽(实测 20px)。
        必须显式 stretch,让它重新占满整行 */
-    .threat-detail { flex: 1; min-height: 0; padding: 10px; align-self: stretch; }
+    .threat-detail { flex: 1; min-height: 0; padding: 10px 0; align-self: stretch; }
     .detection-grid { gap: 4px 10px; }
-    .threat-footer { padding: 0 8px 8px; }
+    .threat-footer { padding: 0 var(--space-5) 8px; }
     .threat-actions button { flex: 0 1 auto; min-width: 82px; }
 }
 @media (max-width: 460px) {
@@ -348,4 +347,423 @@ body:has(#threat_fp_panel:not(.hidden)) .threat-actions { display: none; }
     .threat-meta { flex-direction: column; gap: 5px; }
     #threat_permanent { margin-inline-end: 0; }
     .threat-actions button { flex: 1; min-width: 90px; }
+}
+
+/* ============================================================
+   告警弹窗重排(2026-10-20)
+   三条原则:
+   1) 队列是一条紧凑列表,不是一摞卡片;
+   2) 动作层级按"风险"排:拦截=主操作,永久允许=最危险(描边+危险色,不再实心绿);
+   3) 证据区做成可扫读的表,标题/值分档。
+   ============================================================ */
+
+/* —— 队列:卡片 → 紧凑行 —— */
+.threat-queue ol { padding-right: 2px; }
+
+.threat-queue li {
+    margin-bottom: 0;
+    padding: 9px 10px 9px 12px;
+    border: 0;
+    border-radius: 0;
+    border-left: 2px solid transparent;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color) 55%, transparent);
+    background: transparent;
+}
+
+.threat-queue li:last-child { border-bottom: 0; }
+
+.threat-queue li:hover { background: var(--bg-hover); }
+
+.threat-queue li.active {
+    background: var(--accent-alpha);
+    border-left-color: var(--accent-color);
+    border-radius: var(--radius-sm);
+}
+
+/* 证据区:标签弱、值强,便于竖着扫 */
+.detection-grid dt {
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+}
+
+.detection-grid dd {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.threat-status {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+
+/* ============================================================
+   2026-10-20 结构简化:去掉左侧队列栏,数量进标题栏;证据卡压成一行四列。
+   理由:告警按先进先出逐条处理,明细列表没有决策价值,反而吃掉 148px 宽度;
+         证据是"扫一眼确认"的信息,四个短字段不该占两行。
+   ============================================================ */
+
+/* 队列栏彻底隐藏(节点保留:threat.js 仍渲染,便于回归) */
+.threat-queue { display: none !important; }
+/* 必须同时压住旧规则的 :has(两条以上) 分栏 —— 否则隐藏了队列,
+   详情仍被塞进 118px 的第一列 */
+.threat-layout,
+.threat-layout:has(#threat_queue_list > li:nth-child(2)) {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+/* 标题栏里的待处理计数 */
+.queue-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-left: auto;
+    margin-right: var(--space-3);
+    padding: 2px 8px 2px 10px;
+    border-radius: var(--radius-pill);
+    background: var(--accent-alpha);
+    color: var(--accent-color);
+    font-size: var(--text-xs);
+    line-height: 18px;
+}
+
+.queue-chip-label {
+    margin: 0;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: inherit;
+}
+
+.queue-chip-count {
+    min-width: 16px;
+    text-align: center;
+    font-weight: 700;
+}
+
+/* 证据:四列一行,标签与值同一行(原来上下堆叠,六字段占 ~76px) */
+.detection-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 2px 14px;
+    margin: 6px 0 2px;
+}
+
+.detection-grid > div {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+}
+
+.detection-grid dt {
+    flex: 0 0 auto;
+    font-size: var(--text-2xs);
+}
+
+.detection-grid dd {
+    margin: 0;
+    font-size: var(--text-sm);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 原始报毒结果与命中规则并成一行,省一层高度 */
+.detection-raw, .detection-rules {
+    display: flex;
+    flex-direction: row;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    margin-top: 2px;
+}
+
+.detection-raw > span, .detection-rules > span { flex: 0 0 auto; }
+
+.detection-raw code, .detection-rules code {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ============================================================
+   2026-10-20 扁平化:去掉"圆角卡片套圆角卡片"。
+   原来 窗口 → 详情卡 → 证据卡 → AI 卡 → 事件卡,四层描边叠在一起;
+   现在整块详情是一个面,区块之间只用 1px 发丝线分隔。
+   ============================================================ */
+.threat-detail {
+    border: 0;
+    background: transparent;
+    padding: 4px 0 0;
+}
+
+.detection-card,
+.threat-file,
+.ai-result,
+.event-details {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    padding-left: 0;
+    padding-right: 0;
+}
+
+/* 区块之间用发丝线分节,而不是各自套一个框 */
+.detection-card,
+.threat-file,
+.ai-result {
+    border-top: 1px solid var(--border-color);
+    padding-top: 8px;
+}
+
+.event-details summary {
+    font-size: var(--text-2xs);
+    color: var(--text-secondary);
+}
+
+/* 文件/进程/哈希/SHA 行统一成 key-value 行 */
+/* 原规则是 flex-direction: column(标签在上、值在下),这里必须显式改回一行 */
+.threat-file .file-heading,
+.threat-file .file-hash,
+.threat-file .threat-process {
+    display: flex;
+    flex-direction: row;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+    margin: 2px 0;
+}
+
+.threat-file .file-path {
+    margin: 2px 0 0;
+    font-size: var(--text-sm);
+}
+
+/* 原始报毒结果整行已移除,清理遗留样式 */
+.detection-raw { display: none; }
+
+/* 长标识(路径/哈希)单行省略,悬停看全文;换行会把区块撑高、读起来也断 */
+.threat-file .file-hash > code,
+.threat-file .file-path {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ============================================================
+   2026-10-20 第二轮:按钮语义色、计数贴标题、文件行、AI 说明内联。
+   拦截=红(危险动作,但这是安全默认)/ 本次允许=蓝 / 永久允许=白描边。
+   ============================================================ */
+
+/* 「本次阻止」是默认动作:红实心;「拦截」(记住)降一档,红描边 */
+#threat_block_once {
+    background-color: var(--color-danger-strong);
+    border-color: var(--color-danger-strong);
+    color: #fff;
+}
+
+#threat_block_once:hover:not(:disabled) { background-color: var(--color-danger); border-color: var(--color-danger); }
+
+/* 永久拦截:与「永久允许」同一档外观(白底描边) */
+#threat_block {
+    background-color: var(--bg-panel);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+#threat_block:hover:not(:disabled) { background-color: var(--bg-hover); }
+
+#threat_allow {
+    background-color: var(--accent-color);
+    border-color: var(--accent-color);
+    color: #fff;
+}
+
+#threat_allow:hover:not(:disabled) { filter: brightness(0.92); }
+
+#threat_permanent {
+    background-color: var(--bg-panel);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+#threat_permanent:hover:not(:disabled) { background-color: var(--bg-hover); }
+
+/* 待处理计数紧跟标题文字:标题栏是 space-between,把右侧控件推走即可 */
+.threat-window .navigate-window { justify-content: flex-start; }
+.queue-chip { margin-left: var(--space-2); margin-right: 0; }
+.threat-window .window-controls { margin-left: auto; }
+
+/* 文件行:文件名 + 打开目录按钮;路径只在悬停提示里 */
+.file-open-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.file-open-btn svg { width: 15px; height: 15px; }
+
+.file-open-btn:hover { background: var(--bg-hover); color: var(--accent-color); }
+
+.file-path[hidden] { display: none; }
+
+/* AI 说明并到标题行,跟在建议动作后面 */
+.ai-result-note {
+    font-size: var(--text-2xs);
+    color: var(--text-secondary);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 判断原因下面的分数说明 */
+.evidence-note {
+    font-size: var(--text-2xs);
+    color: var(--text-secondary);
+    margin: 2px 0 0;
+}
+
+/* ============================================================
+   2026-10-20 第三轮细节:详细原因加粗、文件行图标对齐。
+   ============================================================ */
+
+/* 详细原因(规则说明)是"为什么"的主体,用正文色并加粗 */
+#threat_rule_description {
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: var(--text-sm);
+    line-height: 1.5;
+    margin: 4px 0 0;
+}
+
+/* 文件名与文件夹按钮居中对齐(之前按 baseline 排,图标会显得偏上) */
+.threat-file .file-heading { align-items: center; }
+.file-open-btn { align-self: center; }
+
+/* ============================================================
+   文件区块做成"标签列 + 值列":标签 600 加粗固定宽度,值左对齐;
+   三行(文件/操作进程/SHA-256)竖直对齐,扫得动。
+   ============================================================ */
+.threat-file .file-heading,
+.threat-file .threat-process,
+.threat-file .file-target,
+.threat-file .file-hash {
+    display: grid;
+    /* 第一列标签定宽;第二列放"值 + 可选按钮"的 flex,宽度不够时省略而不是撑破 */
+    grid-template-columns: 84px minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-2);
+    margin: 3px 0;
+}
+
+/* 只有第一列(标签)加粗;值是正文色 */
+.threat-file .file-heading > span,
+.threat-file .threat-process > span:first-child,
+.threat-file .file-target > span,
+.threat-file .file-hash > span {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.threat-file .file-process-value {
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 文件名本身是值,用正文色 */
+.threat-file .file-heading > strong { color: var(--text-primary); }
+
+/* 进程名与哈希属于值,不加粗、用次级色 */
+.threat-file .file-hash > code { color: var(--text-secondary); }
+
+/* 复选框与文字真正对齐(原来 align-items: flex-start + margin-top 3px 会错位) */
+.threat-repeat { align-items: center; }
+.threat-repeat input { margin-top: 0; }
+
+/* 事件详情:展开时给足高度,避免第三条(进程)被裁掉 */
+#threat_event_details .threat-message {
+    max-height: 132px;
+}
+
+/* 三个决定按钮统一高度,避免白底那颗被 flex 拉伸得更胖 */
+.threat-actions { align-items: center; }
+.threat-actions > button { align-self: center; height: 40px; }
+
+.threat-file .file-heading-value {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-width: 0;
+}
+
+.threat-file #threat_file_name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 目标行:地址可能很长,单行省略 */
+.threat-file .file-target > code {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-secondary);
+}
+
+/* 事件详情成了独立区块:补一条上发丝线,和文件区块视觉上连成一片 */
+.threat-detail > .event-details {
+    border-top: 1px solid var(--border-color);
+    padding-top: 8px;
+    margin-top: 2px;
+}
+
+.threat-detail > .event-details[hidden] { display: none; }
+
+/* 没有标签时(后端未给)值仍然从第二列起,不和标签列错位 */
+.threat-file .threat-process.is-value-only .file-process-value { grid-column: 2; }
+
+/* 内容少时不要把详情区拉到满高:让 footer 跟着内容走,避免中间一大片空 */
+.threat-layout { align-items: start; align-content: start; }
+
+/* 暗色下 --border-color(44,44,46)对 18,18,20 的对比太弱,分节线提亮一档 */
+[data-theme="black_switch"] .threat-detail > .detection-card,
+[data-theme="black_switch"] .threat-detail > .threat-file,
+[data-theme="black_switch"] .threat-detail > .ai-result,
+[data-theme="black_switch"] .threat-detail > .event-details {
+    border-top-color: rgba(255, 255, 255, 0.10);
+}
+
+/* 左侧一组:永久允许 + 本次允许;右侧一组:永久拦截 + 本次阻止 */
+.threat-actions { justify-content: flex-start; }
+#threat_allow { margin-inline-end: auto; }
+
+/* 「判断原因」与「AI 辅助决策」是同一层的两个区块标题:统一字号并升到 14px;
+   AI 的结论文本(理由)与"详细原因"同级,用正文色 + 600 加粗,才是这一块的重点。 */
+.detection-head h2,
+.ai-result-title {
+    font-size: var(--text-md);
+    /* 标题 700、正文 600:同字号下靠字重区分层级 */
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.ai-result-reason {
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: var(--text-sm);
+    line-height: 1.5;
 }

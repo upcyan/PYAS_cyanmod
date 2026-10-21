@@ -50,7 +50,7 @@ const assert = require('node:assert/strict');
                         language: 'simplified_switch', remaining: null,
                         message: '检测到进程正连接已知恶意地址。拦截将终止该进程；本次允许将允许此次连接。\n\n来源：C:\\Users\\demo\\Downloads\\' + '长目录名称\\'.repeat(16) + 'example.exe\n目标：example.test:443\n进程：4321',
                         waiting: '等待您选择；关闭窗口仅收起，不执行操作。',
-                        allow: '本次允许', block: '拦截', countdown: '',
+                        allow: '本次允许', block: '拦截', block_once: '本次阻止', countdown: '',
                     } : null;
                 },
                 decide: async (id, choice) => {
@@ -65,6 +65,12 @@ const assert = require('node:assert/strict');
         await page.getByRole('button', { name: '拦截', exact: true }).waitFor();
         await page.waitForFunction(() => !document.getElementById('threat_block').disabled);
         assert.equal(await page.locator('#queue_count').textContent(), '3');
+        // 默认不能把焦点放在任意动作按钮上:焦点在「拦截」时按空格会直接拦截
+        assert.notEqual(await page.evaluate(() => document.activeElement.id), 'threat_block',
+            '默认焦点不得落在拦截按钮');
+        await page.keyboard.press('Space');
+        assert.equal(await page.evaluate(() => window.fixture.decisions.length), 0,
+            '空格不得触发拦截');
         await page.keyboard.press('Escape');
         assert.equal(await page.evaluate(() => window.fixture.minimized), 1);
         assert.equal(await page.evaluate(() => window.fixture.decisions.length), 0);
@@ -85,15 +91,22 @@ const assert = require('node:assert/strict');
         if (output) await page.screenshot({ path: path.join(output, 'threat-compact.png') });
         await page.setViewportSize({ width: 720, height: 520 });
         await page.evaluate(() => { window.fixture.theme = 'black_switch'; });
-        await page.waitForFunction(() => getComputedStyle(document.documentElement).getPropertyValue('--bg-window').trim() === 'rgb(0, 0, 0)');
-        await page.waitForFunction(() => getComputedStyle(document.querySelector('.navigate-window')).backgroundColor === 'rgb(28, 28, 30)' && getComputedStyle(document.getElementById('threat_allow')).color === 'rgb(216, 216, 220)');
+        await page.waitForFunction(() => getComputedStyle(document.documentElement).getPropertyValue('--bg-window').trim() === 'rgb(18, 18, 20)');
+        await page.waitForFunction(() => getComputedStyle(document.querySelector('.navigate-window')).backgroundColor === 'rgb(28, 28, 30)' && getComputedStyle(document.getElementById('threat_allow')).color === 'rgb(255, 255, 255)');
         if (output) await page.screenshot({ path: path.join(output, 'threat-dark.png') });
         await page.locator('#threat_block').click();
         await page.waitForFunction(() => document.getElementById('threat_title').textContent === '文件防护');
         assert.deepEqual(await page.evaluate(() => window.fixture.decisions), [{ id: '1', choice: 'block' }]);
+        // 左侧一组:永久允许 + 本次允许;右侧一组:永久拦截 + 本次阻止
         const permanentBox = await page.locator('#threat_permanent').boundingBox();
         const allowBox = await page.locator('#threat_allow').boundingBox();
-        assert(permanentBox.x + permanentBox.width + 20 < allowBox.x, 'permanent button separated on left');
+        const blockBox = await page.locator('#threat_block').boundingBox();
+        const blockOnceBox = await page.locator('#threat_block_once').boundingBox();
+        assert(permanentBox.x + permanentBox.width + 40 >= allowBox.x,
+            '永久允许与本次允许应在同一组(left-aligned)');
+        assert(permanentBox.x < allowBox.x, '永久允许应在本次允许左侧');
+        assert(allowBox.x + allowBox.width + 40 < blockBox.x, '两组之间应有明显间隔');
+        assert(blockBox.x + blockBox.width + 40 >= blockOnceBox.x, '永久拦截与本次阻止应在同一组');
         await page.locator('#threat_permanent').click();
         assert.equal(await page.locator('#threat_confirmation').isVisible(), true);
         assert.equal(await page.evaluate(() => window.fixture.decisions.length), 1, 'permanent requires confirmation');

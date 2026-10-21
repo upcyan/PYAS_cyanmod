@@ -162,6 +162,9 @@ class RuntimeMixin:
             # 首页连驱动灯一起隐藏(忽略驱动防护状态的二级选项),默认关:
             # 绝大多数机器看得见五盏灯更有说服力,只有确实不关心驱动的人才会关掉
             "driver_home_hidden": False,
+            # 发起进程溯源:优先用驱动事件,其次 ETW,最后退回系统占用查询。
+            # 默认开启 —— 拿不到权限/消费者时会在状态里说明原因,不影响拦截。
+            "etw_attribution_switch": True,
             "network_switch": False,
             "extension_switch": False,
             "sensitive_switch": False,

@@ -16,7 +16,12 @@ class InstallLaunchUncertain(RuntimeError):
     """The shell accepted a launch but did not return a process to monitor."""
 
 
-def launch_verified_installer(path, expected_digest, on_exit=None):
+# 应用内「一键升级」用静默参数:Inno 在 /VERYSILENT 下不走任何向导页(含 Ready 页)。
+# PYASAUTO=1 是给安装脚本认的信号 —— 只有带它才在静默安装后自动拉起新版。
+INNO_SILENT_PARAMETERS = ('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/PYASAUTO=1')
+
+
+def launch_verified_installer(path, expected_digest, on_exit=None, silent=True):
     if os.name != 'nt':
         raise OSError('Native installer launch requires Windows')
     path = os.path.realpath(os.path.abspath(path))
@@ -66,6 +71,9 @@ def launch_verified_installer(path, expected_digest, on_exit=None):
             info.lpParameters = subprocess.list2cmdline(['/i', path])
         else:
             info.lpFile = path
+
+            if silent:
+                info.lpParameters = subprocess.list2cmdline(INNO_SILENT_PARAMETERS)
         ready = threading.Event()
         record = {'handle': None}
         owned = stack.pop_all()

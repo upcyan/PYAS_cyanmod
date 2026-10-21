@@ -232,19 +232,141 @@ if ($Legacy -and (Resolve-Sid $Legacy.Definition.Principal.UserId) -eq $Sid -and
 """
         )
 
-    def manage_autostart(self, enable):
-        # 注册/修改提权计划任务需要管理员;普通权限下保留既有任务状态,
-        # 每次会话只记一条提示,避免启动时刷 PowerShell 报错
-        if not ctypes.windll.shell32.IsUserAnAdmin():
-            if not getattr(self, "_autostart_elevation_noticed", False):
-                self._autostart_elevation_noticed = True
+    def _get_registry_autostart(self):
+        try:
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Run",
+                0,
+                winreg.KEY_READ,
+            ) as reg:
+                value, _ = winreg.QueryValueEx(reg, "PYAS_Security")
+                return value
+        except OSError:
+            return None
+
+    def _is_elevated(self):
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+
+    def _elevated_task_name(self, sid):
+        return "PYAS_Security_ATS_" + sid
+
+    def _elevated_task_exists(self, task_name):
+        try:
+            result = subprocess.run(
+                ["schtasks", "/Query", "/TN", task_name, "/NH"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            return result.returncode == 0
+        except Exception:
+            log_exception("PYAS_Autostart.AutostartMixin._elevated_task_exists")
+            return False
+
+    def _disable_elevated_task_best_effort(self, task_name):
+        """普通令牌禁用本用户的提权任务(best-effort)。
+
+        任务是同一位用户注册的,禁用通常不需要管理员;万一被组策略挡住,
+        由调用方降级为 WARN 提示,而不是让开关空转。
+        """
+        try:
+            result = subprocess.run(
+                ["schtasks", "/Change", "/TN", task_name, "/Disable"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            return result.returncode == 0
+        except Exception:
+            log_exception("PYAS_Autostart.AutostartMixin._disable_elevated_task_best_effort")
+            return False
+
+    def _manage_registry_autostart(self, enable):
+        """普通权限路径:HKCU Run 注册表自启动。
+
+        提权计划任务(开机即带管理员令牌)只有管理员能注册,但开关不能因此
+        空转——注册表自启动不需要管理员,保证 PYAS 照常开机运行,并且与
+        「启动项管理」页展示的条目同源,用户能看见也能自己关。
+        """
+        if not enable:
+            if not self._set_registry_autostart(False):
+                self.autostart_mode = "unavailable"
                 self.write_log(
-                    "INFO",
+                    "WARN",
                     "manage_autostart",
-                    detail="Elevated autostart changes require administrator; keeping existing task state",
+                    detail="Could not update the HKCU Run autostart entry",
+                    success=False,
                 )
+                return False
+
+            self.autostart_mode = "disabled"
+
+            # 管理员时期建立的提权任务在普通令牌下删不掉;存在就尝试禁用,
+            # 禁不掉必须如实报告——「显示已关但开机还会启动」比关不掉更糟
+            warn = None
+            try:
+                task_name = self._elevated_task_name(self._get_autostart_user_sid())
+
+                if self._elevated_task_exists(task_name):
+                    if self._disable_elevated_task_best_effort(task_name):
+                        detail = "Autostart disabled (registry entry removed; elevated task disabled)"
+                    else:
+                        detail = "Autostart disabled (registry entry removed)"
+                        warn = "The elevated startup task could not be disabled without administrator rights"
+                else:
+                    detail = "Autostart disabled (registry entry removed)"
+            except Exception:
+                log_exception("PYAS_Autostart.AutostartMixin._manage_registry_autostart.disable")
+                detail = "Autostart disabled (registry entry removed)"
+
+            self.write_log("INFO", "manage_autostart", detail=detail, success=True)
+
+            if warn:
+                self.write_log("WARN", "manage_autostart", detail=warn, success=False)
+
             return True
 
+        # enable=True:目标命令一致时保持静默(启动复核不该每次都刷日志)
+        expected = f'"{self.file_pyas}" -hide'
+
+        if self._get_registry_autostart() == expected:
+            self.autostart_mode = "registry"
+            return True
+
+        if not self._set_registry_autostart(True):
+            self.autostart_mode = "unavailable"
+            self.write_log(
+                "WARN",
+                "manage_autostart",
+                detail="Could not update the HKCU Run autostart entry",
+                success=False,
+            )
+            return False
+
+        self.autostart_mode = "registry"
+        self.write_log(
+            "INFO",
+            "manage_autostart",
+            detail="Autostart configured via registry (HKCU Run)",
+            success=True,
+        )
+        return True
+
+    def manage_autostart(self, enable):
+        """按权限路由:管理员走提权计划任务,普通权限走 HKCU Run 注册表。
+
+        两条路径都让「开机自启动」开关真实生效;提权任务是增强(开机即带
+        管理员令牌),注册表是保底,不再出现「开关开着但什么都没配」的状态。
+        """
+        if self._is_elevated():
+            return self._manage_task_autostart(enable)
+
+        return self._manage_registry_autostart(enable)
+
+    def _manage_task_autostart(self, enable):
         try:
             sid = self._get_autostart_user_sid()
             command = self._autostart_task_script(enable, sid)
@@ -272,7 +394,7 @@ if ($Legacy -and (Resolve-Sid $Legacy.Definition.Principal.UserId) -eq $Sid -and
             if (
                 state.get("verified") is not True
                 or state.get("userSid") != sid
-                or state.get("taskName") != "PYAS_Security_ATS_" + sid
+                or state.get("taskName") != self._elevated_task_name(sid)
                 or state.get("enabled") is not bool(enable)
             ):
                 raise OSError("Autostart task readback did not match the requested state")

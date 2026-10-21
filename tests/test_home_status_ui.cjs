@@ -133,6 +133,33 @@ const baseCfg = (overrides) => Object.assign({
         await filterPage.close();
         await emptyPage.close();
 
+        // ---------- 2.5 暗色材质令牌 ----------
+        // theme.js 写入的是主题键名 black_switch;CSS 里若写成 [data-theme="black"],
+        // 高光/描边/发丝线会一直用亮色值 —— 表现为侧栏发灰、标题栏下缘一条突兀亮线。
+        {
+            const darkPage = await openPage(baseCfg({ theme: 'black_switch' }));
+            const tokens = await darkPage.evaluate(() => {
+                const cs = getComputedStyle(document.documentElement);
+                const aside = document.querySelector('.options-window');
+                const bg = aside ? getComputedStyle(aside).backgroundColor : '';
+                return {
+                    theme: document.documentElement.dataset.theme,
+                    hairline: cs.getPropertyValue('--material-hairline').trim(),
+                    sheen: cs.getPropertyValue('--material-sheen').trim(),
+                    asideBg: bg,
+                };
+            });
+            assert.equal(tokens.theme, 'black_switch', '暗色主题必须落到 data-theme=black_switch');
+            assert.ok(tokens.hairline.startsWith('rgba(255'),
+                `暗色发丝线应是白色低透明度,实为 ${tokens.hairline}`);
+            assert.ok(tokens.sheen.includes('0.05'),
+                `暗色高光应压到 6% 以内,实为 ${tokens.sheen}`);
+            const m = tokens.asideBg.match(/\d+/g) || [];
+            const lum = m.slice(0, 3).map(Number).reduce((a, b) => a + b, 0) / 3;
+            assert.ok(lum < 90, `侧栏在暗色下不该发灰,实测平均亮度 ${lum.toFixed(0)}`);
+            await darkPage.close();
+        }
+
         // ---------- 3/4/5. 尺寸口径与缩放补偿 ----------
         for (const width of [1100, 520]) {
             const page = await openPage(baseCfg({ process_switch: true }), { width, height: 760 });

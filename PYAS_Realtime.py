@@ -5,9 +5,19 @@ from PYAS_Diagnostics import observe_future
 import os
 import time
 import threading
+import queue
 import ctypes
 import ctypes.wintypes
 from PYAS_WinAPI import FILE_NOTIFY_INFORMATION, MEMORY_BASIC_INFORMATION
+
+# 目录监听(ReadDirectoryChangesW)不携带发起方 PID;扫描还要等 0.35s 防抖,弹窗更晚。
+# 写入方(尤其 CLI 一次性写文件)那时句柄早就关了,Restart Manager 只能返回空,
+# 界面就显示「未识别」。所以在事件刚到的这一刻先抄一份「谁占着它」,按路径缓存。
+FILE_OWNER_TTL_SECONDS = 15.0
+FILE_OWNER_PROBE_TIMEOUT = 0.35
+FILE_OWNER_QUEUE_LIMIT = 512
+FILE_OWNER_RECHECK_SECONDS = 2.0
+
 from PYAS_WinAPI import (
     ERROR_LOCK_VIOLATION,
     ERROR_SHARING_VIOLATION,
@@ -457,7 +467,7 @@ class RealtimeMixin:
                         self.write_log(
                             "WARN",
                             "File Watcher",
-                            detail=f"Real-time file protection cannot monitor {self.path_user}; will retry",
+                            detail=f"Real-time file protection cannot watch {self.path_user}; will retry",
                             success=False,
                         )
                         time.sleep(5)
@@ -467,7 +477,7 @@ class RealtimeMixin:
                     self.write_log(
                         "INFO",
                         "File Watcher",
-                        detail=f"Real-time file protection is monitoring {self.path_user}",
+                        detail="Real-time file protection is on (watching the user profile for file changes)",
                     )
 
             bytes_returned = ctypes.wintypes.DWORD()
@@ -532,6 +542,8 @@ class RealtimeMixin:
                                 and norm_path[len(temp_prefix) :].startswith("_mei")
                             ):
                                 if file_needs_scan(file_path, ext_filter, suffix):
+                                    # 这条反查必须赶在防抖+扫描之前,晚了句柄就没了
+                                    self._remember_file_owner(file_path)
                                     self._queue_file_scan(file_path)
             except ValueError:
                 log_exception("PYAS_Realtime.RealtimeMixin.protect_file_thread:parse")
@@ -651,6 +663,95 @@ class RealtimeMixin:
             return False
 
         return True
+
+    def _file_owner_state(self):
+        """懒初始化反查队列:一个后台线程消费,避免每个事件都开线程。"""
+        lock = getattr(self, '_file_owner_lock', None)
+
+        if lock is None:
+            lock = threading.Lock()
+            self._file_owner_lock = lock
+            self._file_owner_cache = {}      # normcase(path) -> (pid, name, monotonic)
+            self._file_owner_pending = set()
+            self._file_owner_queue = queue.Queue(maxsize=FILE_OWNER_QUEUE_LIMIT)
+            worker = threading.Thread(target=self._file_owner_worker, daemon=True,
+                                      name='PYAS.FileOwnerProbe')
+            self._file_owner_thread = worker
+            worker.start()
+
+        return lock
+
+    def _file_owner_worker(self):
+        while True:
+            path = self._file_owner_queue.get()
+
+            if path is None:
+                return
+
+            try:
+                from PYAS_Dialog import _query_file_users
+                users = _query_file_users(path, timeout=FILE_OWNER_PROBE_TIMEOUT)
+            except Exception:
+                log_exception('PYAS_Realtime.RealtimeMixin._file_owner_worker')
+                users = []
+
+            key = os.path.normcase(path)
+
+            with self._file_owner_lock:
+                entry = users[0] if users else (0, '')
+                self._file_owner_cache[key] = (entry[0], entry[1], time.monotonic())
+                self._file_owner_pending.discard(key)
+
+    def _remember_file_owner(self, file_path):
+        """事件刚到时问一次「谁占着它」,结果留给之后的弹窗用。"""
+        try:
+            self._file_owner_state()
+            key = os.path.normcase(file_path)
+            now = time.monotonic()
+
+            with self._file_owner_lock:
+                entry = self._file_owner_cache.get(key)
+
+                if entry and now - entry[2] < FILE_OWNER_RECHECK_SECONDS:
+                    return
+
+                if key in self._file_owner_pending:
+                    return
+
+                if len(self._file_owner_pending) >= FILE_OWNER_QUEUE_LIMIT:
+                    return
+
+                self._file_owner_pending.add(key)
+
+            try:
+                self._file_owner_queue.put_nowait(file_path)
+            except queue.Full:
+                with self._file_owner_lock:
+                    self._file_owner_pending.discard(key)
+        except Exception:
+            log_exception('PYAS_Realtime.RealtimeMixin._remember_file_owner')
+
+    def _file_owner_for(self, file_path):
+        """取事件时刻记下的发起方;过期或没记到就返回 None。"""
+        try:
+            cache = getattr(self, '_file_owner_cache', None)
+
+            if not cache:
+                return None
+
+            with self._file_owner_lock:
+                entry = cache.get(os.path.normcase(file_path))
+
+            if not entry or not entry[0]:
+                return None
+
+            if time.monotonic() - entry[2] > FILE_OWNER_TTL_SECONDS:
+                return None
+
+            return (entry[0], entry[1])
+        except Exception:
+            log_exception('PYAS_Realtime.RealtimeMixin._file_owner_for')
+            return None
 
     def _queue_file_scan(self, file_path, delay=FILE_SCAN_DEBOUNCE_SECONDS):
         self._schedule_file_task("scan", file_path, self.handle_new_file, delay)

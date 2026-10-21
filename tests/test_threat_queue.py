@@ -347,7 +347,7 @@ class ContentDedupTests(unittest.TestCase):
 
 
 class SnapshotProcessTests(unittest.TestCase):
-    """文件告警查不到发起进程时要显式说明,而不是整行消失。"""
+    """文件告警查不到操作进程时要显式说明,而不是整行消失。"""
 
     def _session(self, action, process_name=""):
         owner = ConfigApp(theme="white_switch", language="simplified_switch")

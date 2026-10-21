@@ -174,7 +174,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (m) return template.replace(/\{(\d+)\}/g, (_, i) => m[Number(i)] ?? '');
             }
         }
-        return s;
+        // 详情是整句且没有占位符时(如 "Engine Initialization Complete"),直接查词条本身;
+        // 查不到才原样返回英文原文
+        const dictText = getMsg(s);
+        return dictText === s ? s : dictText;
     };
     window.translateLogDetail = translateLogDetail;
 
@@ -658,7 +661,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     const rawVal = String(item[col.key] || '');
                     let valStr = col.isI18n ? getMsg(rawVal) : rawVal;
                     if (rawVal === '未知路徑' || rawVal === 'path_unknown') valStr = getMsg('path_unknown');
-                    return `<div class="row-col" style="width: var(--col-${idx}); flex: 0 0 auto;" title="${escapeHtml(valStr)}">${escapeHtml(valStr)}</div>`;
+
+                    // 时间列:去掉方括号,单独一档等宽数字样式(方括号是数据里的噪声,不是信息)
+                    const isDate = col.key === 'time_str';
+                    if (isDate) valStr = valStr.replace(/^\[|\]$/g, '');
+
+                    const cls = isDate ? 'row-col row-col--date' : 'row-col';
+
+                    return `<div class="${cls}" style="width: var(--col-${idx}); flex: 0 0 auto;" title="${escapeHtml(valStr)}">${escapeHtml(valStr)}</div>`;
                 }).join('');
 
                 const rowAttrs = [
@@ -729,8 +739,23 @@ document.addEventListener('DOMContentLoaded', () => {
         rebuildCustomSelect('scan_method_select');
     };
 
+    // 扫描结果为空时盖一层占位(图标 + 说明 + 直接开扫),有结果就收起来。
+    // 网格是通用组件,空数据时只剩表头,第一眼像坏了。
+    const syncScanEmpty = () => {
+        const empty = document.getElementById('scan_empty');
+
+        if (!empty) return;
+
+        empty.style.display = appState.virusResults.length ? 'none' : 'flex';
+
+        // 表头是 sticky 且 z-index 高于占位层,空态时直接把它藏掉更像"还没开始"
+        const widget = document.querySelector('#scan_window .virus-widget');
+        if (widget) widget.classList.toggle('is-empty', appState.virusResults.length === 0);
+    };
+
     const checkVirusListEmpty = () => {
         updateCustomSelectUI('scan_method_select', 'none');
+        syncScanEmpty();
         if (appState.virusResults.length === 0) {
             appState.virusMap.clear();
             changeScanSelectMode('scan');
@@ -753,6 +778,7 @@ document.addEventListener('DOMContentLoaded', () => {
         appState.scanning = true;
         appState.virusMap.clear();
         appState.virusResults = [];
+        syncScanEmpty();
         renderDataGrid('#scan_window', appState.virusResults, cols.virus, 'path', true);
         changeScanSelectMode('scan');
         document.getElementById('scan_method_select')?.classList.add('hidden');
@@ -769,6 +795,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (text) { text.setAttribute('data-i18n', 'msg_init'); text.removeAttribute('data-dynamic-msg'); text.textContent = getMsg('msg_init'); }
         window.pywebview.api.trigger_scan(method);
     };
+
+    // 空态里的「智能扫描」直接走同一条开扫路径
+    document.getElementById('scan_empty_btn')?.addEventListener('click', () => triggerScan('smart'));
 
     const handleVirusActions = (action) => {
         if (!window.pywebview) return;
@@ -957,6 +986,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!appState.virusMap.has(path)) {
             appState.virusResults.push({ label, path });
             appState.virusMap.set(path, true);
+            syncScanEmpty();
             const widget = document.querySelector('#scan_window .virus-widget');
             if (widget && widget.renderData) {
                 if (window.virusRenderTimeout) clearTimeout(window.virusRenderTimeout);
@@ -2344,10 +2374,197 @@ document.addEventListener('DOMContentLoaded', () => {
     coalesceWindowMoves();
     window.addEventListener('pywebviewready', coalesceWindowMoves);
 
+    // 边缘缩放:自己算几何,每帧最多一次 SetWindowPos。
+    // 系统模态循环(WM_NCLBUTTONDOWN)在 WebView2 子窗上不生效,所以改成显式摆窗口。
+    // 关键约束:一帧只发一次,且只发改动过的轴 —— 早期版本每帧调 pywebview.resize()
+    // 走 WinForms 尺寸协商,才导致拖动发涩。
+    const MIN_W = 720;
+    const MIN_H = 560;
+
+    // 缩放层必须在最上层:DOM 顺序 + z-index 都可能被别的层盖住,
+    // 直接把整层挪到 body 末尾,保证它在所有内容之上。
+    const resizeLayer = document.querySelector('.resize-layer');
+
+    if (resizeLayer && resizeLayer.parentElement !== document.body) {
+        document.body.appendChild(resizeLayer);
+    }
+
+    // 诊断 HUD:拖动时在左下角显示一行状态。
+    // 之所以做成屏上可见而不是只打日志 —— 日志链路过长(级别/过滤/落盘),
+    // 排查时先要能确认 JS 到底有没有跑到这里。
+    let resizeHud = null;
+    let hudTimer = 0;
+
+    // 默认不显示:只在 localStorage 里把 pyas.resizeDebug 设成 1 时才出现,
+    // 免得正常拖动时左下角总闪一行黑字。
+    const RESIZE_DEBUG = (() => {
+        try {
+            return localStorage.getItem('pyas.resizeDebug') === '1';
+        } catch (_) {
+            return false;
+        }
+    })();
+
+    const showResizeHud = (text) => {
+        if (!RESIZE_DEBUG) return;
+
+        if (!resizeHud) {
+            resizeHud = document.createElement('div');
+            resizeHud.id = 'resize-hud';
+            resizeHud.style.cssText = [
+                'position:fixed', 'left:10px', 'bottom:10px', 'z-index:2147483647',
+                'max-width:60vw', 'padding:4px 8px', 'border-radius:6px',
+                'background:rgba(0,0,0,.78)', 'color:#fff', 'font:12px/1.4 monospace',
+                'pointer-events:none', 'opacity:0', 'transition:opacity .15s',
+            ].join(';');
+            document.body.appendChild(resizeHud);
+        }
+
+        resizeHud.textContent = String(text);
+        resizeHud.style.opacity = '1';
+        clearTimeout(hudTimer);
+        hudTimer = setTimeout(() => { resizeHud.style.opacity = '0'; }, 4000);
+    };
+
+    const logResize = (message) => {
+        showResizeHud(message);
+
+        try {
+            window.pywebview?.api?.resize_debug?.(String(message));
+        } catch (_) { /* 诊断失败不影响功能 */ }
+    };
+
+    window.addEventListener('pywebviewready', () => {
+        const api = window.pywebview?.api || {};
+        logResize('bridge ready window_rect=' + (typeof api.window_rect)
+            + ' set_window_rect=' + (typeof api.set_window_rect));
+    });
+
+    document.querySelectorAll('.resize-edge').forEach((edge) => {
+        edge.addEventListener('pointerdown', (event) => {
+            logResize('down ' + edge.dataset.dir + ' set=' + (typeof window.pywebview?.api?.set_window_rect) + ' native=' + (typeof window.pywebview?.api?.begin_window_resize));
+            if (event.button !== 0) return;
+
+            const bridge = window.pywebview?.api;
+
+            // 几何直接用浏览器自己的坐标:WebView2 的 screenX/outerWidth 就是顶层窗口的位置与尺寸,
+            // 这样不再依赖桥上的 window_rect(它缺失时整条链路会静默返回)。
+            const canResize = typeof bridge?.set_window_rect === 'function';
+            const canNative = typeof bridge?.begin_window_resize === 'function';
+
+            if (!canResize && !canNative) {
+                logResize('no resize api: set_window_rect=' + typeof bridge?.set_window_rect
+                    + ' begin_window_resize=' + typeof bridge?.begin_window_resize);
+                return;
+            }
+
+            event.preventDefault();
+
+            if (!canResize) {
+                // 兜底:交给系统模态缩放循环(有的环境里那条路才通)
+                bridge.begin_window_resize(edge.dataset.dir);
+                return;
+            }
+
+            const dir = edge.dataset.dir;
+            const startX = event.screenX;
+            const startY = event.screenY;
+            let frame = 0;
+            let pending = null;
+            let rect = null;
+
+            const flush = () => {
+                frame = 0;
+
+                if (!rect || !pending) return;
+
+                const target = pending;
+                pending = null;
+
+                Promise.resolve(bridge.set_window_rect(target[0], target[1], target[2], target[3]))
+                    .then((ok) => showResizeHud('set ' + target.join(',') + ' -> ' + ok))
+                    .catch((err) => showResizeHud('set failed: ' + (err && err.message)));
+            };
+
+            const stop = () => {
+                window.removeEventListener('pointermove', onMove);
+                window.removeEventListener('pointerup', stop);
+                window.removeEventListener('pointercancel', stop);
+
+                if (frame) cancelAnimationFrame(frame);
+                frame = 0;
+                flush();
+                rect = null;
+            };
+
+            const onMove = (moveEvent) => {
+                if (!rect) return;
+
+                const dx = moveEvent.screenX - startX;
+                const dy = moveEvent.screenY - startY;
+                let [left, top, right, bottom] = rect;
+
+                if (dir.includes('w')) left = rect[0] + dx;
+                if (dir.includes('e')) right = rect[2] + dx;
+                if (dir.includes('n')) top = rect[1] + dy;
+                if (dir.includes('s')) bottom = rect[3] + dy;
+
+                // 最小尺寸:拖动超出时贴住边界,而不是让窗口被夹小
+                if (right - left < MIN_W) {
+                    if (dir.includes('w')) left = right - MIN_W; else right = left + MIN_W;
+                }
+
+                if (bottom - top < MIN_H) {
+                    if (dir.includes('n')) top = bottom - MIN_H; else bottom = top + MIN_H;
+                }
+
+                pending = [Math.round(left), Math.round(top), Math.round(right - left), Math.round(bottom - top)];
+
+                if (!frame) frame = requestAnimationFrame(flush);
+            };
+
+            rect = [
+                Math.round(window.screenX),
+                Math.round(window.screenY),
+                Math.round(window.screenX + window.outerWidth),
+                Math.round(window.screenY + window.outerHeight),
+            ];
+            logResize('start ' + dir + ' rect=' + rect.join(','));
+
+            window.addEventListener('pointermove', onMove);
+            window.addEventListener('pointerup', stop);
+            window.addEventListener('pointercancel', stop);
+        });
+    });
+
+    // 双击边缘不该触发最大化(系统窗口惯例),挡掉冒泡即可
+    document.querySelectorAll('.resize-edge').forEach((edge) => {
+        edge.addEventListener('dblclick', (event) => event.stopPropagation());
+    });
+    // 系统开着动画时交给 DWM(和资源管理器同一套时长/缓动);关着才用我们自己的,
+    // 否则会变成硬切。
+    let useSystemAnimation = false;
+
+    const probeSystemAnimation = () => {
+        if (typeof window.pywebview?.api?.system_animation_enabled !== 'function') return;
+
+        Promise.resolve(window.pywebview.api.system_animation_enabled())
+            .then((enabled) => { useSystemAnimation = !!enabled; })
+            .catch(() => {});
+    };
+
+    // 首帧时桥可能还没注入,等 pywebviewready 再补一次
+    probeSystemAnimation();
+    window.addEventListener('pywebviewready', probeSystemAnimation);
     document.getElementById('minimize_button')?.addEventListener('click', () => {
         const bridge = window.pywebview?.api;
-        const delay = playWindowAnimation('shrink');
+
         if (!bridge) return;
+
+        if (useSystemAnimation) { bridge.minimize(); return; }
+
+        const delay = playWindowAnimation('shrink');
+
         // 动画没跑起来(拿不到 .app-container)时 delay 为 0,直接收窗
         if (!delay) { bridge.minimize(); return; }
         window.setTimeout(() => bridge.minimize(), delay);
@@ -2362,12 +2579,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // 顺手补一次落定动画,免得只有按钮点击有过渡、其它入口还是硬切
     window.syncMaximizeIcon = (maximized) => {
         applyMaximizeIcon(maximized);
-        playWindowAnimation('grow');
+        if (!useSystemAnimation) playWindowAnimation('grow');
     };
 
     document.getElementById('maximize_button')?.addEventListener('click', () => {
         window.pywebview?.api.toggle_maximize()
-            .then(state => { applyMaximizeIcon(!!state); playWindowAnimation('grow'); })
+            .then(state => { applyMaximizeIcon(!!state); if (!useSystemAnimation) playWindowAnimation('grow'); })
             .catch(() => {});
     });
     document.getElementById('close_button')?.addEventListener('click', () => window.pywebview?.api.hide_window());
@@ -3128,9 +3345,194 @@ document.addEventListener('DOMContentLoaded', () => {
         await api.show_alert(getMsg('title_prompt'), success ? (chinese ? '已清除。' : 'Cleared.') : (chinese ? '保存失败，未清除。' : 'Could not save. Rules were preserved.'), success ? 'info' : 'error');
     });
 
-    document.querySelectorAll('select.modern-select').forEach(buildCustomSelectElement);
+
+    // 一个动作条,两种状态:未选行时给"与选择无关"的动作,选行后换成"对选中行生效"的动作。
+    // 动作仍通过隐藏的 select 派发 change,复用原有处理链路;文案取 data-i18n,跟着语言走。
+    // 这些动作都依赖“选中了哪些行”,统一进动作条;
+    // 新增/全部清除这类与选择无关的动作留在工具栏按钮里
+    const ACTION_VALUES = ['extract', 'remove', 'quarantine', 'whitelist',
+        'view', 'end', 'delete', 'repair', 'enable', 'disable', 'export'];
+
+    const buildActionBar = (select) => {
+        const group = select.closest('.action-group') || select.parentNode;
+        const page = select.closest('.page');
+        const list = page ? page.querySelector('.manage-list') : null;
+        const search = page ? page.querySelector('.sub-header-toolbar .search-box') : null;
+
+        if (!group) return;
+
+        select.style.display = 'none';
+
+        // 选中态用一句摘要顶替搜索框的位置:不再把裸数字塞在搜索框和按钮之间
+        const summary = document.createElement('div');
+        summary.className = 'selection-summary';
+        summary.hidden = true;
+
+        const summaryText = document.createElement('span');
+        summaryText.className = 'selection-text';
+        summary.appendChild(summaryText);
+
+        const clearBtn = document.createElement('button');
+        clearBtn.type = 'button';
+        clearBtn.className = 'link-btn';
+        summary.appendChild(clearBtn);
+
+        // 贴在标题右边(而不是挤在 spacer 之后),一眼看出"在选什么页、选了几项"
+        const toolbar = page ? page.querySelector('.sub-header-toolbar') : null;
+        const title = toolbar ? toolbar.querySelector('h2') : null;
+
+        if (title && title.nextSibling) {
+            toolbar.insertBefore(summary, title.nextSibling);
+        } else {
+            group.parentNode.insertBefore(summary, group);
+        }
+
+        const box = document.createElement('span');
+        box.className = 'action-buttons';
+        group.appendChild(box);
+
+        const options = [...select.options].filter((o) => o.value && o.value !== 'none');
+        const pageActions = options.filter((o) => !ACTION_VALUES.includes(o.value));
+        const rowActions = options.filter((o) => ACTION_VALUES.includes(o.value));
+
+        let mode = null;
+
+        // disabled=true 时按钮照常显示但不可点 —— 让用户知道"这里有操作,先选行"
+        const paint = (actions, disabled = false) => {
+            box.textContent = '';
+
+            actions.forEach((option) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'action-btn modern-btn';
+                btn.disabled = disabled;
+                const key = option.getAttribute('data-i18n');
+                btn.textContent = key ? getMsg(key) : option.textContent;
+                if (key) btn.setAttribute('data-i18n', key);
+
+                btn.addEventListener('click', () => {
+                    select.value = option.value;
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                });
+
+                box.appendChild(btn);
+            });
+        };
+
+        const sync = () => {
+            const checked = list ? list.querySelectorAll('.manage-list-item input[type="checkbox"]:checked').length : 0;
+            const want = checked > 0 && rowActions.length ? 'rows' : 'page';
+
+            if (want === mode) {
+                if (want === 'rows') summaryText.textContent = formatMsg('selection_summary', String(checked));
+                return;
+            }
+
+            mode = want;
+
+            if (want === 'rows') {
+                summaryText.textContent = formatMsg('selection_summary', String(checked));
+                clearBtn.textContent = getMsg('selection_clear');
+                clearBtn.hidden = false;
+                summary.hidden = false;
+                if (search) search.classList.add('is-hidden');
+                paint(rowActions);
+            } else {
+                summary.hidden = true;
+                if (search) search.classList.remove('is-hidden');
+
+                // 页面本身没有"新增"类动作时(如启动项管理),把行动作常驻并置灰,
+                // 否则用户看到的是一块空白,以为这页没有操作
+                paint(pageActions.length ? pageActions : rowActions, !pageActions.length);
+            }
+        };
+
+        clearBtn.addEventListener('click', () => {
+            list?.querySelectorAll('.manage-list-item input[type="checkbox"]').forEach((cb) => { cb.checked = false; });
+
+            // 只改 DOM 不够:网格的自选集合与表头全选框是它自己的状态,
+            // 不同步的话表头会一直停在"已全选"的对勾上
+            const widget = page ? page.querySelector('.manage-widget') : null;
+
+            if (widget && widget.gridState) {
+                widget.gridState.checkedSet.clear();
+                widget.updateSelectAllState?.();
+            }
+
+            if (page && page.id === 'scan_window' && appState.virusMap) appState.virusMap.clear();
+
+            list?.dispatchEvent(new Event('change', { bubbles: true }));
+            sync();
+        });
+
+        if (list) {
+            list.addEventListener('change', sync);
+            // 行点击只改 checked、不派发 change,所以还要听 click(冒泡到列表),延后一拍等网格写完
+            list.addEventListener('click', () => setTimeout(sync, 0));
+            new MutationObserver(sync).observe(list, { childList: true, subtree: true });
+
+            // 表头"全选"是网格构建 header 时才生成的,这里按元素绑定会扑空
+            // (buildActionBar 先于 renderDataGrid 执行) → 全选后动作条永远收不到通知。
+            // 改成 change 冒泡委托:header 何时重建都能接住。
+            const grid = list.closest('.manage-widget');
+
+            grid?.addEventListener('change', (event) => {
+                if (event.target?.classList?.contains('select-all-cb')) setTimeout(sync, 0);
+            });
+        }
+
+        sync();
+    };
+
+    const ACTION_SELECTS = [
+        'whitelist_select', 'quarantine_select', 'release_select',
+        'popup_select', 'custom_protect_select',
+        'taskmgr_select', 'startup_select', 'junk_select',
+        'repair_select', 'netmon_select', 'log_export_select',
+    ];
+
+    // 列表页统一空态:没有数据时不要只留一条光表头。
+    // 用一行占位文本(在滚动容器内部,不额外做浮层),有数据就摘掉。
+    const initGridEmptyStates = () => {
+        document.querySelectorAll('.page .manage-widget').forEach((widget) => {
+            const list = widget.querySelector('.manage-list');
+
+            if (!list) return;
+
+            const sync = () => {
+                const rows = list.querySelectorAll('.manage-list-item').length;
+                widget.classList.toggle('is-empty', rows === 0);
+
+                const existing = list.querySelector('.manage-list-empty');
+
+                if (rows === 0 && !existing) {
+                    const li = document.createElement('li');
+                    li.className = 'manage-list-empty';
+                    li.textContent = getMsg('list_empty');
+                    list.appendChild(li);
+                } else if (rows > 0 && existing) {
+                    existing.remove();
+                }
+            };
+
+            new MutationObserver(sync).observe(list, { childList: true });
+            sync();
+        });
+    };
+    document.querySelectorAll('select.modern-select').forEach((select) => {
+        // 动作型下拉一律铺成按钮条;真正的"取值型"下拉(语言/主题/扫描方式)才用自定义下拉
+        if (ACTION_SELECTS.includes(select.id)) {
+            buildActionBar(select);
+            return;
+        }
+
+        buildCustomSelectElement(select);
+    });
     renderDataGrid('#home_window', [], cols.log, 'id', false);
     renderDataGrid('#scan_window', appState.virusResults, cols.virus, 'path', true);
+    syncScanEmpty();   // 首屏就该是空态,而不是一条没有数据的表头
+    initGridEmptyStates();   // 其余列表页同样要有空态
+
     renderDataGrid('#taskmgr_window', [], cols.process, 'pid', false);
     renderDataGrid('#startup_window', [], cols.startup, 'id', false);
     renderDataGrid('#junk_window', [], cols.junk, 'path', true);

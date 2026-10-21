@@ -36,15 +36,38 @@ const fs = require('node:fs'), path = require('node:path'), http = require('node
      : document.getElementById('lang_select').value === value, [lang, tag || null]);
   };
 
-  await check('traditional renders the localized monitoring sentence', async () => {
+  await check('traditional renders the localized watch sentence', async () => {
    await useLanguage('traditional_switch');
-   const text = await page.evaluate(() => window.translateLogDetail('Real-time file protection is monitoring C:\\Users\\A'));
-   assert.match(text, /檔案即時防護已開啟，正在監控：C:\\Users\\A/);
+   const text = await page.evaluate(() => window.translateLogDetail('Real-time file protection is on (watching the user profile for file changes)'));
+   assert.equal(text, '檔案即時防護已開啟');
   });
   await check('simplified renders its own wording', async () => {
    await useLanguage('simplified_switch');
-   const text = await page.evaluate(() => window.translateLogDetail('Real-time file protection is monitoring C:\\Users\\A'));
-   assert.match(text, /文件实时防护已开启，正在监控：C:\\Users\\A/);
+   const text = await page.evaluate(() => window.translateLogDetail('Real-time file protection is on (watching the user profile for file changes)'));
+   assert.equal(text, '文件实时防护已开启');
+  });
+  // 整句式详情没有占位符,靠词条本身翻译(不是 log_detail_patterns)
+  await check('static sentences resolve through the plain dictionary', async () => {
+   await useLanguage('simplified_switch');
+   const cases = await page.evaluate(() => ({
+     engine: window.translateLogDetail('Engine Initialization Complete'),
+     autostart: window.translateLogDetail('Elevated autostart changes require administrator; keeping existing task state'),
+     registered: window.translateLogDetail('Context menu registered'),
+     unregistered: window.translateLogDetail('Context menu unregistered'),
+     missing: window.translateLogDetail('Registration files are missing'),
+   }));
+   assert.equal(cases.engine, '引擎初始化完成');
+   assert.equal(cases.autostart, '开机自启动需要管理员权限才能设置；当前以普通权限运行，已保留现有自启动状态');
+   assert.equal(cases.registered, '已注册');
+   assert.equal(cases.unregistered, '已取消注册');
+   assert.equal(cases.missing, '注册文件缺失');
+  });
+  await check('a language without the sentence keeps the English original', async () => {
+   await useLanguage('japanese_switch');
+   const text = await page.evaluate(() => window.translateLogDetail('Engine Initialization Complete'));
+   assert.equal(text, 'エンジン初期化完了');
+   const unknown = await page.evaluate(() => window.translateLogDetail('Context menu registered'));
+   assert.equal(unknown, 'Context menu registered');
   });
 
   await check('untranslated language falls back explicitly to the original English sentence', async () => {
@@ -56,8 +79,8 @@ const fs = require('node:fs'), path = require('node:path'), http = require('node
    const result = await page.evaluate(() => {
     const langs = Object.keys(window.AppI18n.dict).filter(k => k.endsWith('_switch'));
     const samples = [
-     'Real-time file protection is monitoring C:\\X',
-     'Real-time file protection cannot monitor C:\\X; will retry',
+     'Real-time file protection is on (watching the user profile for file changes)',
+     'Real-time file protection cannot watch C:\\X; will retry',
      'No file activity for 90s; rescanning to make sure nothing was missed',
      'Too many files changing at once; running a full rescan',
      'File events were dropped during heavy activity; running a full rescan',
@@ -68,7 +91,7 @@ const fs = require('node:fs'), path = require('node:path'), http = require('node
     for (const lang of langs) {
       // Every section must declare a pattern table, not rely on silent fallback.
       const patterns = window.AppI18n.dict[lang]?.log_detail_patterns;
-      if (!Array.isArray(patterns) || patterns.length !== 7) { failures.push(lang + ':patterns'); continue; }
+      if (!Array.isArray(patterns) || patterns.length !== 8) { failures.push(lang + ':patterns'); continue; }
       for (const sample of samples) {
         const after = window.translateLogDetail(sample);
         if (typeof after !== 'string' || !after) failures.push(lang + ':' + sample);

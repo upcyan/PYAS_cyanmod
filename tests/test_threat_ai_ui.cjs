@@ -49,7 +49,7 @@ const assert = require('node:assert/strict');
                         category: 'Malware', platform: 'WinPE', family: 'General', generic: true,
                         raw_label: 'Malware:WinPE/General.92!ml', rules: [], description: '' },
                     theme: 'white_switch', language: 'simplified_switch', remaining: null,
-                    waiting: '等待您选择', allow: '本次允许', block: '拦截', countdown: '', resolving: false,
+                    waiting: '等待您选择', allow: '本次允许', block: '拦截', block_once: '本次阻止', countdown: '', resolving: false,
                     ai: { state: 'analyzing', verdict: '', label: 'AI 分析中…', hint: '正在结合检测证据生成建议。' },
                 },
             };
@@ -78,55 +78,56 @@ const assert = require('node:assert/strict');
         const patch = async data => page.evaluate(data => Object.assign(window.fixture.data, data), data);
         const waitStopped = () => page.waitForFunction(() => !document.getElementById('ai_window_glow').classList.contains('is-analyzing'));
 
-        const verifyPermanentStyle = async () => {
-            const button = page.locator('#threat_permanent');
-            const before = await page.evaluate(() => window.fixture.decisions.length);
-            const expected = await page.evaluate(() => {
+        // 2026-10-20 按钮语义色:拦截=红实心,本次允许=蓝实心,永久允许=白描边。
+        // 断言改为"三个按钮各就各位",不再锁死旧的绿色实底。
+        const verifyDecisionColors = async () => {
+            const resolved = await page.evaluate(() => {
                 const probe = document.createElement('span');
                 document.body.appendChild(probe);
-                const colors = ['--color-success-btn', '--color-success-btn-hover', '--color-success-btn-active'].map(token => {
+                const read = token => {
                     probe.style.backgroundColor = 'var(' + token + ')';
                     return getComputedStyle(probe).backgroundColor;
-                });
+                };
+                const out = {
+                    danger: read('--color-danger-strong'),
+                    accent: read('--accent-color'),
+                    panel: read('--bg-panel'),
+                };
                 probe.remove();
-                return colors;
+                return out;
             });
-            const assertColor = async color => {
-                await page.waitForFunction(color => {
-                    const style = getComputedStyle(document.getElementById('threat_permanent'));
-                    return style.backgroundColor === color && style.borderTopColor === color;
-                }, color);
-                const state = await button.evaluate(el => {
-                    const style = getComputedStyle(el);
-                    return { color: style.color, border: style.borderTopColor, weight: style.fontWeight };
-                });
-                assert.equal(state.color, 'rgb(255, 255, 255)');
-                assert.equal(state.border, color);
-                assert.equal(state.weight, '600');
-            };
-            await page.mouse.move(450, 20);
-            await assertColor(expected[0]);
-            await button.hover();
-            await assertColor(expected[1]);
-            await page.mouse.down();
-            try { await assertColor(expected[2]); } finally { await page.mouse.up(); }
+
+            const state = await page.evaluate(() => {
+                const pick = id => {
+                    const s = getComputedStyle(document.getElementById(id));
+                    return { bg: s.backgroundColor, border: s.borderTopColor };
+                };
+                return { block: pick('threat_block'), blockOnce: pick('threat_block_once'),
+                    allow: pick('threat_allow'), permanent: pick('threat_permanent') };
+            });
+
+            assert.equal(state.blockOnce.bg, resolved.danger, '本次阻止(默认动作)应是危险色实心');
+            assert.notEqual(state.block.bg, resolved.danger, '拦截应降一档,不再是实心');
+            assert.equal(state.allow.bg, resolved.accent, '本次允许应是主色实心');
+            assert.equal(state.permanent.bg, resolved.panel, '永久允许应是白底描边,不是实心');
+            assert.notEqual(state.permanent.bg, state.permanent.border, '永久允许靠描边区分,底色与描边不应相同');
+
+            // 永久允许仍要二次确认(这条不变)
+            const before = await page.evaluate(() => window.fixture.decisions.length);
+            await page.locator('#threat_permanent').click();
             await page.locator('#threat_cancel').waitFor({ state: 'visible' });
-            assert.equal(await page.evaluate(() => window.fixture.decisions.length), before, 'green allow button must still require confirmation');
+            assert.equal(await page.evaluate(() => window.fixture.decisions.length), before,
+                '点「永久允许」必须先经过确认,不能直接放行');
             await page.locator('#threat_cancel').click();
-            await patch({ can_remember: false });
-            await page.waitForFunction(() => document.getElementById('threat_permanent').disabled);
-            await assertColor(expected[0]);
-            await patch({ can_remember: true });
-            await page.waitForFunction(() => !document.getElementById('threat_permanent').disabled);
-            await assertColor(expected[0]);
         };
-        await check('light theme permanent allow retains green, white text and confirmation', verifyPermanentStyle);
+        await check('decision buttons follow risk-based colors and permanent still confirms', verifyDecisionColors);
         await check('AI action button removed; model facts are visible', async () => {
             assert.equal(await page.locator('#threat_ai').count(), 0);
             assert.equal(await page.locator('#threat_engine').textContent(), '本地 PE 机器学习');
             assert.equal(await page.locator('#threat_category').textContent(), '恶意软件（通用）');
             assert.equal(await page.locator('#threat_family').textContent(), '通用检测 · 未确定家族');
-            assert.equal(await page.locator('#threat_raw_label').textContent(), 'Malware:WinPE/General.92!ml');
+            // 「原始报毒结果」整行已移除(与分值/规则重复),这里断言它确实不在
+            assert.equal(await page.locator('#threat_raw_label').count(), 0, '原始报毒结果行应已移除');
             assert.match(await page.locator('#threat_score_note').textContent(), /不是实测准确率/);
         });
         await check('four window edges fade inward and never capture input', async () => {
@@ -200,7 +201,8 @@ const assert = require('node:assert/strict');
             await patch({ id: 'r3', file: { name: payload, path: 'C:/' + 'long/'.repeat(65) + payload },
                 evidence: { raw_label: payload, description: payload, rules: [payload] },
                 ai: { state: 'ready', verdict: 'block', label: 'AI 建议拦截', hint: payload } });
-            await page.waitForFunction(value => document.getElementById('threat_raw_label').textContent === value, payload);
+            // 「原始报毒结果」行已移除,改用规则描述节点等同一个 payload(XSS 断言本身不变)
+            await page.waitForFunction(value => document.getElementById('threat_rule_description').textContent === value, payload);
             assert.equal(await page.locator('#threat_evidence img, #ai_result img, #threat_file img').count(), 0);
             assert.equal(await page.evaluate(() => window.pwned), undefined);
         });
@@ -236,7 +238,7 @@ const assert = require('node:assert/strict');
                 && getComputedStyle(document.querySelector('.navigate-window')).backgroundColor === 'rgb(28, 28, 30)'
                 && Number(getComputedStyle(document.getElementById('ai_window_glow')).opacity) >= .65
                 && document.getElementById('ai_window_glow').classList.contains('is-analyzing'));
-            await verifyPermanentStyle();
+            await verifyDecisionColors();
             if (output) await page.screenshot({ path: path.join(output, 'threat-evidence-dark.png') });
         });
         await check('resolving request cannot keep analysis glow alive', async () => {
@@ -265,7 +267,7 @@ const assert = require('node:assert/strict');
             await waitStopped();
             assert.equal(await page.locator('#threat_confirmation').isVisible(), false);
             assert.equal(await page.locator('#threat_block').isDisabled(), true);
-            assert.equal(await page.locator('#threat_raw_label').textContent(), '未提供');
+            assert.equal(await page.locator('#threat_file_hash').textContent(), '未提供');   // 原始报毒行已移除,改用仍存在的哈希行验证空态
             assert.equal(await page.locator('#threat_file_path').textContent(), '');
         });
         await check('empty evidence labels are not duplicated above collapsed rows', async () => {

@@ -8,6 +8,20 @@ from unittest.mock import patch
 import build_menu
 
 
+def _retry_on_lock(action, attempts=6, delay=0.15):
+    """重试被占用(%TEMP% 下常驻杀软短暂持有)的文件操作,只重试 PermissionError。"""
+    import time as _time
+
+    last = None
+    for _ in range(attempts):
+        try:
+            return action()
+        except PermissionError as error:
+            last = error
+            _time.sleep(delay)
+    raise last
+
+
 class MenuCertificateTests(unittest.TestCase):
     @unittest.skipUnless(os.name == 'nt', 'requires real Windows PowerShell certificate validation')
     def test_exact_certificate_passes_checks_and_tampering_is_rejected(self):
@@ -17,7 +31,8 @@ class MenuCertificateTests(unittest.TestCase):
                 build_menu.write_scripts('3.7.0.11', 'test.msix')
             certificate = root / 'menu_cert.cer'
             shutil.copy2(build_menu.CERT_CER, certificate)
-            generated = (root / 'trust_menu.ps1').read_text(encoding='utf-8-sig')
+            generated = _retry_on_lock(
+                lambda: (root / 'trust_menu.ps1').read_text(encoding='utf-8-sig'))
             # Execute all actual hash/identity/validity/EKU checks, then stop
             # before accessing or changing any machine certificate store.
             prefix = generated.split('$storePath =')[0]

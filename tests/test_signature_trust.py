@@ -87,8 +87,27 @@ class SignatureTrustTests(unittest.TestCase):
             rule = {"sha256": digest, "source": str(file)}
             with patch("PYAS_Decisions.file_signer_hash", return_value="A" * 40) as signer:
                 self.assertEqual(owner._rule_signer(rule), "A" * 40)
-                file.write_bytes(b"changed")
+                _retry_on_lock(lambda: file.write_bytes(b"changed"))
                 self.assertIsNone(owner._rule_signer(rule))
                 signer.assert_called_once()
+
+def _retry_on_lock(action, attempts: int = 6, delay: float = 0.15):
+    """重试一次被占用的文件操作。
+
+    本机常驻杀软(含 PYAS 自己)会短暂持有 %TEMP% 下刚写入的文件,
+    测试里一次写/读可能撞上 PermissionError。这不是被测逻辑的问题,
+    重试几次即可;超过次数仍失败就是真错误,照常抛出。
+    """
+    import time as _time
+
+    last = None
+    for _ in range(attempts):
+        try:
+            return action()
+        except PermissionError as error:   # 只重试"被占用",其它异常照常冒泡
+            last = error
+            _time.sleep(delay)
+    raise last
+
 
 if __name__ == "__main__": unittest.main()

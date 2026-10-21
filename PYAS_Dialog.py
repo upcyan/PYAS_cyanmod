@@ -40,6 +40,35 @@ WM_DESTROY = 0x0002
 WM_CLOSE = 0x0010
 WM_SETFONT = 0x0030
 WM_SHOW_PENDING = 0x8001
+
+def raise_topmost(hwnd):
+    """把窗口重新钉到最上层。
+
+    pywebview 只在创建窗口那一刻设一次 TopMost;之后被别的置顶窗口压下去,
+    它就再也回不到最前面(新告警来了用户也可能看不见)。这里显式重设一次。
+    参数类型用 c_void_p:argtypes 是进程级共享的,写窄了会毒化 pywebview 自己的调用。
+    """
+    if not hwnd:
+        return False
+
+    user32 = ctypes.windll.user32
+    user32.SetWindowPos.argtypes = [
+        ctypes.wintypes.HWND,
+        ctypes.wintypes.HWND,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.wintypes.UINT,
+    ]
+    user32.SetWindowPos.restype = ctypes.wintypes.BOOL
+    HWND_TOPMOST = ctypes.wintypes.HWND(-1)
+    SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE, SWP_SHOWWINDOW = 0x0001, 0x0002, 0x0010, 0x0040
+
+    return bool(user32.SetWindowPos(
+        hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+        SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+    ))
 WM_CANCEL_PENDING = 0x8002
 
 ID_BLOCK_BUTTON = 1001
@@ -121,9 +150,9 @@ class MINMAXINFO(ctypes.Structure):
 
 DIALOG_TEXTS = {
     "btn_block": {
-        "traditional_switch": "攔截",
-        "simplified_switch": "拦截",
-        "english_switch": "Block",
+        "traditional_switch": "永久攔截",
+        "simplified_switch": "永久拦截",
+        "english_switch": "Always block",
         "japanese_switch": "ブロック",
         "korean_switch": "차단",
         "french_switch": "Bloquer",
@@ -132,6 +161,20 @@ DIALOG_TEXTS = {
         "arabic_switch": "حظر",
         "russian_switch": "Блокировать",
         "slovenian_switch": "Blokiraj",
+    },
+    # 「本次阻止」= 只处理这一次;「拦截」= 按重复规则记住(下次同类不再问)
+    "btn_block_once": {
+        "traditional_switch": "本次阻止",
+        "simplified_switch": "本次阻止",
+        "english_switch": "Block once",
+        "japanese_switch": "今回のみブロック",
+        "korean_switch": "이번만 차단",
+        "french_switch": "Bloquer cette fois",
+        "spanish_switch": "Bloquear esta vez",
+        "hindi_switch": "इस बार ब्लॉक करें",
+        "arabic_switch": "حظر هذه المرة",
+        "russian_switch": "Блокировать один раз",
+        "slovenian_switch": "Blokiraj tokrat",
     },
     "btn_allow": {
         "traditional_switch": "放行",
@@ -173,8 +216,8 @@ DIALOG_TEXTS = {
         "slovenian_switch": "Cilj",
     },
     "label_pid": {
-        "traditional_switch": "進程",
-        "simplified_switch": "进程",
+        "traditional_switch": "操作進程",
+        "simplified_switch": "操作进程",
         "english_switch": "Process",
         "japanese_switch": "プロセス",
         "korean_switch": "프로세스",
@@ -185,7 +228,7 @@ DIALOG_TEXTS = {
         "russian_switch": "Процесс",
         "slovenian_switch": "Proces",
     },
-    # 文件类告警查不到发起进程时的显式说明(Restart Manager 查不到占用方)
+    # 文件类告警查不到操作进程时的显式说明(Restart Manager 查不到占用方)
     "process_unknown": {
         "traditional_switch": "未識別（檔案已關閉或無進程佔用）",
         "simplified_switch": "未识别（文件已关闭或无进程占用）",
@@ -1039,7 +1082,7 @@ class _WebDecisionAPI:
             invalidate_stale_ai(request, config, getattr(session.owner, '_ai_config_epoch', 0))
             remaining = max(0, math.ceil(request.deadline - time.monotonic())) if request.deadline else None
             events = session.queue.describe()
-            # 文件类告警的发起进程靠 Restart Manager 反查,文件写后即关就查不到;
+            # 文件类告警的操作进程靠 Restart Manager 反查,文件写后即关就查不到;
             # 整行不显示会被当成"漏了发起方",这里显式说明未识别。
             process_name = request.process_name or ""
             process_path = request.process_path or ""
@@ -1057,6 +1100,8 @@ class _WebDecisionAPI:
                 "evidence": request.evidence or detection_view(None),
                 "file": {"path": request.source or "", "name": ntpath.basename(request.source or ""),
                          "sha256": request.rule.get("sha256", "") if request.rule else ""},
+                # 目标(网络地址/写入点)单独给出来,界面用它代替消息里的"目标：..."重复行
+                "target": request.target or "",
                 "summary": loc_threat_description(request.lang, request.action) if request.action else "",
                 "repeat_hint": (
                     loc_dialog_text(request.lang, "repeat_trigger_hint").replace("{0}", str(request.repeat_count))
@@ -1069,6 +1114,9 @@ class _WebDecisionAPI:
                 "waiting": loc_dialog_text(request.lang, "waiting_decision"),
                 "allow": loc_dialog_text(request.lang, "btn_allow"),
                 "block": loc_dialog_text(request.lang, "btn_block"),
+                "block_once": loc_dialog_text(request.lang, "btn_block_once"),
+                # 倒计时落在哪个按钮上:AI 自动执行时是 AI 建议的动作,否则一律自动拦截
+                "auto_action": "ai" if auto_execute else "block",
                 "countdown": (
                     loc_dialog_text(
                         request.lang,
@@ -1235,6 +1283,7 @@ class _WebThreatDialogSession:
         self.window.events.closing += self._on_closing
         started = time.monotonic()
         idle = False
+        active_id = None
         try:
             while True:
                 # Advance pending alerts even while an older bridge call is waiting
@@ -1259,6 +1308,10 @@ class _WebThreatDialogSession:
                         if idle:
                             idle = False
                             revived = True
+
+                        if request.id != active_id:
+                            active_id = request.id
+                            self._assert_topmost()
                         if (not request.resolving and request.deadline
                                 and request.deadline <= time.monotonic()):
                             verdict = ai_deadline_choice(request)
@@ -1310,6 +1363,15 @@ class _WebThreatDialogSession:
             self.destroying = True
             self.window.destroy()
             self.hwnd = None
+
+    def _assert_topmost(self):
+        """新告警进来时把本窗口重新置顶(创建后可能被别的置顶窗压下去)。"""
+        try:
+            from PYAS_WindowIdentity import find_main_window
+
+            raise_topmost(find_main_window('PYAS · Pending alerts', own_pid=os.getpid()))
+        except Exception:
+            log_exception("PYAS_Dialog._WebThreatDialogSession._assert_topmost")
 
     def _on_closing(self):
         if not self.destroying:
@@ -2241,12 +2303,39 @@ class DialogMixin(AlertPolicyMixin):
                 log_exception("PYAS_Dialog.request_block_decision.exe_info")
 
         elif category == 'file' and source:
-            # 文件类告警由目录监听触发,事件不携带 PID:反查当前占用该文件的进程,补上操作发起方
+            # 文件类告警由目录监听触发,事件不携带 PID。扫描要等 0.35s 防抖,到这里
+            # 写入方多半已经关了句柄 —— 先用事件时刻抄下的那份(由目录监听侧记录),
+            # 没有再退回实时反查。
+            users = []
+
+            # 第一优先:驱动/ETW 事件缓存(写入那一刻就记下了发起方,文件关了也在)
             try:
-                users = _query_file_users(source)
+                from PYAS_Attribution import get_layer
+
+                layer_hit = get_layer().lookup(source)
+
+                if layer_hit:
+                    users = [(layer_hit[0], layer_hit[1])]
             except Exception:
-                log_exception("PYAS_Dialog.request_block_decision.file_users")
-                users = []
+                log_exception("PYAS_Dialog.request_block_decision.attribution")
+
+            cached_lookup = getattr(self, "_file_owner_for", None)
+
+            if cached_lookup is not None:
+                try:
+                    cached = cached_lookup(source)
+
+                    if cached:
+                        users = [cached]
+                except Exception:
+                    log_exception("PYAS_Dialog.request_block_decision.file_users_cache")
+
+            if not users:
+                try:
+                    users = _query_file_users(source)
+                except Exception:
+                    log_exception("PYAS_Dialog.request_block_decision.file_users")
+                    users = []
 
             if users:
                 resolved_pid, rm_name = users[0]
@@ -2292,7 +2381,7 @@ class DialogMixin(AlertPolicyMixin):
                     detail=f'{action} / {target or ""} / {cached}', file_hash=rule['sha256'])
             return cached != 'allow'
         repeat_count = _record_trigger(rule['key']) if rule else 0
-        # 智能体关联审计 + 弹窗标注:来源文件或发起进程命中智能体指纹时留痕,
+        # 智能体关联审计 + 弹窗标注:来源文件或操作进程命中智能体指纹时留痕,
         # 命中后再验签名定档(verified=强证据)。自动拦截路径的审计在
         # trigger_block_notification,两处互补不重复。
         agent = ''

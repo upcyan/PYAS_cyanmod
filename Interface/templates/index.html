@@ -166,6 +166,19 @@
     <div id="loading_overlay">
         <svg class="spinner" aria-hidden="true" focusable="false"><use href="#i-spinner"/></svg>
     </div>
+    <!-- 无边框窗口的边缘缩放热区:8 条 6px 的窄边。
+         mousedown 只发一次 begin_window_resize,之后交给系统的模态缩放循环(拖动期间零桥调用)。
+         必须放在 app-container 外层,且只在边缘 6px 内接收指针。 -->
+    <div class="resize-layer" aria-hidden="true">
+        <div class="resize-edge" data-dir="n"></div>
+        <div class="resize-edge" data-dir="s"></div>
+        <div class="resize-edge" data-dir="w"></div>
+        <div class="resize-edge" data-dir="e"></div>
+        <div class="resize-edge" data-dir="nw"></div>
+        <div class="resize-edge" data-dir="ne"></div>
+        <div class="resize-edge" data-dir="sw"></div>
+        <div class="resize-edge" data-dir="se"></div>
+    </div>
     <div class="app-container" style="opacity: 0; transition: opacity 0.5s ease;">
         <header class="navigate-window pywebview-drag-region">
             <div class="title-group">
@@ -291,10 +304,19 @@
                         <div class="virus-widget">
                             <ul class="virus-list" id="virus_list"></ul>
                         </div>
+                        <!-- 空态:网格是通用组件,没数据时只剩一条表头,像坏掉了。
+                             这里盖一层占位,有结果就隐藏(见 main.js syncScanEmpty) -->
+                        <div class="grid-empty" id="scan_empty">
+                            <svg class="grid-empty-icon" aria-hidden="true" focusable="false"><use href="#i-scan-smart"/></svg>
+                            <p class="grid-empty-text" data-i18n="scan_virus_desc">此選項可以選擇進階掃描方式</p>
+                        </div>
                     </div>
                 </section>
 
                 <section id="protect_window" class="page">
+                    <div class="page-head">
+                        <h2 class="page-title" data-i18n="nav_protect">防護</h2>
+                    </div>
                     <div class="list-widget">
                         <div class="list-item">
                             <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-shield-pulse"/></svg>
@@ -323,6 +345,13 @@
                                 <h2 data-i18n>檔案防護</h2><p data-i18n>此選項可以隔離惡意檔案建立</p>
                             </div>
                             <label class="toggle-switch"><input type="checkbox" checked data-config-key="document_switch"><span class="slider"></span></label>
+                        </div>
+                        <div class="list-item">
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-search"/></svg>
+                            <div class="item-info">
+                                <h2 data-i18n>發起進程溯源</h2><p data-i18n>此選項可以記錄檔案由哪個進程寫入（需要管理員權限）</p>
+                            </div>
+                            <label class="toggle-switch"><input type="checkbox" checked data-config-key="etw_attribution_switch"><span class="slider"></span></label>
                         </div>
                         <div class="list-item">
                             <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-monitor-check"/></svg>
@@ -356,6 +385,9 @@
                 </section>
 
                 <section id="tool_window" class="page">
+                    <div class="page-head">
+                        <h2 class="page-title" data-i18n="nav_tool">工具</h2>
+                    </div>
                     <div class="list-widget">
                         <div class="list-item" style="cursor: pointer;" data-target="taskmgr_window">
                             <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="14" rx="2"/><path d="M8 21h8m-4-4v4M6 11h3l2-4 3 7 2-3h2"/></svg>
@@ -424,6 +456,9 @@
                 </section>
 
                 <section id="setting_window" class="page">
+                    <div class="page-head">
+                        <h2 class="page-title" data-i18n="nav_settings">設定</h2>
+                    </div>
                     <div class="list-widget">
                         <div class="list-item">
                             <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-zap"/></svg>
@@ -710,6 +745,9 @@
                 </section>
 
                 <section id="about_window" class="page">
+                    <div class="page-head">
+                        <h2 class="page-title" data-i18n="btn_about">關於</h2>
+                    </div>
                     <div class="list-widget">
                         <div class="list-item">
                             <svg class="item-icon item-icon-compact" aria-hidden="true" focusable="false"><use href="#i-key"/></svg>
@@ -813,6 +851,7 @@
                             </select>
                         </div>
                     </div>
+
                     <div class="manage-widget flex-grow"><ul class="manage-list"></ul></div>
                 </section>
 
@@ -856,6 +895,7 @@
                             </select>
                         </div>
                     </div>
+
                     <div class="manage-widget flex-grow"><ul class="manage-list"></ul></div>
                 </section>
 

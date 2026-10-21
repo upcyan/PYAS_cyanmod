@@ -377,7 +377,7 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
 
         menu = pystray.Menu(
             pystray.MenuItem(
-                lambda item: self.get_tray_text("open_ui"), self.restore_from_tray, default=True
+                lambda item: self.get_tray_text("open_ui"), self.toggle_window_activation, default=True
             ),
             pystray.MenuItem(lambda item: self.get_tray_text("optimize_mem"), self.optimize_memory),
             pystray.MenuItem(
@@ -387,6 +387,7 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
         )
         self.tray_icon = pystray.Icon("PYAS", self.get_app_icon(), "PYAS Security Cyanmod", menu)
         self.tray_icon.run_detached()
+        self._start_foreground_watch()
 
     def tray_check_update(self, icon=None, item=None):
         def _check():
@@ -489,7 +490,96 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
 
         threading.Thread(target=_check, daemon=True).start()
 
+    def _start_foreground_watch(self):
+        """每 150ms 采一次前台窗口,只记本窗口是否在前台。
+
+        托盘点击发生在 Explorer 抢走前台之后,现场问不出「点之前在前台吗」;
+        采样线程把这个信息在点击前备好。GetForegroundWindow 只读一个整数,开销可忽略。"""
+        if getattr(self, '_foreground_watch_started', False):
+            return
+
+        self._foreground_watch_started = True
+
+        # HWND 在 64 位下是 8 字节指针,不声明 restype 会被 ctypes 当 c_int 截断,
+        # 比较永远不相等 —— 采样就永远记不到「在前台」。
+        user32 = ctypes.WinDLL('user32', use_last_error=True)
+        user32.GetForegroundWindow.argtypes = []
+        user32.GetForegroundWindow.restype = ctypes.c_void_p
+
+        def loop():
+            while not getattr(self, 'closing', False):
+                try:
+                    hwnd = self._find_main_hwnd()
+                    foreground = user32.GetForegroundWindow()
+
+                    if hwnd and foreground and int(foreground) == int(hwnd):
+                        self._last_foreground_at = time.monotonic()
+                except Exception:
+                    log_exception('PYAS._foreground_watch')
+
+                time.sleep(0.15)
+
+        threading.Thread(target=loop, name='pyas-foreground-watch', daemon=True).start()
+
+    def toggle_window_activation(self, icon=None, item=None):
+        """托盘点击:窗口在前台才最小化,否则先置顶显示。
+
+        这是资源管理器任务栏按钮的行为 —— 只按"可见/隐藏"判断会导致
+        "窗口开着但被别的程序盖住,点托盘反而把它收起来"。"""
+        hwnd = self._find_main_hwnd()
+
+        if not hwnd:
+            self.restore_from_tray(icon, item)
+            return
+
+        try:
+            minimized = self.user32.IsIconic(ctypes.c_void_p(hwnd))
+        except Exception:
+            minimized = False
+
+        # 用「最近一次处于前台」的时间判断,不用 GetForegroundWindow:
+        # 点托盘那一刻前台已经转给 explorer,现场问必然答「不在前台」。
+        # 也不能用 WM_ACTIVATE 时间戳 —— 用户常常是窗口在前面放了一会儿才去点托盘,
+        # 距最后一次激活早超过阈值,表现就是永远只置顶。
+        recently_foreground = (
+            time.monotonic() - getattr(self, '_last_foreground_at', 0.0)
+        ) < 0.5
+
+        if not minimized and recently_foreground:
+            self.minimize()
+        else:
+            self.bring_window_to_front(icon, item)
+
+    def bring_window_to_front(self, icon=None, item=None):
+        """托盘「打开主界面」:恢复并置顶,**绝不最小化**。
+
+        之前这里挂的是"切换"逻辑(可见就最小化),导致窗口开着时点菜单反而把它收起来。
+        """
+        self.restore_from_tray(icon, item)
+        hwnd = self._find_main_hwnd()
+
+        if hwnd:
+            try:
+                user32 = getattr(self, '_foreground_user32', None)
+
+                if user32 is None:
+                    user32 = ctypes.WinDLL('user32', use_last_error=True)
+                    user32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
+                    user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
+                    user32.BringWindowToTop.argtypes = [ctypes.c_void_p]
+                    self._foreground_user32 = user32
+
+                # SW_RESTORE=9:最小化/最大化状态都回到常态,再置顶
+                user32.ShowWindow(ctypes.c_void_p(hwnd), 9)
+                user32.BringWindowToTop(ctypes.c_void_p(hwnd))
+                user32.SetForegroundWindow(ctypes.c_void_p(hwnd))
+            except Exception:
+                log_exception('PYAS.bring_window_to_front')
+
     def restore_from_tray(self, icon=None, item=None):
+        self._window_visible = True
+        self._minimized = False
+
         if self._window:
             self._window.restore()
             self._window.show()
@@ -617,6 +707,8 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
             return False
 
     def minimize(self):
+        self._minimized = True
+
         if self._window:
             self._window.minimize()
         else:
@@ -625,7 +717,162 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
             if hwnd:
                 self.user32.ShowWindow(hwnd, 6)
 
+    def system_animation_enabled(self):
+        """系统是否开启了「在 Windows 中显示动画」。
+
+        开着就把最大化/最小化的过渡交给 DWM(和资源管理器一致);
+        关着时前端才退回自己的 CSS 动画 —— 否则用户会看到硬切。"""
+        try:
+            # 不能用 ctypes.wintypes.BOOL:ctypes.wintypes 要显式 import,
+            # 直接用会 AttributeError,被 except 吞掉 —— 结果永远是 False,
+            # 表现就是"系统动画明明开着却仍走自定义动画"。
+            enabled = ctypes.c_int()
+            # SPI_GETCLIENTAREAANIMATION = 0x1042
+            if self.user32.SystemParametersInfoW(0x1042, 0, ctypes.byref(enabled), 0):
+                return bool(enabled.value)
+
+            log_exception('PYAS.system_animation_enabled:SPI 返回 0')
+        except Exception:
+            log_exception('PYAS.system_animation_enabled')
+
+        return False
+
+    # 最小窗口尺寸(与 WM_GETMINMAXINFO 一致,JS 侧也按这个夹)
+    MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT = 720, 560
+
+    def resize_debug(self, message):
+        """前端缩放链路的诊断落点(只写日志,不参与逻辑)。"""
+        logging.getLogger('PYAS.Window').info('resize: %s', str(message)[:200])
+        return True
+
+    def window_rect(self):
+        """返回 [left, top, right, bottom](屏幕坐标),给 JS 缩放时做基准。"""
+        hwnd = self._find_main_hwnd()
+
+        if not hwnd:
+            return None
+
+        rect = self.RECT()
+
+        if not self.user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return None
+
+        return [rect.left, rect.top, rect.right, rect.bottom]
+
+    def set_window_rect(self, left, top, width, height):
+        """摆窗口到指定位置/尺寸,返回状态字符串,便于前端 HUD 直接显示。
+
+        用 SetWindowPos 而不是 pywebview 的 resize():后者走 WinForms 的尺寸协商,
+        每帧一次会明显发涩。SetWindowPos 失败时退回 MoveWindow。
+        """
+        hwnd = self._find_main_hwnd()
+
+        if not hwnd:
+            try:
+                hwnd = find_main_window(PYAS_WINDOW_TITLE, own_pid=os.getpid())
+            except Exception:
+                hwnd = None
+
+        if not hwnd:
+            return 'no-hwnd'
+
+        try:
+            left, top = int(left), int(top)
+            width = max(int(width), self.MIN_WINDOW_WIDTH)
+            height = max(int(height), self.MIN_WINDOW_HEIGHT)
+
+            user32 = getattr(self, '_rect_user32', None)
+
+            if user32 is None:
+                # 独立句柄 + 显式 argtypes,不与 _resize_user32 混用:
+                # 混用时谁先建谁决定 argtypes,后建的一方拿到的是没声明的函数。
+                user32 = ctypes.WinDLL('user32', use_last_error=True)
+                user32.SetWindowPos.argtypes = [
+                    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+                    ctypes.c_int, ctypes.c_int, ctypes.c_uint,
+                ]
+                user32.SetWindowPos.restype = ctypes.c_bool
+                user32.MoveWindow.argtypes = [
+                    ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+                    ctypes.c_int, ctypes.c_int, ctypes.c_bool,
+                ]
+                user32.MoveWindow.restype = ctypes.c_bool
+                self._rect_user32 = user32
+
+            SWP_NOZORDER, SWP_NOACTIVATE = 0x0004, 0x0010
+
+            if user32.SetWindowPos(
+                ctypes.c_void_p(hwnd), None, left, top, width, height,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            ):
+                return 'ok'
+
+            err = ctypes.get_last_error()
+
+            if user32.MoveWindow(ctypes.c_void_p(hwnd), left, top, width, height, True):
+                return 'ok-move'
+
+            return 'fail hwnd=0x%x err=%d move_err=%d' % (
+                hwnd, err, ctypes.get_last_error()
+            )
+        except Exception as exc:
+            log_exception('PYAS.set_window_rect')
+            return 'except ' + type(exc).__name__
+
+    def begin_window_resize(self, direction):
+        """把一次鼠标按下转成系统的模态缩放循环。
+
+        无边框窗口没有可拖的边框,JS 热区按下时只调用这里一次;
+        之后由 Windows 自己的缩放循环接管 —— 拖动过程中**没有任何桥调用**,
+        所以不会出现旧方案(每帧 resize)那种卡顿。
+
+        两个前提缺一不可:
+          1. 窗口必须有 WS_THICKFRAME(WindowHook.hook 里补),否则系统不认这是一次缩放;
+          2. SendMessage 会一直阻塞到用户松手,所以必须丢到后台线程,
+             不能让桥调用线程被卡住(否则前端拿不到返回、按钮像点了没反应)。
+        """
+        ht = self._RESIZE_HITTEST.get(str(direction or '').lower())
+
+        if not ht:
+            return False
+
+        hwnd = self._find_main_hwnd()
+
+        if not hwnd:
+            logging.getLogger('PYAS.Window').info('begin_window_resize: main hwnd not found')
+            return False
+
+        if getattr(self, '_maximized', False):
+            # 最大化状态下窗口不可缩放,先还原
+            self.user32.ShowWindow(hwnd, 9)
+            self._maximized = False
+
+        user32 = getattr(self, '_resize_user32', None)
+
+        if user32 is None:
+            # 独立句柄:argtypes 只设在这个副本上,不污染 ctypes.windll 的全局函数
+            user32 = ctypes.WinDLL('user32', use_last_error=True)
+            user32.ReleaseCapture.argtypes, user32.ReleaseCapture.restype = [], ctypes.c_bool
+            user32.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+            user32.SendMessageW.restype = ctypes.c_void_p
+            self._resize_user32 = user32
+
+        def _enter_resize_loop():
+            try:
+                user32.ReleaseCapture()
+                # 等价于"在边框左上角按下左键":系统接管,直到用户松手
+                user32.SendMessageW(ctypes.c_void_p(hwnd), 0x00A1, ctypes.c_void_p(ht), None)
+                logging.getLogger('PYAS.Window').info('window resize loop finished ht=%s', ht)
+            except Exception:
+                log_exception('PYAS.begin_window_resize.loop')
+
+        logging.getLogger('PYAS.Window').info('begin_window_resize dir=%s ht=%s', direction, ht)
+        threading.Thread(target=_enter_resize_loop, daemon=True).start()
+        return True
+
     def hide_window(self):
+        self._window_visible = False
+
         if self._window:
             self._window.hide()
 
@@ -1179,10 +1426,15 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
             result = subprocess.run(command, capture_output=True,
                 timeout=90, creationflags=subprocess.CREATE_NO_WINDOW)
             detail = (decode_process_output(result.stdout) + decode_process_output(result.stderr)).strip()[:1500]
-            self.write_log('INFO' if result.returncode == 0 else 'WARN', 'Modern Context Menu',
+            ok = result.returncode == 0
+            # 幂等路径(PowerShell 判定已注册后直接 exit 0)没有任何输出,
+            # 这里补一条固定状态文案,否则日志详情是空的
+            if ok and not detail:
+                detail = 'Context menu registered' if enable else 'Context menu unregistered'
+            self.write_log('INFO' if ok else 'WARN', 'Modern Context Menu',
                 detail=detail,
-                success=result.returncode == 0)
-            return remember(result.returncode == 0, detail if result.returncode else '')
+                success=ok)
+            return remember(ok, detail if result.returncode else '')
         except Exception as error:
             log_exception('PYAS.register_modern_context_menu')
             return remember(False, str(error))
@@ -1378,6 +1630,12 @@ class NoCacheRequestHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
 
+class _NCCALCSIZE_PARAMS(ctypes.Structure):
+    """WM_NCCALCSIZE 的 lParam 结构:rgrc[0] 是待计算的窗口/客户区矩形。"""
+
+    _fields_ = [("rgrc", RECT * 3), ("lppos", ctypes.c_void_p)]
+
+
 class WindowHook:
     def __init__(self, title, api_ref=None):
         self.title, self.api_ref = title, api_ref
@@ -1389,6 +1647,7 @@ class WindowHook:
         self.WM_SYSCOMMAND = 0x0112
         self.WM_GETMINMAXINFO = 0x0024
         self.SC_CLOSE = 0xF060
+        self.SC_MINIMIZE = 0xF020
         self.SC_MAXIMIZE = 0xF030
         self.SC_RESTORE = 0xF120
         self.HTCAPTION = 2
@@ -1397,6 +1656,7 @@ class WindowHook:
         self.GWLP_WNDPROC = -4
 
         self.RECT = RECT
+        self.NCCALCSIZE_PARAMS = _NCCALCSIZE_PARAMS
         self.WNDPROC = ctypes.WINFUNCTYPE(
             ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p
         )
@@ -1452,6 +1712,31 @@ class WindowHook:
             self.old_wndproc = self.GetWindowLong(hwnd, self.GWLP_WNDPROC)
             self.SetWindowLong(hwnd, self.GWLP_WNDPROC, self.new_wndproc_cb)
 
+            # 补上最小化/最大化/可缩放位:无边框窗口默认这三样都没有,
+            # 于是①点任务栏标签发来的 SC_MINIMIZE 被忽略、②DWM 不给最小化动画、
+            # ③WM_NCLBUTTONDOWN + HTxxx 进不了缩放循环(窗口不是 sizable)。
+            #
+            # 注意不能复用 self.SetWindowLong:它的 argtypes 是按 SetWindowLongPtrW(GWLP_WNDPROC)
+            # 声明的,第三参是 WNDPROC 函数指针;拿它写 GWL_STYLE 会 TypeError,
+            # 而这里包了 try/except,失败是静默的 —— 样式根本没生效过。
+            try:
+                GWL_STYLE = -16
+                WS_MINIMIZEBOX, WS_MAXIMIZEBOX, WS_THICKFRAME = 0x00020000, 0x00010000, 0x00040000
+                style32 = ctypes.WinDLL('user32', use_last_error=True)
+                style32.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+                style32.GetWindowLongW.restype = ctypes.c_long
+                style32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_long]
+                style32.SetWindowLongW.restype = ctypes.c_long
+                before = style32.GetWindowLongW(ctypes.c_void_p(hwnd), GWL_STYLE) or 0
+                after = before | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME
+                style32.SetWindowLongW(ctypes.c_void_p(hwnd), GWL_STYLE, after)
+                applied = style32.GetWindowLongW(ctypes.c_void_p(hwnd), GWL_STYLE) or 0
+                logging.getLogger('PYAS.Window').info(
+                    'window style 0x%08x -> 0x%08x (readback 0x%08x)', before, after, applied
+                )
+            except Exception:
+                log_exception('PYAS.WindowHook.hook:style')
+
             try:
                 self.user32.ChangeWindowMessageFilterEx.argtypes = [
                     ctypes.c_void_p,
@@ -1475,6 +1760,24 @@ class WindowHook:
                 log_exception("PYAS.WindowHook.hook:732")
                 pass
 
+    def resync_after_restore(self):
+        """还原后强制一次等尺寸 resize。
+
+        WebView2 的 bounds 是在 WinForms 的 OnResize 里推过去的;从最小化还原时
+        那一帧可能还按最小化前/占位尺寸画,表现为「窗口跳一下」。这里在还原后
+        主动走一次 resize(尺寸不变),让子窗立刻按当前客户区重排。
+        """
+        time.sleep(0.05)
+        window = getattr(self.api_ref, "_window", None)
+
+        if window is None:
+            return
+
+        try:
+            window.resize(int(round(window.width)), int(round(window.height)))
+        except Exception:
+            log_exception("PYAS.WindowHook.resync_after_restore")
+
     def call_default(self, hwnd, msg, wparam, lparam):
         if self.old_wndproc:
             return self.user32.CallWindowProcW(self.old_wndproc, hwnd, msg, wparam, lparam)
@@ -1482,6 +1785,11 @@ class WindowHook:
         return self.user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
     def wndproc(self, hwnd, msg, wparam, lparam):
+        if msg == 0x0006 and self.api_ref:  # WM_ACTIVATE
+            # 记下最近一次被激活的时间。托盘点击会把前台让给 explorer,
+            # 等回调跑起来再问 GetForegroundWindow 已经晚了。
+            if (wparam & 0xFFFF) != 0:
+                self.api_ref._last_active_at = time.monotonic()
         if msg in (0x0231, 0x0232) and self.api_ref:  # WM_ENTER/EXITSIZEMOVE
             self.api_ref._window_interacting = msg == 0x0231
         if msg == PYAS_MAINTENANCE_MESSAGE:
@@ -1532,8 +1840,23 @@ class WindowHook:
         if msg == self.WM_SYSCOMMAND and self.api_ref:
             sc_value = wparam & 0xFFF0
 
+            if sc_value == self.SC_MINIMIZE:
+                # 无边框窗口没有 WS_MINIMIZEBOX,点任务栏按钮时系统发的 SC_MINIMIZE
+                # 会被 WinForms 直接忽略(表现为「点了没反应」)。这里改走应用自己的
+                # minimize():与标题栏按钮同一条路,还原时尺寸才不会丢。
+                threading.Thread(target=self.api_ref.minimize, daemon=True).start()
+                return 0
+
             if sc_value in (self.SC_MAXIMIZE, self.SC_RESTORE):
                 self.api_ref._maximized = sc_value == self.SC_MAXIMIZE
+
+                if sc_value == self.SC_RESTORE:
+                    # 系统还原(任务栏 / Alt+Tab)也要清掉已最小化标记,
+                    # 否则托盘点击会误判成还在最小化而重复还原。
+                    self.api_ref._minimized = False
+
+                if sc_value == self.SC_RESTORE:
+                    threading.Thread(target=self.resync_after_restore, daemon=True).start()
                 # evaluate_js waits for the WebView thread; never call it from
                 # the native window procedure that thread may be waiting on.
                 self.api_ref.ui_queue.put(
@@ -1549,6 +1872,31 @@ class WindowHook:
                 return 0
 
             return self.call_default(hwnd, msg, wparam, lparam)
+
+        if msg == 0x0083 and wparam:  # WM_NCCALCSIZE:客户区算法
+            # 为了可缩放,窗口补了 WS_THICKFRAME;但系统会把客户区往里缩一圈边框,
+            # 表现就是顶部一条白边(最小化还原后尤其明显,因为重算了一次布局)。
+            # 这里声明没有非客户区:客户区 = 整个窗口矩形。
+            # 用 IsZoomed 查实际状态,不要用 _maximized 标志:
+            # 恢复(SC_RESTORE)时标志已经翻成 False,但系统仍会带最大化尺寸来算一次,
+            # 按标志判断就会给普通窗口套上最大化补偿 → 顶部再出一条白边。
+            if not self.user32.IsZoomed(ctypes.c_void_p(hwnd)):
+                return 0
+
+            # 最大化时窗口矩形比工作区大出边框厚度,不补偿就会把四边吃掉。
+            try:
+                params = ctypes.cast(lparam, ctypes.POINTER(self.NCCALCSIZE_PARAMS)).contents
+                rect = params.rgrc[0]
+                pad_x = self.user32.GetSystemMetrics(32) + self.user32.GetSystemMetrics(92)
+                pad_y = self.user32.GetSystemMetrics(33) + self.user32.GetSystemMetrics(92)
+                rect.left += pad_x
+                rect.top += pad_y
+                rect.right -= pad_x
+                rect.bottom -= pad_y
+            except Exception:
+                log_exception('PYAS.WindowHook.wndproc:nccalcsize')
+
+            return 0
 
         if msg == self.WM_NCHITTEST:
             x, y = lparam & 0xFFFF, (lparam >> 16) & 0xFFFF
@@ -1672,8 +2020,13 @@ def start_ui():
     try:
         wait_for_recovery_parent()
         arguments = os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "")
+        # Chromium 会把「被遮挡/最小化」的窗口当成不可见并停掉渲染,还原后要过一两秒
+        # 才重新合成 —— 实测录屏里是 1.6s 的空白(只剩背景和分隔线)。
+        # 关掉遮挡计算与后台节流,窗口一还原就能立刻出画面。
         os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (
             arguments + " --proxy-bypass-list=localhost;127.0.0.1"
+            " --disable-features=CalculateNativeWinOcclusion"
+            " --disable-backgrounding-occluded-windows"
         ).strip()
         frontend_errors = get_frontend_asset_errors()
 
@@ -1697,6 +2050,20 @@ def start_ui():
         stage = "api"
         logger.info("Initializing Python API")
         js_api = WindowAPI()
+
+        # 发起进程溯源:驱动事件(层 A)随时可用;ETW(层 B)需要管理员 + 消费者。
+        # 这里只探测并记录原因,拿不到不影响拦截,弹窗会退到系统占用查询。
+        try:
+            from PYAS_ETW import available as _etw_available
+
+            etw_ok, etw_reason = _etw_available()
+            switch_on = bool(js_api.pyas_config.get('etw_attribution_switch', True))
+            logging.getLogger('PYAS.Startup').info(
+                'attribution: switch=%s etw=%s (%s)', switch_on, etw_ok, etw_reason
+            )
+            js_api._attribution_status = {'switch': switch_on, 'etw': etw_ok, 'reason': etw_reason}
+        except Exception:
+            log_exception('PYAS.main.attribution_probe')
         js_api.file_webview_log = STARTUP_LOG_PATH or js_api.file_webview_log
 
         stage = "profile"

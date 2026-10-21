@@ -24,7 +24,7 @@ const buildSnapshot = (events, overrides) => Object.assign({
     theme: 'white_switch', language: 'simplified_switch', can_remember: true,
     identity_summary: 'C:\\fixture\\PYAS_Launcher.exe\nSHA-256: ' + 'a'.repeat(64),
     remaining: null, waiting: '等待您选择；关闭窗口仅收起，不执行操作。', countdown: '',
-    allow: '本次允许', block: '拦截',
+    allow: '本次允许', block: '拦截', block_once: '本次阻止',
     summary: '检测到可疑程序正在启动，现已暂停并等待您处理。拦截将终止该进程；放行将恢复其运行。',
     evidence: {
         engine: 'ml', score: 83, score_kind: 'model_probability', category: 'Malware',
@@ -95,22 +95,24 @@ const buildSnapshot = (events, overrides) => Object.assign({
         const single = buildSnapshot([{ id: 'a1', title: '进程防护', count: 1, active: true }]);
         let page = await open(single);
         assert.equal(await page.locator('.threat-queue').isVisible(), false,
-            '单条告警不该显示队列栏(1 条列表没有信息量,却吃掉 118px 宽度)');
+            '队列明细不展示:告警逐条 FIFO 处理,数量已在标题栏');
         assert.ok(await overflow(page) <= 0, `单条告警仍有 ${await overflow(page)}px 溢出`);
         const cols = await page.evaluate(() =>
             getComputedStyle(document.querySelector('.detection-grid')).gridTemplateColumns.split(' ').length);
         assert.equal(cols, 4, '详情区够宽时证据应摊成四列一行');
         await page.close();
 
-        // 2b: 三条告警 —— 左栏出现,仍然不滚动
+        // 2b: 三条告警 —— 仍然不显示队列栏,数量进标题栏,且不滚动
         const multi = buildSnapshot([
             { id: 'a1', title: '进程防护', count: 1, active: true },
             { id: 'b1', title: '文件防护', count: 2, active: false },
             { id: 'c1', title: '网络防护', count: 1, active: false },
         ]);
         page = await open(multi);
-        assert.equal(await page.locator('.threat-queue').isVisible(), true,
-            '两条以上待处理告警必须显示队列栏');
+        assert.equal(await page.locator('.threat-queue').isVisible(), false,
+            '多条告警也不展示队列栏,避免占用正文宽度');
+        assert.equal(await page.locator('.queue-chip-count').textContent(), '3',
+            '标题栏计数应等于待处理条目数(队列明细不再展示)');
         assert.ok(await overflow(page) <= 0, `三条告警时仍有 ${await overflow(page)}px 溢出`);
         await page.close();
 

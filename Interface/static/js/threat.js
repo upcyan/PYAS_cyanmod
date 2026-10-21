@@ -3,12 +3,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const byId = id => document.getElementById(id);
     const allow = byId('threat_allow');
     const block = byId('threat_block');
+    const blockOnce = byId('threat_block_once');
     const permanent = byId('threat_permanent');
     const glow = byId('ai_window_glow');
     const fpButton = byId('threat_fp');
     const fpPanel = byId('threat_fp_panel');
     const repeat = byId('threat_repeat');
-    const allButtons = [allow, block, permanent, fpButton];
+    const allButtons = [allow, block, blockOnce, permanent, fpButton];
     const disable = () => {
         allButtons.forEach(button => { button.disabled = true; });
         repeat.disabled = true;
@@ -68,11 +69,18 @@ document.addEventListener('DOMContentLoaded', () => {
     let actionRevision = 0;
     let decisionTimeoutId = null;
     let confirmationId = null;
+    // 「原始事件文本」的展开状态:轮询刷新不该覆盖用户的点击
+    let eventDetailsOpen = true;
     let fpTexts = null;
     const hideFpPanel = () => fpPanel.classList.add('hidden');
     const message = (lang, key) => window.AppI18n.dict[lang]?.[key]
         || window.AppI18n.dict.english_switch[key] || key;
     // AI is advice, not a second detector. Only actual in-flight analysis lights the window.
+    // 打开文件所在目录:与主窗口的 open_file_location 同一个入口
+    byId('threat_file_open')?.addEventListener('click', () => {
+        if (!currentFilePath) return;
+        Promise.resolve(window.pywebview?.api?.open_file_location?.(currentFilePath)).catch(console.error);
+    });
     const renderAiResult = (ai, lang, resolving = false) => {
         const panel = byId('ai_result');
         const visible = !!ai?.label;
@@ -92,6 +100,14 @@ document.addEventListener('DOMContentLoaded', () => {
         byId('ai_result_reason').classList.toggle('hidden', !ai.hint);
         setText('ai_result_note', message(lang, 'evidence_ai_note'));
     };
+    // 只做格式规整:字面量 \n 还原成真换行,连续空行压到一行,首尾去空白。
+    // 内容一个字都不删 —— 事件详情要能作为原始依据。
+    const normalizeEventText = (raw) => String(raw || '')
+        .replace(/\\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .replace(/^\s+|\s+$/g, '');
+    let currentFilePath = '';
+
     const renderEvidence = (data, lang) => {
         const e = data?.evidence || {};
         const unknown = message(lang, 'evidence_unknown');
@@ -100,6 +116,7 @@ document.addEventListener('DOMContentLoaded', () => {
             evidence_platform_label: 'evidence_platform', evidence_family_label: 'evidence_family',
             evidence_raw_label: 'evidence_raw', evidence_rules_label: 'evidence_rules',
             evidence_file_label: 'evidence_file', evidence_hash_label: 'evidence_hash',
+            evidence_target_label: 'evidence_target',
             evidence_event_label: 'evidence_event' };
         for (const [id, key] of Object.entries(labels)) setText(id, message(lang, key));
         const scored = typeof e.score === 'number' && Number.isFinite(e.score) && e.score >= 0 && e.score <= 100
@@ -123,7 +140,6 @@ document.addEventListener('DOMContentLoaded', () => {
         setText('threat_category', category || e.category || unknown);
         setText('threat_platform', e.platform || unknown);
         setText('threat_family', e.generic ? message(lang, 'evidence_generic') : (e.family || unknown));
-        setText('threat_raw_label', e.raw_label || unknown);
         // 空态时把 dd 折成一行(label 用 ::before 内联),有真实值时恢复上下堆叠
         for (const id of ['threat_category', 'threat_engine', 'threat_platform', 'threat_family']) {
             const dd = byId(id);
@@ -146,6 +162,19 @@ document.addEventListener('DOMContentLoaded', () => {
         setText('threat_file_name', file.name || '');
         setText('threat_file_path', file.path || '');
         setText('threat_file_hash', file.sha256 || unknown);
+
+        // 完整路径只在悬停提示里出现;正文只保留文件名 + 打开目录按钮
+        byId('threat_file_path').title = file.path || '';
+        byId('threat_file_hash').title = file.sha256 || '';
+
+        // 目标(网络地址/写入点):有值时单独一行,替代消息里"目标：..."的重复文本
+        const targetRow = byId('threat_target_row');
+        const targetValue = String(data?.target || '');
+        targetRow.classList.toggle('hidden', !targetValue);
+        setText('threat_target', targetValue);
+        byId('threat_target').title = targetValue;
+        byId('threat_file_name').title = file.path || file.name || '';
+        currentFilePath = file.path || '';
         setText('threat_context', data?.summary || '');
     };
     const openFpPanel = () => {
@@ -175,10 +204,24 @@ document.addEventListener('DOMContentLoaded', () => {
         fpPanel.classList.remove('hidden');
         byId('threat_fp_cancel').focus({ preventScroll: true });
     };
+    // 复选框只放短标签,阶梯规则放 title 提示(原文太长,挤得按钮变形)
+    const repeatShort = {
+        simplified_switch: '记住本次决定',
+        traditional_switch: '記住本次決定',
+        english_switch: 'Remember this decision',
+        japanese_switch: 'この決定を記憶',
+        korean_switch: '이 결정 기억',
+        french_switch: 'Mémoriser cette décision',
+        spanish_switch: 'Recordar esta decisión',
+        hindi_switch: 'यह निर्णय याद रखें',
+        arabic_switch: 'تذكّر هذا القرار',
+        russian_switch: 'Запомнить решение',
+        slovenian_switch: 'Zapomni si to odločitev',
+    };
     const texts = {
-        simplified_switch: ['永久允许', '重复确认越多，自动延长有效时间（60 秒起，最长 1 小时，累计最多 100 次，默认关闭）', '仅记住此防护、此完整路径、此 SHA-256 文件内容、此检测结果和此目标。文件变化后重新询问；不会放行目录或关闭扫描。可在设置中清除。确认永久允许？', '确认永久允许', '取消', '文件身份无法验证、已经变化或保存失败；未新增允许规则，请重新处理。', '无法确认文件身份或属于内存告警，不能记住决定。'],
-        traditional_switch: ['永久允許', '重複確認越多，自動延長有效時間（60 秒起，最長 1 小時，累計最多 100 次，預設關閉）', '僅記住此防護、此完整路徑、此 SHA-256 檔案內容、此偵測結果與此目標。檔案變更後重新詢問；不放行目錄或關閉掃描。可在設定中清除。確認永久允許？', '確認永久允許', '取消', '無法驗證檔案身分、檔案已變更或儲存失敗；未新增允許規則。', '無法確認檔案身分或屬於記憶體告警，不能記住決定。'],
-        english_switch: ['Always allow', 'Repeat this decision for identical alerts — window grows with each confirmation (60s base, up to 1 hour, 100 uses max, off by default)', 'Remember only this protection, exact path, SHA-256 content, detection and target. Changed files will prompt again. Scanning stays enabled. Clear rules in Settings. Always allow?', 'Confirm always allow', 'Cancel', 'File identity changed, could not be verified, or saving failed. No allow rule added.', 'File identity cannot be verified or this is a memory alert. Decisions cannot be remembered.'],
+        simplified_switch: ['永久允许', '同一项重复确认会自动延长记住的时间：首次 60 秒；确认满 5 次后 5 分钟；满 15 次后 15 分钟；满 40 次后 1 小时（最长）。最多记录 100 项，默认关闭。', '仅记住此防护、此完整路径、此 SHA-256 文件内容、此检测结果和此目标。文件变化后重新询问；不会放行目录或关闭扫描。可在设置中清除。确认永久允许？', '确认永久允许', '取消', '文件身份无法验证、已经变化或保存失败；未新增允许规则，请重新处理。', '无法确认文件身份或属于内存告警，不能记住决定。'],
+        traditional_switch: ['永久允許', '同一項重複確認會自動延長記住的時間：首次 60 秒；確認滿 5 次後 5 分鐘；滿 15 次後 15 分鐘；滿 40 次後 1 小時（最長）。最多記錄 100 項，預設關閉。', '僅記住此防護、此完整路徑、此 SHA-256 檔案內容、此偵測結果與此目標。檔案變更後重新詢問；不放行目錄或關閉掃描。可在設定中清除。確認永久允許？', '確認永久允許', '取消', '無法驗證檔案身分、檔案已變更或儲存失敗；未新增允許規則。', '無法確認檔案身分或屬於記憶體告警，不能記住決定。'],
+        english_switch: ['Always allow', 'Repeating the same decision extends how long it is remembered: 60 s at first, 5 minutes after 5 confirmations, 15 minutes after 15, 1 hour after 40 (the maximum). Up to 100 entries, off by default.', 'Remember only this protection, exact path, SHA-256 content, detection and target. Changed files will prompt again. Scanning stays enabled. Clear rules in Settings. Always allow?', 'Confirm always allow', 'Cancel', 'File identity changed, could not be verified, or saving failed. No allow rule added.', 'File identity cannot be verified or this is a memory alert. Decisions cannot be remembered.'],
         japanese_switch: ['常に許可', '同一アラートに対し決定を繰り返します（60秒〜最長1時間、最大100回、既定はオフ）。確認回数が増えるほど有効時間が延びます', 'この保護・完全なパス・SHA-256内容・検出・対象のみ記憶します。ファイルが変われば再確認します。ディレクトリの許可やスキャン停止はしません。設定で削除できます。常に許可しますか？', '常に許可を確認', 'キャンセル', 'ファイルの身元を検証できないか、変更または保存に失敗しました。許可ルールは追加されていません。', 'ファイルの身元を確認できないかメモリ警告のため、決定を記憶できません。'],
         korean_switch: ['항상 허용', '동일한 경고에 대해 이 결정을 반복합니다(60초~최대 1시간, 최대 100회, 기본값 꺼짐). 반복할수록 유효 시간이 늘어납니다', '이 보호, 전체 경로, SHA-256 내용, 탐지, 대상만 기억합니다. 파일이 변경되면 다시 묻습니다. 디렉터리 허용이나 검사 중지는 하지 않습니다. 설정에서 삭제할 수 있습니다. 항상 허용할까요?', '항상 허용 확인', '취소', '파일 신원을 확인할 수 없거나 변경·저장에 실패했습니다. 허용 규칙이 추가되지 않았습니다.', '파일 신원을 확인할 수 없거나 메모리 경고이므로 결정을 기억할 수 없습니다.'],
         french_switch: ['Toujours autoriser', 'Répéter cette décision pour des alertes identiques — la fenêtre s’allonge à chaque confirmation (60 s de base, jusqu’à 1 h, 100 fois max, désactivé par défaut)', 'Seuls cette protection, ce chemin exact, ce contenu SHA-256, cette détection et cette cible sont mémorisés. Les fichiers modifiés redemanderont. Aucun dossier autorisé, scan jamais désactivé. Supprimable dans les réglages. Toujours autoriser ?', 'Confirmer l’autorisation', 'Annuler', 'Identité du fichier invérifiable, modifiée ou échec d’enregistrement ; aucune règle ajoutée.', 'Identité invérifiable ou alerte mémoire : la décision ne peut pas être mémorisée.'],
@@ -201,6 +244,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const setText = (id, text) => {
         const element = byId(id);
+
+        if (!element) return;   // 节点可能已被移除(如"原始报毒结果"行),不能因此抛错
+
         const value = String(text ?? '');
         if (element.textContent !== value) element.textContent = value;
     };
@@ -254,8 +300,15 @@ document.addEventListener('DOMContentLoaded', () => {
             setText('queue_heading', pendingLabel);
             setText('queue_count', String(data.count ?? data.events.length));
             setText('threat_title', data.title);
-            setText('threat_message', data.message);
-            byId('threat_event_details').hidden = false;
+            // 原始事件文本:保留后端给的完整消息(含来源/目标/进程行),
+            // 它是排查/反馈时的原始依据;默认收起,避免与上方结构化字段重复刷屏。
+            const rawText = normalizeEventText(String(data.message || ''));
+
+            setText('threat_message', rawText);
+            byId('threat_event_details').hidden = !rawText;
+            // 不要每次刷新都强制收起:轮询刷新一秒一次,用户刚点开就会被下一帧合上。
+            // 展开状态由 eventDetailsOpen 记住,只在新告警到来时重置。
+            byId('threat_event_details').open = eventDetailsOpen && !byId('threat_event_details').hidden;
             const repeatHint = byId('threat_repeat_hint');
             if (repeatHint) {
                 if (data.repeat_hint) {
@@ -269,11 +322,26 @@ document.addEventListener('DOMContentLoaded', () => {
             if (procLine) {
                 const proc = data.process;
                 if (proc && proc.name) {
-                    const label = data.process_label || 'Process';
+                    // 后端会按语言给 process_label;缺失时宁可不带前缀,也不硬编码英文
+                    const label = data.process_label || '';
                     // agent 是产品名(专有名词,不做翻译);✓=二进制签名已验证,无标记=仅名字匹配
-                    procLine.textContent = data.agent
-                        ? `${label}: ${proc.name} · ${data.agent}${data.agent_verified ? ' ✓' : ''}`
-                        : `${label}: ${proc.name}`;
+                    // 拆成"标签 + 值"两个节点:标签列与文件/SHA-256 对齐,值可单独省略
+                    procLine.textContent = '';
+                    const procLabel = document.createElement('span');
+                    procLabel.textContent = label;
+                    const procValue = document.createElement('span');
+                    procValue.className = 'file-process-value';
+                    procValue.textContent = data.agent
+                        ? `${proc.name} · ${data.agent}${data.agent_verified ? ' ✓' : ''}`
+                        : proc.name;
+                    procValue.title = proc.path || proc.name || '';
+                    // 没有标签的进程名会读成上一行的续行,宁可不显示这一行
+                    if (!label) {
+                        procLine.classList.add('hidden');
+                        procLine.textContent = '';
+                    } else {
+                        procLine.append(procLabel, procValue);
+                    }
                     procLine.title = proc.path || '';
                     procLine.classList.remove('hidden');
                 } else {
@@ -281,7 +349,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
             const localized = texts[data.language] || texts.english_switch;
-            let status = data.decision_error ? localized[5] : (data.remaining === null ? data.waiting : data.countdown);
+            // 倒计时显示在"将被自动执行"的那个按钮上(只显示数字),状态行只说等待/出错
+            const autoAction = data.auto_action === 'ai' ? null : 'block';
+            const countdownLabel = data.remaining === null ? '' : String(data.remaining);
+
+            // 默认动作是「本次阻止」:倒计时数字挂在它上面
+            byId('threat_block_once').textContent = countdownLabel && autoAction === 'block'
+                ? `${data.block_once || data.block} ${countdownLabel}`
+                : (data.block_once || data.block);
+
+            byId('threat_block_once').setAttribute('aria-label', data.block_once || data.block);
+
+            // 「拦截」不带数字,文案固定
+            byId('threat_block').textContent = data.block;
+
+            let status = data.decision_error
+                ? localized[5]
+                : (data.remaining === null ? data.waiting : message(data.language, 'waiting_countdown'));
             if (data.duplicates > 1) status += /^zh/.test(document.documentElement.lang)
                 ? ` 此决定同时处理 ${data.duplicates} 个完全相同的重复告警。`
                 : ` This decision covers ${data.duplicates} identical duplicate alerts.`;
@@ -289,13 +373,20 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (decisionTimeoutId === data.id) status = decisionText('timeout');
             setText('threat_status', status);
             setText('threat_permanent', localized[0]);
-            setText('threat_repeat_text', localized[1]);
+            setText('threat_repeat_text', repeatShort[data.language] || repeatShort.english_switch);
+
+            // 完整规则(阶梯有效期/上限/默认关闭)放在悬停提示里,不再挤在按钮旁
+            byId('threat_repeat_text').title = localized[1];
             setText('threat_confirmation_text', `${localized[2]}\n${data.identity_summary || ''}`);
             setText('threat_confirm', localized[3]);
             setText('threat_cancel', localized[4]);
             allow.textContent = data.allow;
-            block.textContent = data.block;
-            allow.disabled = block.disabled = busy || !!data.resolving;
+            // 拦截按钮的文案可能带倒计时数字,已在上面按 remaining 写入,这里不再覆盖
+            allow.disabled = blockOnce.disabled = busy || !!data.resolving;
+
+            // 「拦截」要写入重复规则,没有可锚定的文件身份时只能「本次阻止」
+            block.disabled = busy || !!data.resolving || !data.can_remember;
+            block.title = data.can_remember ? '' : (localized[6] || '');
             permanent.disabled = repeat.disabled = busy || !!data.resolving || !data.can_remember;
             permanent.title = data.can_remember ? localized[2] : localized[6];
             if (!data.can_remember) repeat.checked = false;
@@ -329,10 +420,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 confirmationId = null;
                 byId('threat_confirmation').classList.add('hidden');
                 hideFpPanel();
-                byId('threat_event_details').open = false;
+                // 新告警默认展开「事件详情」:用户多半要看完整路径与哈希
+                eventDetailsOpen = true;
+                byId('threat_event_details').open = true;
                 document.querySelector('.threat-detail').scrollTop = 0;
                 byId('threat_message').scrollTop = 0;
-                block.focus({ preventScroll: true });
+                // 不给按钮默认焦点:焦点落在「拦截」上时按空格会直接触发拦截。
+                // 焦点交给消息区(可滚动、不可点击),键盘用户仍可 Tab 到按钮。
+                byId('threat_message').focus({ preventScroll: true });
             }
             if (!initialized) { await waitForBridge(api.ready()); initialized = true; }
         } catch (error) {
@@ -363,12 +458,20 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!disposed && action === actionRevision) { busy = false; await refresh(); }
         }
     };
-    const decide = choice => {
-        const remember = choice !== 'permanent' && repeat.checked;
+    // rememberOverride:true=记入重复规则(拦截),false=只处理这一次(本次阻止)
+    const decide = (choice, rememberOverride) => {
+        const remember = typeof rememberOverride === 'boolean'
+            ? rememberOverride
+            : choice !== 'permanent' && repeat.checked;
         return runAction(id => window.pywebview.api.decide(id, choice, remember));
     };
+    byId('threat_event_details')?.addEventListener('toggle', (event) => {
+        eventDetailsOpen = !!event.target.open;
+    });
+
     allow.addEventListener('click', () => decide('allow'));
-    block.addEventListener('click', () => decide('block'));
+    block.addEventListener('click', () => decide('block', true));      // 拦截:按重复规则记住
+    blockOnce.addEventListener('click', () => decide('block', false)); // 本次阻止:只处理这一次
     // 误报备注框右侧清空按钮:threat.html 不加载 main.js,需在此单独注入
     (() => {
         const note = byId('threat_fp_note');

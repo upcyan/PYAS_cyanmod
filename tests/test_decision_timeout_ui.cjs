@@ -33,7 +33,7 @@ const path = require('node:path');
                 data: { id: 'first', title: 'first', summary: 'fixture', message: 'fixture',
                     events: [{ id: 'file', title: '文件防护', count: 3, active: true }], count: 3,
                     can_remember: true, identity_summary: 'fixture identity', remaining: null,
-                    waiting: '等待您选择', allow: '本次允许', block: '拦截', countdown: '',
+                    waiting: '等待您选择', allow: '本次允许', block: '拦截', block_once: '本次阻止', countdown: '',
                     language: 'simplified_switch', theme: 'white_switch', resolving: false,
                     ai: { state: 'unavailable', label: 'AI 建议不可用', hint: '' }, evidence: {}, file: {}, process: {},
                     fp: { button: '误报处理', scope_this: '仅此检测', scope_file: '此文件', reason: '原因',
