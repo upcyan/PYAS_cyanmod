@@ -165,6 +165,41 @@ const ROOT = path.resolve(__dirname, '../Interface');
         assert.ok(before >= 1, '测试前应至少选中一行');
     }
 
+    // 6. 双击行 → 行内详情(完整路径不截断);Esc 关闭;再双击切换
+    await page.evaluate(() => {
+        // 前面的用例切过页面,这里先把隔离区重新显示出来,否则元素不可见
+        document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+        document.getElementById('quarantine_window').classList.add('active');
+    });
+
+    await page.evaluate(() => {
+        const ul = document.querySelector('#quarantine_window .manage-list');
+        ul.innerHTML = `<li class="manage-list-item"><input type="checkbox" value="C:////very////long////path.exe"
+            data-path="C:////very////long////path.exe"><div class="manage-list-item-content">
+            <div class="row-col" style="width: 300px" title="C:////very////long////path.exe">C:////very////long////path.exe</div>
+            <div class="row-col" title="12 KB">12 KB</div></div></li>`;
+    });
+    await page.waitForTimeout(80);
+
+    const row = page.locator('#quarantine_window .manage-list-item').first();
+    await row.dblclick();
+    await page.waitForTimeout(80);
+    assert.equal(await page.locator('#quarantine_window .row-detail').count(), 1, '双击应展开行内详情');
+
+    const detailText = await page.locator('#quarantine_window .row-detail').textContent();
+    assert.ok(detailText.includes('完整路径'), `详情里应有「完整路径」标签,实为 ${detailText}`);
+    assert.ok(detailText.includes('C:////very////long////path.exe'), '详情要显示未截断的完整路径');
+
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(60);
+    assert.equal(await page.locator('#quarantine_window .row-detail').count(), 0, 'Esc 应关闭详情');
+
+    await row.dblclick();
+    await page.waitForTimeout(60);
+    await row.dblclick();
+    await page.waitForTimeout(60);
+    assert.equal(await page.locator('#quarantine_window .row-detail').count(), 0, '再次双击同一行应收起');
+
     assert.deepEqual(errors, [], '不应有页面异常');
     console.log('List action bar: PASS (空闲/选中切换、摘要、取消选择同步表头、无页面动作时按钮常驻置灰)');
     await browser.close();

@@ -2556,6 +2556,60 @@ document.addEventListener('DOMContentLoaded', () => {
     // 首帧时桥可能还没注入,等 pywebviewready 再补一次
     probeSystemAnimation();
     window.addEventListener('pywebviewready', probeSystemAnimation);
+    // 行内详情:双击一行展开完整信息。
+    // 行的单击已经用于勾选,所以详情不能挂在 click 上;双击是空着的交互,
+    // 而且桌面应用里「双击看详情」不需要教。
+    const closeRowDetail = () => {
+        document.querySelectorAll('.manage-list .row-detail').forEach(el => el.remove());
+    };
+
+    document.addEventListener('dblclick', (event) => {
+        const row = event.target.closest?.('.manage-list-item');
+
+        if (!row || !row.querySelector('.manage-list-item-content')) return;
+
+        // 表头/空态等伪行没有 checkbox 与列内容,直接忽略
+        const checkbox = row.querySelector('input[type="checkbox"]');
+
+        if (!checkbox) return;
+
+        const alreadyOpen = row.nextElementSibling?.classList.contains('row-detail');
+
+        closeRowDetail();
+
+        if (alreadyOpen) return;
+
+        const list = row.closest('.manage-list');
+        const widget = list?.closest('.manage-widget');
+        const headers = [...(widget?.querySelectorAll('.manage-list-header .col-header .header-text') || [])]
+            .map(el => el.textContent.trim());
+        const cols = [...row.querySelectorAll('.row-col')];
+
+        const rows = cols.map((col, index) => {
+            const label = headers[index] || ('#' + (index + 1));
+            const value = col.getAttribute('title') || col.textContent.trim();
+            return `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`;
+        });
+
+        const path = checkbox.getAttribute('data-path') || '';
+
+        if (path) {
+            rows.push(`<dt>${escapeHtml(getMsg('row_detail_path'))}</dt>`
+                + `<dd class="row-detail-path">${escapeHtml(path)}</dd>`);
+        }
+
+        if (!rows.length) return;
+
+        const detail = document.createElement('li');
+        detail.className = 'row-detail';
+        detail.innerHTML = `<dl>${rows.join('')}</dl>`;
+        row.after(detail);
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeRowDetail();
+    });
+
     document.getElementById('minimize_button')?.addEventListener('click', () => {
         const bridge = window.pywebview?.api;
 

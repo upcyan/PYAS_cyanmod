@@ -1521,9 +1521,13 @@ body.resizing-active * {
     padding: var(--space-1) var(--space-2) var(--space-3);
 }
 
-.status-brand {
-    display: flex;
-    align-items: center;
+/* 复用 .page-head 的 flex/对齐语义,但首页这块是「仪表盘英雄区」而不是子页面标题行:
+   宽度要跟随内容(右边还有五盏灯)、不需要 52px 的最小高度、外边距由 .home-status-widget 给。
+   标题也保持 .state-title 的尺度 —— 压到 20px 就和下面的卡片标题拉不开层次了。 */
+.page-head.status-brand {
+    width: auto;
+    min-height: 0;
+    margin-bottom: 0;
     gap: var(--space-4);
     min-width: 0;
 }
@@ -2669,3 +2673,44 @@ body.resizing-active * {
 .resize-edge[data-dir="se"] { right: 0; bottom: 0; cursor: nwse-resize; }
 .resize-edge[data-dir="ne"] { top: 0; right: 0; cursor: nesw-resize; }
 .resize-edge[data-dir="sw"] { left: 0; bottom: 0; cursor: nesw-resize; }
+
+/* ============================================================
+   行内详情(双击行展开):列值按「标签 + 完整值」两列排布,
+   路径单独一行等宽字体并允许断行 —— 这里就是要能看全,不截断。
+   ============================================================ */
+/* 双击会顺手选中行内文字(截图里那片蓝色),行本身不需要被选中;
+   详情面板反过来要允许选中复制路径。 */
+.manage-list .manage-list-item { user-select: none; }
+
+.manage-list .row-detail {
+    padding: 10px var(--space-4) 12px;
+    background-color: var(--bg-hover);
+    border-bottom: 1px solid var(--border-color);
+    cursor: default;
+}
+
+.row-detail dl {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 4px var(--space-4);
+    margin: 0;
+}
+
+.row-detail dt {
+    color: var(--text-secondary);
+    font-size: var(--text-xs);
+    white-space: nowrap;
+}
+
+.row-detail dd {
+    margin: 0;
+    user-select: text;
+    color: var(--text-primary);
+    font-size: var(--text-sm);
+    word-break: break-all;
+}
+
+.row-detail .row-detail-path {
+    font-family: Consolas, "Cascadia Mono", monospace;
+    font-size: var(--text-xs);
+}
