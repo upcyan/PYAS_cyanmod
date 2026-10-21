@@ -130,17 +130,39 @@ english.InstallWebView2=Install Microsoft Edge WebView2 Runtime
 english.InstallVCRedist=Install Microsoft Visual C++ Runtime
 english.LegacyVersionDetected=An older version of PYAS was detected. Please uninstall it manually before installing.
 english.QuitFailed=PYAS or its driver could not be stopped safely. Restart Windows and run Setup again.
-english.PendingAlert=PYAS is waiting for you to answer a security alert. Resolve it in the PYAS window; Setup continues automatically once the alert is cleared.
-chinesesimplified.PendingAlert=PYAS 有未处理的拦截弹窗。请先在弹窗中做出选择，告警清除后安装会自动继续；取消则本次安装停止。
-chinesetraditional.PendingAlert=PYAS 有未處理的攔截視窗。請先在視窗中做出選擇，告警清除後安裝會自動繼續；取消則本次安裝停止。
-japanese.PendingAlert=PYAS に未処理の警告ウィンドウがあります。PYAS 側で選択してください。処理が終わるとインストールが自動的に続行します。
-korean.PendingAlert=PYAS에 처리되지 않은 경고 창이 있습니다. PYAS에서 선택해 주세요. 경고가 해제되면 설치가 자동으로 계속됩니다.
-french.PendingAlert=PYAS attend votre réponse à une alerte de sécurité. Traitez-la dans la fenêtre PYAS ; l'installation reprend automatiquement ensuite.
-spanish.PendingAlert=PYAS está esperando su respuesta a una alerta de seguridad. Resuélvala en la ventana de PYAS; la instalación continuará automáticamente.
-hindi.PendingAlert=PYAS एक सुरक्षा चेतावनी पर आपके उत्तर की प्रतीक्षा कर रहा है। कृपया PYAS विंडो में निर्णय लें; चेतावनी हटते ही इंस्टॉल अपने आप जारी रहेगा।
-arabic.PendingAlert=ينتظر PYAS ردك على تنبيه أمني. يرجى معالجته في نافذة PYAS؛ وستستأنف عملية التثبيت تلقائياً بعد ذلك.
-russian.PendingAlert=PYAS ожидает вашего решения по предупреждению безопасности. Обработайте его в окне PYAS — установка продолжится автоматически.
-slovenian.PendingAlert=PYAS čaka na vaš odgovor na varnostno opozorilo. Odločite v oknu PYAS; namestitev se bo nato nadaljevala samodejno.
+english.PendingAlertTitle=PYAS is waiting for your decision
+english.PendingAlertDesc=A PYAS security alert is still unresolved. Choose an action in that window; setup continues automatically.
+english.PendingAlertWait=%1 s remaining - you can also answer it in the PYAS window.
+chinesesimplified.PendingAlertTitle=PYAS 正在等待您处理拦截弹窗
+chinesesimplified.PendingAlertDesc=PYAS 有一条拦截告警还没有结果。请在那个窗口里做出选择；处理完成后安装会自动继续。
+chinesesimplified.PendingAlertWait=剩余 %1 秒；也可以直接去 PYAS 窗口里选择。
+chinesetraditional.PendingAlertTitle=PYAS 正在等待您處理攔截視窗
+chinesetraditional.PendingAlertDesc=PYAS 有一條攔截告警還沒有結果。請在那個視窗裡做出選擇；處理完成後安裝會自動繼續。
+chinesetraditional.PendingAlertWait=剩餘 %1 秒；也可以直接去 PYAS 視窗裡選擇。
+japanese.PendingAlertTitle=PYAS の警告処理を待っています
+japanese.PendingAlertDesc=未処理のセキュリティ警告があります。PYAS のウィンドウで選択してください。処理が終わるとインストールが自動的に続行します。
+japanese.PendingAlertWait=残り %1 秒。PYAS のウィンドウで直接選択することもできます。
+korean.PendingAlertTitle=PYAS가 경고 처리 결과를 기다리고 있습니다
+korean.PendingAlertDesc=처리되지 않은 보안 경고가 있습니다. PYAS 창에서 선택해 주세요. 처리가 끝나면 설치가 자동으로 계속됩니다.
+korean.PendingAlertWait=남은 시간 %1초. PYAS 창에서 직접 선택해도 됩니다.
+french.PendingAlertTitle=PYAS attend votre décision
+french.PendingAlertDesc=Une alerte de sécurité PYAS n'est pas résolue. Faites un choix dans cette fenêtre ; l'installation reprend ensuite automatiquement.
+french.PendingAlertWait=Il reste %1 s — vous pouvez aussi répondre dans la fenêtre PYAS.
+spanish.PendingAlertTitle=PYAS espera su decisión
+spanish.PendingAlertDesc=Hay una alerta de seguridad de PYAS sin resolver. Elija una acción en esa ventana; la instalación continuará automáticamente.
+spanish.PendingAlertWait=Quedan %1 s; también puede responderla en la ventana de PYAS.
+hindi.PendingAlertTitle=PYAS आपके निर्णय की प्रतीक्षा कर रहा है
+hindi.PendingAlertDesc=PYAS की एक सुरक्षा चेतावनी अभी अनसुलझी है। कृपया उस विंडो में चुनें; चेतावनी हटते ही इंस्टॉल अपने आप जारी रहेगा।
+hindi.PendingAlertWait=%1 सेकंड शेष; आप PYAS विंडो में सीधे भी चुन सकते हैं।
+arabic.PendingAlertTitle=PYAS ينتظر قرارك
+arabic.PendingAlertDesc=لا يزال هناك تنبيه أمني غير محسوم. اختر إجراءً في تلك النافذة؛ وستستأنف عملية التثبيت تلقائياً بعد ذلك.
+arabic.PendingAlertWait=بقي %1 ثانية — يمكنك أيضاً الرد من نافذة PYAS.
+russian.PendingAlertTitle=PYAS ждёт вашего решения
+russian.PendingAlertDesc=Одно предупреждение безопасности PYAS ещё не решено. Выберите действие в том окне — установка продолжится автоматически.
+russian.PendingAlertWait=Осталось %1 с — можно ответить и в окне PYAS.
+slovenian.PendingAlertTitle=PYAS čaka na vašo odločitev
+slovenian.PendingAlertDesc=Varnostno opozorilo PYAS še ni rešeno. Izberite dejanje v tistem oknu; namestitev se bo nato nadaljevala samodejno.
+slovenian.PendingAlertWait=Še %1 s — lahko odgovorite tudi v oknu PYAS.
 english.QuitRetry=PYAS could not be closed automatically (attempt %1 of 3). Right-click the PYAS tray icon and choose Exit, then click Retry.
 english.QuitRestart=PYAS is still running, so Setup cannot replace its files. Restart Windows and run Setup again.
 english.DependencyInstallFailed=Required Microsoft runtime installation failed. Setup cannot continue.
@@ -276,6 +298,13 @@ var
   DependencyRestartRequired: Boolean;
   DependenciesReady: Boolean;
   UpgradeMode: Boolean;
+  DeferredStopPending: Boolean;
+  DeferredStopPath: string;
+
+{ PrepareToInstall 在停旧实例之前就要用到这两个函数,先做前置声明 }
+function PendingAlertActive: Boolean; forward;
+function WaitForPendingAlertPage(TimeoutMs: Cardinal): Boolean; forward;
+function EnsureOldInstanceStopped(InstallPath: string): Boolean; forward;
 
 function FindWindow(lpClassName: LongWord; lpWindowName: string): HWND;
   external 'FindWindowW@user32.dll stdcall';
@@ -482,6 +511,20 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): string;
 begin
   DependenciesReady := False;
+
+  { 升级且启动时有未决告警:用向导内的倒计时页面等用户处理完,再停旧实例 }
+  if DeferredStopPending then
+  begin
+    DeferredStopPending := False;
+    WaitForPendingAlertPage(120000);
+
+    if not EnsureOldInstanceStopped(DeferredStopPath) then
+    begin
+      Result := CustomMessage('QuitFailed');
+      Exit;
+    end;
+  end;
+
   try
     Result := EnsureWebView2;
     if Result = '' then
@@ -557,23 +600,37 @@ begin
   Result := CheckForMutexes('PYAS.PendingAlert');
 end;
 
-function WaitForPendingAlert(TimeoutMs: Cardinal): Boolean;
+{ 等待页:向导内的进度页 + 倒计时文案。不用模态框,用户可以去点 PYAS 的弹窗。 }
+function WaitForPendingAlertPage(TimeoutMs: Cardinal): Boolean;
 var
-  Deadline: Cardinal;
+  Page: TOutputProgressWizardPage;
+  Deadline, Total, Elapsed, Remaining: Cardinal;
 begin
-  if not PendingAlertActive then
-  begin
-    Result := True;
-    Exit;
-  end;
-
-  Deadline := GetTickCount + TimeoutMs;
-  repeat
-    Sleep(500);
-  until (not PendingAlertActive) or (GetTickCount >= Deadline);
   Result := not PendingAlertActive;
-  if not Result then
-    Log('Pending alert still unresolved after waiting; falling back to the quit prompt');
+  if Result then
+    Exit;
+
+  Total := TimeoutMs div 1000;
+  Page := CreateOutputProgressPage(CustomMessage('PendingAlertTitle'), CustomMessage('PendingAlertDesc'));
+  Page.SetText(CustomMessage('PendingAlertDesc'), '');
+  Page.SetProgress(0, Total);
+  Page.Show;
+  try
+    Deadline := GetTickCount + TimeoutMs;
+    while PendingAlertActive and (GetTickCount < Deadline) do
+    begin
+      Elapsed := (TimeoutMs - (Deadline - GetTickCount)) div 1000;
+      Remaining := Total - Elapsed;
+      Page.SetText(FmtMessage(CustomMessage('PendingAlertWait'), [IntToStr(Remaining)]), '');
+      Page.SetProgress(Elapsed, Total);
+      Sleep(500);
+    end;
+    Result := not PendingAlertActive;
+    if not Result then
+      Log('Pending alert unresolved after the countdown; falling back to the quit prompt');
+  finally
+    Page.Hide;
+  end;
 end;
 
 function QuitOldInstance(InstallPath: string; TimeoutMs: Cardinal): Boolean;
@@ -610,15 +667,15 @@ function EnsureOldInstanceStopped(InstallPath: string): Boolean;
 var
   Attempt: Integer;
 begin
+  { 有未决告警时不在启动阶段停进程:向导还没出来,看不到倒计时,也无法兼顾弹窗。 }
+  { 这里只记下待办,真正的等待放到 PrepareToInstall 的进度页里。 }
   if PendingAlertActive then
   begin
-    Log('PYAS has a pending alert; asking the user to resolve it before shutdown');
-    if MsgBox(CustomMessage('PendingAlert'), mbInformation, MB_OKCANCEL) = IDCANCEL then
-    begin
-      Result := False;
-      Exit;
-    end;
-    WaitForPendingAlert(120000);
+    Log('PYAS has a pending alert; deferring shutdown to the wizard');
+    DeferredStopPending := True;
+    DeferredStopPath := InstallPath;
+    Result := True;
+    Exit;
   end;
 
   { 首次失败已经等过 15 秒;后面的重试用户多半已退出,不必再等那么久 }

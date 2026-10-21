@@ -43,9 +43,20 @@ class QuitFlowContractTests(unittest.TestCase):
         """托盘常驻时没有主窗口;只看窗口会误判为「已退出」。"""
         self.assertIn('ProcessImageRunning', ISS)
         self.assertIn('tasklist', ISS)
-        quit_body = ISS[ISS.index('function QuitOldInstance'):ISS.index('function EnsureOldInstanceStopped')]
+        # 顶部有前置声明,按「签名 + var」定位真正的定义,避免切到声明行
+        quit_body = ISS[ISS.index('function QuitOldInstance'):ISS.index(
+            'function EnsureOldInstanceStopped(InstallPath: string): Boolean;\nvar')]
         self.assertIn('ProcessImageRunning', quit_body)
         self.assertIn('WaitForProcessExit', quit_body)
+
+    def test_pending_alert_is_waited_out_before_shutdown(self):
+        """有未决告警时先等用户处理,不要直接杀进程 —— 那次拦截会没有结论。"""
+        self.assertIn('CheckForMutexes(\'PYAS.PendingAlert\')', ISS)
+        self.assertIn('CreateOutputProgressPage', ISS, '等待要显示在向导里,不是模态框')
+        self.assertIn('PendingAlertWait', ISS, '倒计时要作为界面文案出现')
+        body = ISS[ISS.index('function EnsureOldInstanceStopped(InstallPath: string): Boolean;\nvar'):
+                   ISS.index('function InitializeSetup')]
+        self.assertNotIn('WaitForPendingAlert', body, '初始化阶段没有向导,不能在这里等')
 
     def test_manual_exit_is_accepted_without_waiting_for_a_timeout(self):
         body = ISS[ISS.index('function EnsureOldInstanceStopped'):ISS.index('function InitializeSetup')]
