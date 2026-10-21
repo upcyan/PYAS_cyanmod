@@ -4,7 +4,10 @@ import threading
 import tempfile
 import unittest
 from unittest.mock import Mock
+from pathlib import Path
 from PYAS_Config import ConfigMixin
+from PYAS_Decisions import AlertPolicyMixin, alert_identity
+from PYAS_Dialog import _DecisionRequest
 from PYAS_Policy import PolicyStore, POLICY_KEYS
 from PYAS_PolicyAccess import PolicyAccessMixin
 from test_policy_store import Backend
@@ -31,6 +34,10 @@ class Owner(PolicyAccessMixin, ConfigMixin):
 class AccessBackend(Backend):
     policy_file = 'protected-policy-placeholder'
     legacy_file = 'missing-legacy-placeholder'
+
+class DecisionsOwner(Owner, AlertPolicyMixin):
+    """补上告警决策的批量写入能力,验证「一次授权写多条规则」。"""
+
 
 class PolicyAccessTests(unittest.TestCase):
     def setUp(self): self.backend = AccessBackend(); self.owner = Owner(self.backend)
@@ -174,5 +181,26 @@ class PolicyAccessTests(unittest.TestCase):
         self.assertIn('exited 49', result['detail'])
         self.assertEqual(self.owner.effects, [])
         self.assertFalse(self.owner.pyas_config['process_switch'])
+    def test_merged_permanent_allow_opens_one_authorization(self):
+        """文件 + 进程合并告警:一次 UAC,写两条规则。"""
+        owner = DecisionsOwner(self.backend)
+        self.assertTrue(owner.initialize_security_policy()['ok'])
+        owner.load_config()
+        self.backend.prompts = 0
+
+        directory = tempfile.mkdtemp()
+        self.addCleanup(lambda: None)
+        path = Path(directory) / 'merged.bin'
+        path.write_bytes(b'merged fixture')
+
+        rules = [alert_identity(action, str(path), None, {'rule': 'merged'})
+                 for action in ('File Block', 'Process Block')]
+        requests = [_DecisionRequest('english_switch', 't', 'm', None, rule=rule, category='file')
+                    for rule in rules]
+
+        self.assertTrue(owner._remember_alert_decisions(requests, 'permanent'))
+        self.assertEqual(self.backend.prompts, 1, '合并告警只应弹一次授权')
+        self.assertEqual(len(owner.pyas_config['alert_allow_rules']), 2, '两条规则都要落库')
+
 
 if __name__ == '__main__': unittest.main()

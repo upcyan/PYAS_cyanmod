@@ -399,6 +399,16 @@ class AlertPolicyMixin:
             self.write_log("INFO", "Config Update", detail=f"Release records cleared: {kind or 'all'}")
         return True
 
+    def _remember_alert_decisions(self, requests, choice, repeat=False):
+        """一次裁决覆盖多条规则(合并告警):逐条写,全部成功才算成功。"""
+        items = [item for item in requests if getattr(item, 'rule', None)]
+
+        if not items:
+            return False
+
+        results = [self._remember_alert_decision(item, choice, repeat) for item in items]
+        return all(results)
+
     def _remember_alert_decision(self, request, choice, repeat=False):
         rule = request.rule
         if not rule:

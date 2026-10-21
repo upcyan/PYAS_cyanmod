@@ -178,6 +178,20 @@ class PolicyAccessMixin:
         target = super().remove_popup_rules
         return self._policy_call({'block_list'}, lambda: target(identifiers), False, 'remove-popup-rule')
 
+    def _remember_alert_decisions(self, requests, choice, repeat=False):
+        """合并告警的一次裁决:永久允许只弹一次 UAC,里面把每条规则都写掉。"""
+        items = [item for item in requests if getattr(item, 'rule', None)]
+
+        if not items:
+            return False
+
+        if choice != 'permanent':
+            return super()._remember_alert_decisions(items, choice, repeat)
+
+        target = super()._remember_alert_decisions
+        return self._policy_call({'alert_allow_rules'}, lambda: target(items, choice, repeat),
+                                 False, 'permanent-allow')
+
     def _remember_suppression(self, request, reason, note, scope):
         target = super()._remember_suppression
         return self._policy_call({'suppress_rules'}, lambda: target(request, reason, note, scope), False, 'false-positive')

@@ -1523,22 +1523,14 @@ class _WebDecisionAPI:
             request.resolving = True
         try:
             if choice == 'permanent' or repeat:
-                if not session.owner._remember_alert_decision(request, choice, repeat):
+                # 合并告警一次裁决要写多条规则(文件 + 进程各一条)。
+                # 必须走批量接口:逐条调用会为每条规则各开一次授权,UAC 弹两次。
+                targets = [request, *[item for item in request.followers
+                                      if getattr(item, 'rule', None)]]
+
+                if not session.owner._remember_alert_decisions(targets, choice, repeat):
                     session.decision_error = True
                     return False
-
-                # 合并进来的同类告警各有自己的 action,必须逐条落规则:
-                # 只写主条目的话,另一类(如进程启动)下次还会再问一遍。
-                for follower in request.followers:
-                    if not getattr(follower, 'rule', None):
-                        continue
-
-                    try:
-                        if not session.owner._remember_alert_decision(follower, choice, repeat):
-                            logging.getLogger('PYAS.Dialog').warning(
-                                'merged alert rule not remembered: %s', follower.action)
-                    except Exception:
-                        log_exception('PYAS_Dialog.decide.follower_rule')
             with session.queue.condition:
                 if session.queue.active is not request or session.queue.closed:
                     return False
