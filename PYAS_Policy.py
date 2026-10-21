@@ -5,6 +5,7 @@ No UI or Windows imports: transactional behavior can be tested independently.
 import copy
 import hashlib
 import json
+import logging
 import math
 import os
 import threading
@@ -239,9 +240,18 @@ class PolicyStore:
         if not lease:
             # Ordinary writes cannot change authority, including unknown keys.
             unknown = set(config) - POLICY_KEYS - USER_KEYS - {'version'}
-            if unknown or proposed != policy_values(self.values):
-                self.status['error'] = 'Security policy changes require administrator authorization'
+            current = policy_values(self.values)
+            changed = sorted(key for key, value in proposed.items() if current.get(key) != value)
+
+            if unknown or changed:
+                # 拒绝写入是必须的,但**不能**把整块安全面板打成错误态:
+                # 这类调用多来自后台(命中计数、白名单元数据回填、AI 用量),
+                # 它们本来就不该弹授权窗;把它记进日志,面板状态交给真正的授权流程维护。
+                logging.getLogger('PYAS.Policy').warning(
+                    'policy write ignored without authorization: keys=%s unknown=%s',
+                    changed, sorted(unknown))
                 return False
+
             return True
         updates = {key: proposed[key] for key in lease.scope if key in proposed}
         expected = policy_values(self.values)

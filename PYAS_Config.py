@@ -83,7 +83,10 @@ class ConfigMixin:
                             item["is_dir"] = os.path.isdir(item_path)
                             whitelist_metadata_updated = True
 
-                    if whitelist_metadata_updated:
+                    # 启动时回填 is_dir 属于派生信息,不是管理员的授权变更。
+                    # 受策略约束时不能偷偷落盘(那是没有租约的策略写入,会被拒绝),
+                    # 每次启动重新算一遍即可,代价是几次 stat。
+                    if whitelist_metadata_updated and not getattr(self, '_policy_required', False):
                         self.save_config()
                 except Exception as e:
                     log_exception("PYAS_Config.ConfigMixin.load_config:40")

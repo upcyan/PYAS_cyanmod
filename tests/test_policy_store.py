@@ -79,6 +79,9 @@ class PolicyStoreTests(unittest.TestCase):
         self.initialize()
         self.assertFalse(self.store.save({**self.config, 'process_switch': True}))
         self.assertFalse(self.store.save({**self.config, 'new_privileged_flag': True}))
+        # 拒绝写入即可,但状态不能被这类后台写入打成错误:
+        # 面板会把 status.error 直接显给用户,一句「需要管理员授权」会把整块设置变成红条
+        self.assertEqual(self.store.status.get('error'), '')
     def test_conflict_is_not_retried_or_overwritten(self):
         self.initialize(); lease = self.store.begin({'process_switch'})
         self.backend.document['_revision'] = 'different'
