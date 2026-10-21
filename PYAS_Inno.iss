@@ -130,6 +130,17 @@ english.InstallWebView2=Install Microsoft Edge WebView2 Runtime
 english.InstallVCRedist=Install Microsoft Visual C++ Runtime
 english.LegacyVersionDetected=An older version of PYAS was detected. Please uninstall it manually before installing.
 english.QuitFailed=PYAS or its driver could not be stopped safely. Restart Windows and run Setup again.
+english.PendingAlert=PYAS is waiting for you to answer a security alert. Resolve it in the PYAS window; Setup continues automatically once the alert is cleared.
+chinesesimplified.PendingAlert=PYAS 有未处理的拦截弹窗。请先在弹窗中做出选择，告警清除后安装会自动继续；取消则本次安装停止。
+chinesetraditional.PendingAlert=PYAS 有未處理的攔截視窗。請先在視窗中做出選擇，告警清除後安裝會自動繼續；取消則本次安裝停止。
+japanese.PendingAlert=PYAS に未処理の警告ウィンドウがあります。PYAS 側で選択してください。処理が終わるとインストールが自動的に続行します。
+korean.PendingAlert=PYAS에 처리되지 않은 경고 창이 있습니다. PYAS에서 선택해 주세요. 경고가 해제되면 설치가 자동으로 계속됩니다.
+french.PendingAlert=PYAS attend votre réponse à une alerte de sécurité. Traitez-la dans la fenêtre PYAS ; l'installation reprend automatiquement ensuite.
+spanish.PendingAlert=PYAS está esperando su respuesta a una alerta de seguridad. Resuélvala en la ventana de PYAS; la instalación continuará automáticamente.
+hindi.PendingAlert=PYAS एक सुरक्षा चेतावनी पर आपके उत्तर की प्रतीक्षा कर रहा है। कृपया PYAS विंडो में निर्णय लें; चेतावनी हटते ही इंस्टॉल अपने आप जारी रहेगा।
+arabic.PendingAlert=ينتظر PYAS ردك على تنبيه أمني. يرجى معالجته في نافذة PYAS؛ وستستأنف عملية التثبيت تلقائياً بعد ذلك.
+russian.PendingAlert=PYAS ожидает вашего решения по предупреждению безопасности. Обработайте его в окне PYAS — установка продолжится автоматически.
+slovenian.PendingAlert=PYAS čaka na vaš odgovor na varnostno opozorilo. Odločite v oknu PYAS; namestitev se bo nato nadaljevala samodejno.
 english.QuitRetry=PYAS could not be closed automatically (attempt %1 of 3). Right-click the PYAS tray icon and choose Exit, then click Retry.
 english.QuitRestart=PYAS is still running, so Setup cannot replace its files. Restart Windows and run Setup again.
 english.DependencyInstallFailed=Required Microsoft runtime installation failed. Setup cannot continue.
@@ -539,6 +550,32 @@ begin
   Result := False;
 end;
 
+{ PYAS 有未处理告警时会持有同名互斥体;等它消失再动手,避免安装器在用户还没决定时 }
+{ 就把进程杀掉 —— 那条告警会以「被中断」收场,用户也看不到自己的选择被如何处理。 }
+function PendingAlertActive: Boolean;
+begin
+  Result := CheckForMutexes('PYAS.PendingAlert');
+end;
+
+function WaitForPendingAlert(TimeoutMs: Cardinal): Boolean;
+var
+  Deadline: Cardinal;
+begin
+  if not PendingAlertActive then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  Deadline := GetTickCount + TimeoutMs;
+  repeat
+    Sleep(500);
+  until (not PendingAlertActive) or (GetTickCount >= Deadline);
+  Result := not PendingAlertActive;
+  if not Result then
+    Log('Pending alert still unresolved after waiting; falling back to the quit prompt');
+end;
+
 function QuitOldInstance(InstallPath: string; TimeoutMs: Cardinal): Boolean;
 var
   ResultCode: Integer;
@@ -573,6 +610,17 @@ function EnsureOldInstanceStopped(InstallPath: string): Boolean;
 var
   Attempt: Integer;
 begin
+  if PendingAlertActive then
+  begin
+    Log('PYAS has a pending alert; asking the user to resolve it before shutdown');
+    if MsgBox(CustomMessage('PendingAlert'), mbInformation, MB_OKCANCEL) = IDCANCEL then
+    begin
+      Result := False;
+      Exit;
+    end;
+    WaitForPendingAlert(120000);
+  end;
+
   { 首次失败已经等过 15 秒;后面的重试用户多半已退出,不必再等那么久 }
   Result := QuitOldInstance(InstallPath, 15000);
   if Result then Exit;

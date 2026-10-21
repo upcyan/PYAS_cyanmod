@@ -808,6 +808,42 @@ class _DecisionRequest:
     agent_verified: bool = False
 
 
+# 有未处理告警时持有一个具名互斥体,安装器用 CheckForMutexes 就能知道「现在别杀进程」。
+# 用 Local 命名空间(无前缀):安装器与本程序在同一会话,不需要 Global 权限。
+PENDING_ALERT_MUTEX = "PYAS.PendingAlert"
+
+
+class _PendingAlertMarker:
+    """把「有告警等待处理」暴露给外部(安装器/脚本),进程崩溃时由系统自动释放。"""
+
+    def __init__(self, name=PENDING_ALERT_MUTEX):
+        self.name = name
+        self.handle = None
+        self.lock = threading.Lock()
+
+    def set(self, active):
+        with self.lock:
+            if active and not self.handle:
+                try:
+                    import ctypes, sys
+                    if sys.platform != 'win32':
+                        return
+                    self.handle = ctypes.windll.kernel32.CreateMutexW(None, False, self.name)
+                except Exception:
+                    self.handle = None
+            elif not active and self.handle:
+                try:
+                    import ctypes
+                    ctypes.windll.kernel32.CloseHandle(self.handle)
+                except Exception:
+                    pass
+
+                self.handle = None
+
+
+pending_alert_marker = _PendingAlertMarker()
+
+
 class _ThreatPromptQueue:
     """One UI worker per application; FIFO decisions never expire while queued."""
 
@@ -853,6 +889,8 @@ class _ThreatPromptQueue:
                 self.pending.append(request)
                 new_request = True
                 promote = self.worker is not None and self.active is None
+            pending_alert_marker.set(bool(self.active or self.pending))
+
             if self.worker is None:
                 self.worker = threading.Thread(target=self._run, daemon=True, name="PYAS.ThreatQueue")
                 self.worker.start()
@@ -946,6 +984,7 @@ class _ThreatPromptQueue:
                 item.choice = choice
                 item.done.set()
             self.active = None
+            pending_alert_marker.set(bool(self.pending))
             self.condition.notify_all()
         # No caller may wrap complete() in an outer queue lock: abort can block.
         for item in completed:
@@ -1011,6 +1050,7 @@ class _ThreatPromptQueue:
 
         with self.condition:
             self.closed = True
+            pending_alert_marker.set(False)
 
             for request in self.pending:
                 request.done.set()
