@@ -242,17 +242,20 @@
             </div>
             <!-- 重复提示放在页脚(固定区):内容再长也不会滚走或被遮挡 -->
             <p id="threat_repeat_hint" class="threat-repeat-hint hidden" role="note"></p>
-            <div class="threat-meta">
-                <label class="threat-repeat"><input id="threat_repeat" type="checkbox"><span id="threat_repeat_text"></span></label>
-                <button id="threat_fp" class="fp-link" type="button" hidden></button>
+            <!-- 决策行:左边三档「记住多久」,右边两个动作。
+                 动作文案随档位变化(永久允许 / 临时允许(60 秒) / 本次允许)。 -->
+            <div class="threat-decide">
+                <div class="decide-modes" role="radiogroup" aria-label="Remember">
+                    <label class="decide-mode"><input type="radio" name="decision_mode" value="permanent"><span id="mode_permanent_text"></span></label>
+                    <label class="decide-mode"><input type="radio" name="decision_mode" value="temp"><span id="mode_temp_text"></span></label>
+                    <label class="decide-mode"><input type="radio" name="decision_mode" value="once" checked><span id="mode_once_text"></span></label>
+                </div>
+                <div class="decide-actions">
+                    <button id="threat_allow" class="action-btn modern-btn allow-btn" type="button" disabled>Allow</button>
+                    <button id="threat_block" class="action-btn modern-btn block-btn" type="button" disabled>Block</button>
+                </div>
             </div>
-            <div class="threat-actions">
-                <button id="threat_permanent" class="action-btn modern-btn" type="button" disabled>Always allow</button>
-                <button id="threat_allow" class="action-btn modern-btn" type="button" disabled>Allow this time</button>
-                <!-- 拦截=按重复规则记住;本次阻止=只处理这一次(默认动作,在默认倒计时里执行) -->
-                <button id="threat_block" class="action-btn modern-btn" type="button" disabled>Block</button>
-                <button id="threat_block_once" class="action-btn modern-btn primary-btn" type="button" disabled>Block once</button>
-            </div>
+            <button id="threat_fp" class="fp-link" type="button" hidden></button>
         </footer>
     </div>
 </body>

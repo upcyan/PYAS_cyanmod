@@ -102,19 +102,17 @@ const assert = require('node:assert/strict');
                     const s = getComputedStyle(document.getElementById(id));
                     return { bg: s.backgroundColor, border: s.borderTopColor };
                 };
-                return { block: pick('threat_block'), blockOnce: pick('threat_block_once'),
-                    allow: pick('threat_allow'), permanent: pick('threat_permanent') };
+                return { block: pick('threat_block'), allow: pick('threat_allow') };
             });
 
-            assert.equal(state.blockOnce.bg, resolved.danger, '本次阻止(默认动作)应是危险色实心');
-            assert.notEqual(state.block.bg, resolved.danger, '拦截应降一档,不再是实心');
-            assert.equal(state.allow.bg, resolved.accent, '本次允许应是主色实心');
-            assert.equal(state.permanent.bg, resolved.panel, '永久允许应是白底描边,不是实心');
-            assert.notEqual(state.permanent.bg, state.permanent.border, '永久允许靠描边区分,底色与描边不应相同');
+            assert.equal(state.block.bg, resolved.danger, '拦截应是危险色实心');
+            assert.equal(state.allow.bg, resolved.panel, '允许应是白底描边,不是实心');
+            assert.notEqual(state.allow.bg, state.allow.border, '允许靠描边区分,底色与描边不应相同');
 
             // 永久允许仍要二次确认(这条不变)
             const before = await page.evaluate(() => window.fixture.decisions.length);
-            await page.locator('#threat_permanent').click();
+            await page.locator('input[name="decision_mode"][value="permanent"]').check();
+            await page.locator('#threat_allow').click();
             await page.locator('#threat_cancel').waitFor({ state: 'visible' });
             assert.equal(await page.evaluate(() => window.fixture.decisions.length), before,
                 '点「永久允许」必须先经过确认,不能直接放行');
@@ -261,7 +259,8 @@ const assert = require('node:assert/strict');
             assert.deepEqual(await page.evaluate(() => window.fixture.decisions), [{ id: 'r3', choice: 'block' }]);
         });
         await check('empty queue clears facts, confirmation and pending actions', async () => {
-            await page.locator('#threat_permanent').click();
+            await page.locator('input[name="decision_mode"][value="permanent"]').check();
+            await page.locator('#threat_allow').click();
             await page.evaluate(() => { window.fixture.blank = true; });
             await page.waitForFunction(() => document.getElementById('queue_count').textContent === '0');
             await waitStopped();

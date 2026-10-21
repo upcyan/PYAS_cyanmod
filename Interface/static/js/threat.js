@@ -3,16 +3,36 @@ document.addEventListener('DOMContentLoaded', () => {
     const byId = id => document.getElementById(id);
     const allow = byId('threat_allow');
     const block = byId('threat_block');
-    const blockOnce = byId('threat_block_once');
-    const permanent = byId('threat_permanent');
     const glow = byId('ai_window_glow');
     const fpButton = byId('threat_fp');
     const fpPanel = byId('threat_fp_panel');
-    const repeat = byId('threat_repeat');
-    const allButtons = [allow, block, blockOnce, permanent, fpButton];
+    // 三档:永久记住 / 临时记住 / 仅本次。默认「仅本次」——
+    // 记不住的决定不该是默认选项。
+    const modeInputs = [...document.querySelectorAll('input[name="decision_mode"]')];
+    const modeLabels = {
+        permanent: byId('mode_permanent_text'),
+        temp: byId('mode_temp_text'),
+        once: byId('mode_once_text'),
+    };
+    const currentMode = () => document.querySelector('input[name="decision_mode"]:checked')?.value || 'once';
+    const modeAllowed = { permanent: false, temp: false, once: true };
+    let lastLabels = null;
+
+    // 档位切换只改两个字:允许/拦截 的文案。决策仍然在点按钮时发生。
+    const refreshLabels = () => {
+        if (!lastLabels) return;
+
+        const mode = currentMode();
+        const decide = lastLabels.decide || {};
+        allow.textContent = (decide.allow || {})[mode] || lastLabels.allow || allow.textContent;
+        block.textContent = (decide.block || {})[mode] || lastLabels.block || block.textContent;
+
+        if (lastLabels.countdown) block.textContent = `${block.textContent} ${lastLabels.countdown}`;
+    };
+    const allButtons = [allow, block, fpButton];
     const disable = () => {
         allButtons.forEach(button => { button.disabled = true; });
-        repeat.disabled = true;
+        modeInputs.forEach(input => { input.disabled = true; });
         glow.classList.remove('is-analyzing');
     };
     const BRIDGE_TIMEOUT_MS = 5000;
@@ -204,20 +224,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fpPanel.classList.remove('hidden');
         byId('threat_fp_cancel').focus({ preventScroll: true });
     };
-    // 复选框只放短标签,阶梯规则放 title 提示(原文太长,挤得按钮变形)
-    const repeatShort = {
-        simplified_switch: '记住本次决定',
-        traditional_switch: '記住本次決定',
-        english_switch: 'Remember this decision',
-        japanese_switch: 'この決定を記憶',
-        korean_switch: '이 결정 기억',
-        french_switch: 'Mémoriser cette décision',
-        spanish_switch: 'Recordar esta decisión',
-        hindi_switch: 'यह निर्णय याद रखें',
-        arabic_switch: 'تذكّر هذا القرار',
-        russian_switch: 'Запомнить решение',
-        slovenian_switch: 'Zapomni si to odločitev',
-    };
+    // 决策档位文案统一由后端下发(带实际时长),这里不再维护副本
     const texts = {
         simplified_switch: ['永久允许', '同一项重复确认会自动延长记住的时间：首次 60 秒；确认满 5 次后 5 分钟；满 15 次后 15 分钟；满 40 次后 1 小时（最长）。最多记录 100 项，默认关闭。', '仅记住此防护、此完整路径、此 SHA-256 文件内容、此检测结果和此目标。文件变化后重新询问；不会放行目录或关闭扫描。可在设置中清除。确认后会请求管理员权限（UAC），请在弹窗中点「是」。确认永久允许？', '确认永久允许', '取消', '文件身份无法验证、已经变化或保存失败；未新增允许规则，请重新处理。', '无法确认文件身份或属于内存告警，不能记住决定。'],
         traditional_switch: ['永久允許', '同一項重複確認會自動延長記住的時間：首次 60 秒；確認滿 5 次後 5 分鐘；滿 15 次後 15 分鐘；滿 40 次後 1 小時（最長）。最多記錄 100 項，預設關閉。', '僅記住此防護、此完整路徑、此 SHA-256 檔案內容、此偵測結果與此目標。檔案變更後重新詢問；不放行目錄或關閉掃描。可在設定中清除。確認後會請求管理員權限（UAC），請在彈窗中點「是」。確認永久允許？', '確認永久允許', '取消', '無法驗證檔案身分、檔案已變更或儲存失敗；未新增允許規則。', '無法確認檔案身分或屬於記憶體告警，不能記住決定。'],
@@ -253,7 +260,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const clearActive = (failed = false) => {
         currentId = null; latestIdentity = ''; confirmationId = null; fpTexts = null; queueKey = '';
         disable(); hideFpPanel(); renderAiResult(null, latestLanguage); renderEvidence(null, latestLanguage);
-        repeat.checked = false;
+        document.querySelector('input[name="decision_mode"][value="once"]').checked = true;
         byId('threat_confirmation').classList.add('hidden');
         fpButton.hidden = true;
         byId('threat_process').classList.add('hidden');
@@ -370,12 +377,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const autoAction = data.auto_action === 'ai' ? null : 'block';
             const countdownLabel = data.remaining === null ? '' : String(data.remaining);
 
-            // 默认动作是「本次阻止」:倒计时数字挂在它上面
-            byId('threat_block_once').textContent = countdownLabel && autoAction === 'block'
-                ? `${data.block_once || data.block} ${countdownLabel}`
-                : (data.block_once || data.block);
-
-            byId('threat_block_once').setAttribute('aria-label', data.block_once || data.block);
 
             // 「拦截」不带数字,文案固定
             byId('threat_block').textContent = data.block;
@@ -389,24 +390,36 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.resolving) status = decisionText('pending');
             else if (decisionTimeoutId === data.id) status = decisionText('timeout');
             setText('threat_status', status);
-            setText('threat_permanent', localized[0]);
-            setText('threat_repeat_text', repeatShort[data.language] || repeatShort.english_switch);
-
-            // 完整规则(阶梯有效期/上限/默认关闭)放在悬停提示里,不再挤在按钮旁
-            byId('threat_repeat_text').title = localized[1];
             setText('threat_confirmation_text', `${localized[2]}\n${data.identity_summary || ''}`);
             setText('threat_confirm', localized[3]);
             setText('threat_cancel', localized[4]);
-            allow.textContent = data.allow;
-            // 拦截按钮的文案可能带倒计时数字,已在上面按 remaining 写入,这里不再覆盖
-            allow.disabled = blockOnce.disabled = busy || !!data.resolving;
 
-            // 「拦截」要写入重复规则,没有可锚定的文件身份时只能「本次阻止」
-            block.disabled = busy || !!data.resolving || !data.can_remember;
-            block.title = data.can_remember ? '' : (localized[6] || '');
-            permanent.disabled = repeat.disabled = busy || !!data.resolving || !data.can_remember;
-            permanent.title = data.can_remember ? localized[2] : localized[6];
-            if (!data.can_remember) repeat.checked = false;
+            // 三档标签与按钮文案全部来自后端(已本地化),临时档带实际时长
+            const decide = data.decide || {};
+            const modeText = Object.fromEntries((decide.modes || []).map(item => [item[0], item[1]]));
+            setText('mode_permanent_text', modeText.permanent || '');
+            setText('mode_temp_text', modeText.temp || '');
+            setText('mode_once_text', modeText.once || '');
+
+            // 没有可锚定的文件身份时,只有「仅本次」可用
+            const canRemember = !!data.can_remember;
+            modeInputs.forEach(input => {
+                const allowed = input.value === 'once' || canRemember;
+                input.disabled = busy || !!data.resolving || !allowed;
+
+                if (!allowed && input.checked) { document.querySelector('input[name="decision_mode"][value="once"]').checked = true; }
+            });
+
+            lastLabels = {
+                decide,
+                allow: data.allow,
+                block: data.block,
+                countdown: countdownLabel && autoAction === 'block' ? countdownLabel : '',
+            };
+            refreshLabels();
+
+            allow.disabled = busy || !!data.resolving;
+            block.disabled = busy || !!data.resolving;
             renderEvidence(data, data.language);
             renderAiResult(data.ai, data.language, !!data.resolving);
             const fp = data.fp;
@@ -433,7 +446,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }));
             }
             if (changed) {
-                repeat.checked = false;
+                document.querySelector('input[name="decision_mode"][value="once"]').checked = true;
                 confirmationId = null;
                 byId('threat_confirmation').classList.add('hidden');
                 hideFpPanel();
@@ -475,20 +488,36 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!disposed && action === actionRevision) { busy = false; await refresh(); }
         }
     };
-    // rememberOverride:true=记入重复规则(拦截),false=只处理这一次(本次阻止)
+    // remember 由选中档位决定:永久/临时都要求记住,仅本次不记。
+    // 永久 + 允许 走 'permanent'(需要确认 + 提权);其余按 allow/block 提交。
     const decide = (choice, rememberOverride) => {
         const remember = typeof rememberOverride === 'boolean'
             ? rememberOverride
-            : choice !== 'permanent' && repeat.checked;
+            : currentMode() !== 'once';
         return runAction(id => window.pywebview.api.decide(id, choice, remember));
     };
     byId('threat_event_details')?.addEventListener('toggle', (event) => {
         eventDetailsOpen = !!event.target.open;
     });
 
-    allow.addEventListener('click', () => decide('allow'));
-    block.addEventListener('click', () => decide('block', true));      // 拦截:按重复规则记住
-    blockOnce.addEventListener('click', () => decide('block', false)); // 本次阻止:只处理这一次
+    allow.addEventListener('click', () => {
+        // 永久允许要写提权规则,先走一次确认(文案里已说明会弹 UAC)
+        if (currentMode() === 'permanent') {
+            confirmationId = currentId;
+            byId('threat_confirmation').classList.remove('hidden');
+            byId('threat_cancel').focus();
+            return;
+        }
+
+        decide('allow');
+    });
+    block.addEventListener('click', () => decide('block'));
+
+    // 切换档位只改按钮文案,不触发决策
+    modeInputs.forEach(input => input.addEventListener('change', () => {
+        if (busy) return;
+        refreshLabels();
+    }));
     // 误报备注框右侧清空按钮:threat.html 不加载 main.js,需在此单独注入
     (() => {
         const note = byId('threat_fp_note');
@@ -523,15 +552,11 @@ document.addEventListener('DOMContentLoaded', () => {
         hideFpPanel();
         await runAction(id => window.pywebview.api.report_false_positive(id, reason, note, scope));
     });
-    permanent.addEventListener('click', () => {
-        confirmationId = currentId;
-        byId('threat_confirmation').classList.remove('hidden');
-        byId('threat_cancel').focus();
-    });
+
     byId('threat_cancel').addEventListener('click', () => {
         confirmationId = null;
         byId('threat_confirmation').classList.add('hidden');
-        permanent.focus();
+        allow.focus();
     });
     byId('threat_confirm').addEventListener('click', () => {
         if (confirmationId === currentId) decide('permanent');

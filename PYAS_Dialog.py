@@ -1036,6 +1036,145 @@ def ai_snapshot_view(request):
     return {"state": "failed", "verdict": "", "label": label, "hint": loc_dialog_text(lang, "ai_failed_hint")}
 
 
+DIALOG_TEXTS.update({
+    # 决策方式:三选一,决定"记住多久"
+    "mode_permanent": {
+        "simplified_switch": "永久记住", "traditional_switch": "永久記住",
+        "english_switch": "Remember permanently", "japanese_switch": "永久に記憶",
+        "korean_switch": "영구 기억", "french_switch": "Mémoriser définitivement",
+        "spanish_switch": "Recordar siempre", "hindi_switch": "स्थायी रूप से याद रखें",
+        "arabic_switch": "تذكّر دائماً", "russian_switch": "Запомнить навсегда",
+        "slovenian_switch": "Zapomni si trajno",
+    },
+    "mode_temp": {
+        "simplified_switch": "临时记住", "traditional_switch": "臨時記住",
+        "english_switch": "Remember temporarily", "japanese_switch": "一時的に記憶",
+        "korean_switch": "임시 기억", "french_switch": "Mémoriser temporairement",
+        "spanish_switch": "Recordar temporalmente", "hindi_switch": "अस्थायी रूप से याद रखें",
+        "arabic_switch": "تذكّر مؤقتاً", "russian_switch": "Запомнить временно",
+        "slovenian_switch": "Zapomni si začasno",
+    },
+    "mode_once": {
+        "simplified_switch": "仅本次", "traditional_switch": "僅本次",
+        "english_switch": "This time only", "japanese_switch": "今回のみ",
+        "korean_switch": "이번만", "french_switch": "Cette fois seulement",
+        "spanish_switch": "Solo esta vez", "hindi_switch": "केवल इस बार",
+        "arabic_switch": "هذه المرة فقط", "russian_switch": "Только сейчас",
+        "slovenian_switch": "Samo tokrat",
+    },
+    "btn_permanent_allow": {
+        "simplified_switch": "永久允许", "traditional_switch": "永久允許",
+        "english_switch": "Allow permanently", "japanese_switch": "永久に許可",
+        "korean_switch": "영구 허용", "french_switch": "Autoriser définitivement",
+        "spanish_switch": "Permitir siempre", "hindi_switch": "स्थायी अनुमति",
+        "arabic_switch": "السماح دائماً", "russian_switch": "Разрешить навсегда",
+        "slovenian_switch": "Dovoli trajno",
+    },
+    "btn_permanent_block": {
+        "simplified_switch": "永久拦截", "traditional_switch": "永久攔截",
+        "english_switch": "Block permanently", "japanese_switch": "永久にブロック",
+        "korean_switch": "영구 차단", "french_switch": "Bloquer définitivement",
+        "spanish_switch": "Bloquear siempre", "hindi_switch": "स्थायी रूप से ब्लॉक",
+        "arabic_switch": "حظر دائم", "russian_switch": "Блокировать навсегда",
+        "slovenian_switch": "Blokiraj trajno",
+    },
+    # {0} = 已本地化的时长(如「60 秒」「5 分钟」)
+    "btn_temp_allow": {
+        "simplified_switch": "临时允许({0})", "traditional_switch": "臨時允許({0})",
+        "english_switch": "Allow temporarily ({0})", "japanese_switch": "一時許可({0})",
+        "korean_switch": "임시 허용({0})", "french_switch": "Autoriser temporairement ({0})",
+        "spanish_switch": "Permitir temporalmente ({0})", "hindi_switch": "अस्थायी अनुमति ({0})",
+        "arabic_switch": "سماح مؤقت ({0})", "russian_switch": "Разрешить временно ({0})",
+        "slovenian_switch": "Dovoli začasno ({0})",
+    },
+    "btn_temp_block": {
+        "simplified_switch": "临时拦截({0})", "traditional_switch": "臨時攔截({0})",
+        "english_switch": "Block temporarily ({0})", "japanese_switch": "一時ブロック({0})",
+        "korean_switch": "임시 차단({0})", "french_switch": "Bloquer temporairement ({0})",
+        "spanish_switch": "Bloquear temporalmente ({0})", "hindi_switch": "अस्थायी ब्लॉक ({0})",
+        "arabic_switch": "حظر مؤقت ({0})", "russian_switch": "Блокировать временно ({0})",
+        "slovenian_switch": "Blokiraj začasno ({0})",
+    },
+    "dur_seconds": {
+        "simplified_switch": "{0} 秒", "traditional_switch": "{0} 秒",
+        "english_switch": "{0} s", "japanese_switch": "{0} 秒",
+        "korean_switch": "{0}초", "french_switch": "{0} s",
+        "spanish_switch": "{0} s", "hindi_switch": "{0} सेकंड",
+        "arabic_switch": "{0} ثانية", "russian_switch": "{0} с",
+        "slovenian_switch": "{0} s",
+    },
+    "dur_minutes": {
+        "simplified_switch": "{0} 分钟", "traditional_switch": "{0} 分鐘",
+        "english_switch": "{0} min", "japanese_switch": "{0} 分",
+        "korean_switch": "{0}분", "french_switch": "{0} min",
+        "spanish_switch": "{0} min", "hindi_switch": "{0} मिनट",
+        "arabic_switch": "{0} دقيقة", "russian_switch": "{0} мин",
+        "slovenian_switch": "{0} min",
+    },
+    "dur_hour": {
+        "simplified_switch": "1 小时", "traditional_switch": "1 小時",
+        "english_switch": "1 hour", "japanese_switch": "1 時間",
+        "korean_switch": "1시간", "french_switch": "1 heure",
+        "spanish_switch": "1 hora", "hindi_switch": "1 घंटा",
+        "arabic_switch": "ساعة واحدة", "russian_switch": "1 час",
+        "slovenian_switch": "1 ura",
+    },
+})
+
+
+def _duration_text(lang, seconds):
+    """把秒数说成人话:60 → 「60 秒」,300 → 「5 分钟」,3600 → 「1 小时」。"""
+    seconds = int(seconds or 0)
+
+    if seconds >= 3600:
+        return loc_dialog_text(lang, "dur_hour")
+
+    if seconds >= 120 and seconds % 60 == 0:
+        return loc_dialog_text(lang, "dur_minutes").replace("{0}", str(seconds // 60))
+
+    return loc_dialog_text(lang, "dur_seconds").replace("{0}", str(seconds))
+
+
+def _remember_window_seconds(owner, request):
+    """本次「临时记住」的实际窗口:按该规则已消费次数落在哪一档。"""
+    from PYAS_Decisions import REPEAT_SECONDS, REPEAT_USES, _repeat_window
+
+    rule = request.rule or {}
+    recent = getattr(owner, "_recent_alert_decisions", None) or {}
+    item = recent.get(rule.get("key")) if isinstance(recent, dict) else None
+
+    if not isinstance(item, dict):
+        return REPEAT_SECONDS
+
+    used = REPEAT_USES - int(item.get("uses", REPEAT_USES))
+    return _repeat_window(max(0, used))
+
+
+def decide_view(request, owner, allow_text, block_once_text):
+    """三档决策方式的文案与「临时」的实际时长。"""
+    lang = request.lang
+    window = _duration_text(lang, _remember_window_seconds(owner, request))
+
+    return {
+        "window": window,
+        "modes": [
+            ["permanent", loc_dialog_text(lang, "mode_permanent")],
+            ["temp", loc_dialog_text(lang, "mode_temp")],
+            ["once", loc_dialog_text(lang, "mode_once")],
+        ],
+        "allow": {
+            "permanent": loc_dialog_text(lang, "btn_permanent_allow"),
+            "temp": loc_dialog_text(lang, "btn_temp_allow").replace("{0}", window),
+            "once": allow_text,
+        },
+        "block": {
+            "permanent": loc_dialog_text(lang, "btn_permanent_block"),
+            "temp": loc_dialog_text(lang, "btn_temp_block").replace("{0}", window),
+            "once": block_once_text,
+        },
+    }
+
+
 def fp_snapshot_view(request, signer_ok=None):
     """误报表单的本地化文案;无文件身份(内存告警)时返回 None,入口隐藏。"""
     if request.rule is None:
@@ -1144,6 +1283,11 @@ class _WebDecisionAPI:
                 "decision_error": getattr(session, 'decision_error', False),
                 "waiting": loc_dialog_text(request.lang, "waiting_decision"),
                 "allow": loc_dialog_text(request.lang, "btn_allow"),
+                "decide": decide_view(
+                    request, session.owner,
+                    loc_dialog_text(request.lang, "btn_allow"),
+                    loc_dialog_text(request.lang, "btn_block_once"),
+                ),
                 "block": loc_dialog_text(request.lang, "btn_block"),
                 "block_once": loc_dialog_text(request.lang, "btn_block_once"),
                 # 倒计时落在哪个按钮上:AI 自动执行时是 AI 建议的动作,否则一律自动拦截

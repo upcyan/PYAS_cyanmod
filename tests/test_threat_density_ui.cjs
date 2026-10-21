@@ -120,10 +120,8 @@ const buildSnapshot = (events, overrides) => Object.assign({
         page = await open(single);
         await page.click('#threat_fp');
         await page.waitForTimeout(200);
-        assert.equal(await page.locator('.threat-actions').isVisible(), false,
+        assert.equal(await page.locator('.threat-decide').isVisible(), false,
             '误报面板自带提交/取消,常规决策区应让位');
-        assert.equal(await page.locator('.threat-meta').isVisible(), false,
-            '误报面板打开时重复确认不适用,应一并收起');
         const submit = await page.locator('#threat_fp_submit').boundingBox();
         assert.ok(submit && submit.y + submit.height <= 600, '提交按钮必须留在视口内');
         const detailOverflow = await page.evaluate(() => {

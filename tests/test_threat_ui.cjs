@@ -51,6 +51,10 @@ const assert = require('node:assert/strict');
                         message: '检测到进程正连接已知恶意地址。拦截将终止该进程；本次允许将允许此次连接。\n\n来源：C:\\Users\\demo\\Downloads\\' + '长目录名称\\'.repeat(16) + 'example.exe\n目标：example.test:443\n进程：4321',
                         waiting: '等待您选择；关闭窗口仅收起，不执行操作。',
                         allow: '本次允许', block: '拦截', block_once: '本次阻止', countdown: '',
+                        decide: { window: '60 秒',
+                            modes: [['permanent', '永久记住'], ['temp', '临时记住'], ['once', '仅本次']],
+                            allow: { permanent: '永久允许', temp: '临时允许(60 秒)', once: '本次允许' },
+                            block: { permanent: '永久拦截', temp: '临时拦截(60 秒)', once: '拦截' } },
                     } : null;
                 },
                 decide: async (id, choice) => {
@@ -92,34 +96,48 @@ const assert = require('node:assert/strict');
         await page.setViewportSize({ width: 720, height: 520 });
         await page.evaluate(() => { window.fixture.theme = 'black_switch'; });
         await page.waitForFunction(() => getComputedStyle(document.documentElement).getPropertyValue('--bg-window').trim() === 'rgb(18, 18, 20)');
-        await page.waitForFunction(() => getComputedStyle(document.querySelector('.navigate-window')).backgroundColor === 'rgb(28, 28, 30)' && getComputedStyle(document.getElementById('threat_allow')).color === 'rgb(255, 255, 255)');
+        await page.waitForFunction(() => getComputedStyle(document.querySelector('.navigate-window')).backgroundColor === 'rgb(28, 28, 30)');
+        // 拦截按钮用主题危险色(深色模式下也是同一令牌),不写死十六进制
+        const blockTone = await page.evaluate(() => {
+            const probe = document.createElement('span');
+            document.body.appendChild(probe);
+            probe.style.backgroundColor = 'var(--color-danger-strong)';
+            const expected = getComputedStyle(probe).backgroundColor;
+            probe.remove();
+            return { expected, actual: getComputedStyle(document.getElementById('threat_block')).backgroundColor };
+        });
+        assert.equal(blockTone.actual, blockTone.expected, '拦截按钮应使用主题危险色');
         if (output) await page.screenshot({ path: path.join(output, 'threat-dark.png') });
         await page.locator('#threat_block').click();
         await page.waitForFunction(() => document.getElementById('threat_title').textContent === '文件防护');
         assert.deepEqual(await page.evaluate(() => window.fixture.decisions), [{ id: '1', choice: 'block' }]);
-        // 左侧一组:永久允许 + 本次允许;右侧一组:永久拦截 + 本次阻止
-        const permanentBox = await page.locator('#threat_permanent').boundingBox();
+        // 决策行:三档在左,允许/拦截在右,同一行
+        const modesBox = await page.locator('.decide-modes').boundingBox();
         const allowBox = await page.locator('#threat_allow').boundingBox();
         const blockBox = await page.locator('#threat_block').boundingBox();
-        const blockOnceBox = await page.locator('#threat_block_once').boundingBox();
-        assert(permanentBox.x + permanentBox.width + 40 >= allowBox.x,
-            '永久允许与本次允许应在同一组(left-aligned)');
-        assert(permanentBox.x < allowBox.x, '永久允许应在本次允许左侧');
-        assert(allowBox.x + allowBox.width + 40 < blockBox.x, '两组之间应有明显间隔');
-        assert(blockBox.x + blockBox.width + 40 >= blockOnceBox.x, '永久拦截与本次阻止应在同一组');
-        await page.locator('#threat_permanent').click();
+        assert(modesBox.x + modesBox.width < allowBox.x, '三档选项应在按钮左侧');
+        assert(allowBox.x < blockBox.x, '允许按钮在拦截按钮左侧');
+        assert(Math.abs(modesBox.y + modesBox.height / 2 - (allowBox.y + allowBox.height / 2)) < 12,
+            '选项与按钮应基本同一行');
+        assert.equal((await page.locator('#threat_allow').evaluate(el => el.textContent)).trim(), '本次允许',
+            '默认档位是仅本次');
+
+        // 切到永久:按钮文案跟着变,点允许要先确认
+        await page.locator('input[name="decision_mode"][value="permanent"]').check();
+        assert.equal((await page.locator('#threat_allow').evaluate(el => el.textContent)).trim(), '永久允许');
+        await page.locator('#threat_allow').click();
         assert.equal(await page.locator('#threat_confirmation').isVisible(), true);
         assert.equal(await page.evaluate(() => window.fixture.decisions.length), 1, 'permanent requires confirmation');
-        // 永久允许会走提权写规则,确认文案必须预告 UAC,否则用户不知道为什么弹管理员窗口
         const confirmText = await page.locator('#threat_confirmation_text').textContent();
         assert.ok(/UAC/.test(confirmText), `确认文案应预告 UAC 提权,实为: ${confirmText}`);
         await page.locator('#threat_cancel').click();
         assert.equal(await page.locator('#threat_confirmation').isVisible(), false);
-        await page.locator('#threat_permanent').click();
+        await page.locator('#threat_allow').click();
         await page.locator('#threat_confirm').click();
         await page.waitForFunction(() => window.fixture.decisions.length === 2);
         assert.deepEqual(await page.evaluate(() => window.fixture.decisions[1]), { id: '2', choice: 'permanent' });
-        assert.equal(await page.locator('#threat_repeat').isChecked(), false);
+        assert.equal(await page.locator('input[name="decision_mode"][value="once"]').isChecked(), true,
+            '新告警应回到默认档位(仅本次)');
         assert.deepEqual(errors, []);
         const main = await browser.newPage({ viewport: { width: 1024, height: 768 } });
         main.on('pageerror', error => errors.push(String(error)));
