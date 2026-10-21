@@ -31,6 +31,20 @@ def _identity_view(item):
     return {field: item.get(field) for field in PERMANENT_IDENTITY_FIELDS} if isinstance(item, dict) else None
 
 
+def _is_stale_source(item, rule):
+    """同一路径、但内容哈希已经变了 —— 这条规则永远不会再命中。
+
+    放行规则按 (action, source, target, sha256, detection) 整体匹配,
+    文件一改 sha256 就不一样了,旧条目留在表里只会占坑(MAX_RULES)和刷屏。"""
+    if not isinstance(item, dict):
+        return False
+
+    if os.path.normcase(str(item.get("source", ""))) != os.path.normcase(str(rule.get("source", ""))):
+        return False
+
+    return str(item.get("sha256", "")) != str(rule.get("sha256", ""))
+
+
 def _repeat_window(consumed):
     """按已消费次数查阶梯窗口:消费越多,窗口越长。"""
     for floor, seconds in REPEAT_TIERS:
@@ -393,10 +407,16 @@ class AlertPolicyMixin:
         fresh = self._make_alert_identity(rule['action'], rule['source'], rule['target'], json.loads(rule['detection']))
         if fresh != rule or request.done.is_set() or (request.deadline and request.deadline <= time.monotonic()):
             return False
+        stale = 0  # 本次清掉的「同路径旧哈希」条目数,仅用于日志
+
         with self._alert_policy_lock():
             if choice == 'permanent':
                 old = self.pyas_config.get('alert_allow_rules', [])
-                rules = list(old) if isinstance(old, list) else []
+                kept = list(old) if isinstance(old, list) else []
+                # 文件内容变过之后,同路径的旧规则再也匹配不上,顺手清掉:
+                # 否则放行记录里会留下同名的僵尸条目,还会挤占 MAX_RULES。
+                rules = [item for item in kept if not _is_stale_source(item, rule)]
+                stale = len(kept) - len(rules)
                 # 落库的条目带 hits/created,重复判断只能按身份字段比
                 if not any(isinstance(item, dict) and _identity_view(item) == rule for item in rules[:MAX_RULES]):
                     if len(rules) >= MAX_RULES:
@@ -418,7 +438,7 @@ class AlertPolicyMixin:
                     'created': now}
         if hasattr(self, 'write_log'):
             self.write_log('WARN' if choice == 'permanent' else 'INFO', 'Alert Decision Remembered',
-                source=rule['source'], detail=f"{rule['action']} / {rule['target']} / {choice} / repeat={repeat}", file_hash=rule['sha256'])
+                source=rule['source'], detail=f"{rule['action']} / {rule['target']} / {choice} / repeat={repeat}" + (f" / stale-removed={stale}" if stale else ""), file_hash=rule['sha256'])
         return True
 
     def clear_alert_decisions(self):

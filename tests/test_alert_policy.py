@@ -81,6 +81,26 @@ class AlertPolicyTests(unittest.TestCase):
         self.assertTrue(self.owner.clear_alert_decisions())
         self.assertIsNone(self.owner._lookup_alert_decision(current.rule))
 
+    def test_replacing_content_drops_stale_entry_for_same_path(self):
+        """同一路径内容变了:新规则要落库,旧哈希那条必须清掉 —— 它永远不会再命中。"""
+        first = self.request()
+        self.assertTrue(self.owner._remember_alert_decision(first, 'permanent'))
+
+        self.path.write_bytes(b'rebuilt with different bytes')
+        second = self.request()
+        self.assertTrue(self.owner._remember_alert_decision(second, 'permanent'))
+
+        rules = self.owner.pyas_config['alert_allow_rules']
+        self.assertEqual(len(rules), 1, f'同路径只应保留一条,实为 {len(rules)} 条')
+        self.assertEqual(rules[0]['sha256'], second.rule['sha256'], '保留的必须是新内容')
+        self.assertEqual(self.owner._lookup_alert_decision(second.rule), 'allow')
+
+    def test_duplicate_identity_is_not_appended_twice(self):
+        request = self.request()
+        self.assertTrue(self.owner._remember_alert_decision(request, 'permanent'))
+        self.assertTrue(self.owner._remember_alert_decision(request, 'permanent'))
+        self.assertEqual(len(self.owner.pyas_config['alert_allow_rules']), 1)
+
     def test_permanent_hits_counted_and_persisted_throttled(self):
         request = self.request()
         self.assertTrue(self.owner._remember_alert_decision(request, 'permanent'))
