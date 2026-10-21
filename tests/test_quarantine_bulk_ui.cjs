@@ -200,6 +200,35 @@ const ROOT = path.resolve(__dirname, '../Interface');
     await page.waitForTimeout(60);
     assert.equal(await page.locator('#quarantine_window .row-detail').count(), 0, '再次双击同一行应收起');
 
+    // 7. 空态:表头不占位 + 不出滚动条
+    //    (历史 bug:表头 visibility:hidden 仍占 34px,列表又 height:100%,相加溢出)
+    await page.evaluate(() => {
+        document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+        document.getElementById('quarantine_window').classList.add('active');
+        const widget = document.querySelector('#quarantine_window .manage-widget');
+        const ul = widget.querySelector('.manage-list');
+        ul.innerHTML = '';
+        widget.classList.add('is-empty');
+        const li = document.createElement('li');
+        li.className = 'manage-list-empty';
+        li.textContent = '暂无记录';
+        ul.appendChild(li);
+    });
+    await page.waitForTimeout(120);
+
+    const emptyState = await page.evaluate(() => {
+        const widget = document.querySelector('#quarantine_window .manage-widget');
+        const header = widget.querySelector('.manage-list-header');
+        return {
+            client: widget.clientHeight,
+            scroll: widget.scrollHeight,
+            headerDisplay: header ? getComputedStyle(header).display : 'none',
+        };
+    });
+    assert.equal(emptyState.headerDisplay, 'none', '空态下表头必须不占位');
+    assert.ok(emptyState.scroll <= emptyState.client,
+        `空态不该有滚动条:client=${emptyState.client} scroll=${emptyState.scroll}`);
+
     assert.deepEqual(errors, [], '不应有页面异常');
     console.log('List action bar: PASS (空闲/选中切换、摘要、取消选择同步表头、无页面动作时按钮常驻置灰)');
     await browser.close();

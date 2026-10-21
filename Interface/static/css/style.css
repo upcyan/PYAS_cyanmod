@@ -2402,7 +2402,7 @@ body.resizing-active * {
 }
 
 /* 空态时连表头一起收起:只剩一圈空白比"有表头没数据"更清楚 */
-.virus-widget.is-empty .manage-list-header { visibility: hidden; }
+.virus-widget.is-empty .manage-list-header { display: none; }
 
 /* ============================================================
    页面骨架统一:标题区 / 工具条 / 内容区
@@ -2590,7 +2590,10 @@ body.resizing-active * {
     list-style: none;
 }
 
-.page.active .manage-widget.is-empty .manage-list-header { visibility: hidden; }
+/* 空态:表头要**不占位**。原来用 visibility:hidden,它还占 34px,
+   而下面 .manage-list 又 height:100% 取满容器 —— 两者相加溢出,
+   于是「一条记录都没有」的页面右侧也挂着滚动条。 */
+.page.active .manage-widget.is-empty .manage-list-header { display: none; }
 
 /* 空态在容器里垂直居中,而不是贴在顶部 */
 .page.active .manage-widget.is-empty .manage-list {
