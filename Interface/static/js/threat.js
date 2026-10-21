@@ -90,7 +90,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let decisionTimeoutId = null;
     let confirmationId = null;
     // 「原始事件文本」的展开状态:轮询刷新不该覆盖用户的点击
-    let eventDetailsOpen = true;
+    let eventDetailsOpen = false;
     let fpTexts = null;
     const hideFpPanel = () => fpPanel.classList.add('hidden');
     const message = (lang, key) => window.AppI18n.dict[lang]?.[key]
@@ -450,9 +450,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 confirmationId = null;
                 byId('threat_confirmation').classList.add('hidden');
                 hideFpPanel();
-                // 新告警默认展开「事件详情」:用户多半要看完整路径与哈希
-                eventDetailsOpen = true;
-                byId('threat_event_details').open = true;
+                // 新告警默认收起「原始事件文本」:它比结构化字段长,展开会挤掉操作区;
+                // 需要完整路径/哈希的用户自己展开,展开状态在这一条内会被记住。
+                eventDetailsOpen = false;
+                byId('threat_event_details').open = false;
                 document.querySelector('.threat-detail').scrollTop = 0;
                 byId('threat_message').scrollTop = 0;
                 // 不给按钮默认焦点:焦点落在「拦截」上时按空格会直接触发拦截。

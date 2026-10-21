@@ -198,7 +198,8 @@
                     <p id="threat_process" class="threat-process hidden"></p>
                 </section>
                 <!-- 事件详情独立成块:驱动/进程告警没有文件,但事件描述必须能显示 -->
-                <details id="threat_event_details" class="event-details" open>
+                <!-- 默认收起:原始文本通常比结构化字段长得多,展开会把操作区顶出视野 -->
+                <details id="threat_event_details" class="event-details">
                     <summary id="evidence_event_label">Event and file identity</summary>
                     <div id="threat_message" class="threat-message" tabindex="0"></div>
                 </details>

@@ -143,6 +143,14 @@ const buildSnapshot = (events, overrides) => Object.assign({
             message: Array.from({ length: 14 }, (_, i) => `第 ${i + 1} 行:检测到可疑文件已创建。`).join('\n'),
             repeat_hint: '该告警在 1 小时内已重复出现 2 次。若确认为误报,可用下方「误报抑制」排除该文件内容。',
         }));
+        // 原始事件文本默认收起:长正文一展开就把操作区顶出视野
+        assert.equal(await page.locator('#threat_event_details').evaluate(el => el.open), false,
+            '新告警的「原始事件文本」应默认收起');
+        await page.locator('#threat_event_details summary').click();
+        await page.waitForTimeout(120);
+        assert.equal(await page.locator('#threat_event_details').evaluate(el => el.open), true,
+            '点标题应能展开');
+
         const layout = await page.evaluate(() => {
             const msg = document.getElementById('threat_message');
             const hint = document.getElementById('threat_repeat_hint');
