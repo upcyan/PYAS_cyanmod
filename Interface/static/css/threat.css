@@ -176,7 +176,9 @@
     gap: 2px 10px;
     min-width: 0;
 }
-.threat-summary svg { width: 24px; height: 24px; }
+/* 盒子居中对齐,但字形墨迹不居中:盾形图标的墨迹略偏上,20px 中文字的墨迹略偏下。
+   几何中心一致时看起来仍是图标偏高 —— 按墨迹补 2px。 */
+.threat-summary svg { width: 24px; height: 24px; position: relative; top: 1px; }
 .threat-summary h1 { font-size: var(--text-4xl); line-height: 1.25; }
 .threat-context { margin: 0; font-size: var(--text-sm); line-height: 1.4; color: var(--text-secondary); overflow-wrap: anywhere; }
 .detection-card { padding: 7px 10px; background: var(--bg-hover); border: 1px solid var(--border-color); border-radius: var(--radius-panel); }
