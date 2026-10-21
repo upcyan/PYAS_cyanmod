@@ -99,6 +99,13 @@ const buildSnapshot = (events, overrides) => Object.assign({
         assert.ok(await overflow(page) <= 0, `单条告警仍有 ${await overflow(page)}px 溢出`);
         const cols = await page.evaluate(() =>
             getComputedStyle(document.querySelector('.detection-grid')).gridTemplateColumns.split(' ').length);
+        // 证据值不允许用省略号收尾:columns 按内容分配,长值换行而不是被截断
+        const valueStyle = await page.evaluate(() => {
+            const style = getComputedStyle(document.getElementById('threat_family'));
+            return { textOverflow: style.textOverflow, whiteSpace: style.whiteSpace };
+        });
+        assert.notEqual(valueStyle.textOverflow, 'ellipsis', '证据值不该用省略号截断');
+        assert.equal(valueStyle.whiteSpace, 'normal', '证据值应允许换行');
         assert.equal(cols, 4, '详情区够宽时证据应摊成四列一行');
         await page.close();
 

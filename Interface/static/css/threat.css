@@ -250,7 +250,11 @@ body:has(#threat_fp_panel:not(.hidden)) .threat-decide { display: none; }
 /* 详情区够宽(≥520px)就把证据摊成四列一行:类别/引擎/平台/家族都是短值,
    两列两行纯属浪费。窄窗(有队列栏、或窗口被拉窄)自动退回两列。 */
 @container detail (min-width: 520px) {
-    .detection-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px 12px; }
+    /* 四列按内容宽度分配:短列(类别/引擎/平台)不再各占 1fr,
+       省下来的宽度给「家族 / 分类」这类长值,不用省略号也能放下 */
+    /* 前三列贴内容,最后一列吃掉剩余宽度:短列不再各占 1fr,
+       长值(家族/分类)有地方整句显示,放不下也只是换行而不是省略 */
+    .detection-grid { grid-template-columns: max-content max-content max-content minmax(0, 1fr); gap: 2px 24px; }
 }
 
 /* The mask combines four continuous inward alpha fades. No opaque inner cutout.
@@ -442,10 +446,11 @@ body:has(#threat_fp_panel:not(.hidden)) .threat-decide { display: none; }
     font-weight: 700;
 }
 
-/* 证据:四列一行,标签与值同一行(原来上下堆叠,六字段占 ~76px) */
+/* 证据:四列一行,标签与值同一行(原来上下堆叠,六字段占 ~76px)。
+   列宽由 @container 那条按内容分配;这里只管间距,不能再无条件钉死列数 ——
+   否则 390px 的窄窗也会排四列,横向溢出。 */
 .detection-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 2px 14px;
+    gap: 2px 24px;
     margin: 6px 0 2px;
 }
 
@@ -464,9 +469,9 @@ body:has(#threat_fp_panel:not(.hidden)) .threat-decide { display: none; }
 .detection-grid dd {
     margin: 0;
     font-size: var(--text-sm);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    /* 不再单行省略:四列时按内容分配宽度,值真的放不下就换行。
+       原来这里白捡了「等宽列 + 超出省略」,于是旁边大片空白、这行却只剩「…」。 */
+    overflow-wrap: anywhere;
 }
 
 /* 原始报毒结果与命中规则并成一行,省一层高度 */
