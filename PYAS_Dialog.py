@@ -742,6 +742,37 @@ def _query_file_users(path, timeout=_RM_QUERY_TIMEOUT):
     return found
 
 
+# 同内容的多类拦截可以合并成一条告警:文件被写入后立刻被执行,本来就是同一件事
+MERGE_ACTIONS = ('File Block', 'Process Block', 'Deferred Scan Block')
+
+
+def _merge_request_into(primary, follower):
+    """把同一份内容的另一类拦截并入第一条告警:标题写明覆盖了哪几类动作,正文取并集。"""
+    lang = primary.lang
+    nouns = []
+
+    for item in (primary, follower):
+        key = {"file": "action_noun_file", "process": "action_noun_process",
+               "network": "action_noun_network"}.get(item.category)
+        noun = loc_dialog_text(lang, key) if key else ""
+
+        if noun and noun not in nouns:
+            nouns.append(noun)
+
+    if len(nouns) > 1:
+        primary.title = loc_dialog_text(lang, "combined_block_title").replace("{0}", " & ".join(nouns))
+        primary.category = "combined"
+
+    # 两条消息各自带「来源/目标」行,按行去重后拼在一起,避免重复刷屏
+    lines = [line for line in str(primary.message or "").splitlines() if line.strip()]
+
+    for line in str(follower.message or "").splitlines():
+        if line.strip() and line not in lines:
+            lines.append(line)
+
+    primary.message = "\r\n".join(lines)
+
+
 @dataclass
 class _DecisionRequest:
     lang: str
@@ -814,6 +845,9 @@ class _ThreatPromptQueue:
             matching = next((item for item in [self.active, *self.pending]
                 if item and request.dedup_key and item.dedup_key == request.dedup_key and not item.resolving), None)
             if matching:
+                # 同一份内容的多类拦截(文件写入 + 进程启动)并成一条:
+                # 标题与正文都要能看出它其实覆盖了两件事。
+                _merge_request_into(matching, request)
                 matching.followers.append(request)
             else:
                 self.pending.append(request)
@@ -836,8 +870,9 @@ class _ThreatPromptQueue:
 
     @property
     def count(self):
+        """队列里的「事件」数:合并进来的 follower 属于同一条事件,不重复计数。"""
         with self.condition:
-            return sum(1 + len(item.followers) for item in [self.active, *self.pending] if item)
+            return sum(1 for item in [self.active, *self.pending] if item)
 
     def describe(self):
         """队列分组摘要:按类别聚合(标题+数量+是否处理中),决策窗快照与主界面列表共用。"""
@@ -848,7 +883,7 @@ class _ThreatPromptQueue:
                     continue
                 category = item.category or item.title
                 group = groups.setdefault(category, {'id': category, 'title': item.title, 'count': 0, 'active': False})
-                group['count'] += 1 + len(item.followers)
+                group['count'] += 1
                 group['active'] |= item is self.active
             return list(groups.values())
 
@@ -1122,6 +1157,36 @@ DIALOG_TEXTS.update({
 })
 
 
+DIALOG_TEXTS.update({
+    # 同一份内容同时命中文件与进程防护时合并成一条告警,标题要说明覆盖了哪几类动作
+    "action_noun_file": {
+        "simplified_switch": "文件", "traditional_switch": "檔案", "english_switch": "file",
+        "japanese_switch": "ファイル", "korean_switch": "파일", "french_switch": "fichier",
+        "spanish_switch": "archivo", "hindi_switch": "फ़ाइल", "arabic_switch": "ملف",
+        "russian_switch": "файл", "slovenian_switch": "datoteka",
+    },
+    "action_noun_process": {
+        "simplified_switch": "进程", "traditional_switch": "程序", "english_switch": "process",
+        "japanese_switch": "プロセス", "korean_switch": "프로세스", "french_switch": "processus",
+        "spanish_switch": "proceso", "hindi_switch": "प्रक्रिया", "arabic_switch": "عملية",
+        "russian_switch": "процесс", "slovenian_switch": "proces",
+    },
+    "action_noun_network": {
+        "simplified_switch": "网络", "traditional_switch": "網路", "english_switch": "network",
+        "japanese_switch": "ネットワーク", "korean_switch": "네트워크", "french_switch": "réseau",
+        "spanish_switch": "red", "hindi_switch": "नेटवर्क", "arabic_switch": "شبكة",
+        "russian_switch": "сеть", "slovenian_switch": "omrežje",
+    },
+    "combined_block_title": {
+        "simplified_switch": "{0}综合拦截", "traditional_switch": "{0}綜合攔截",
+        "english_switch": "Combined block ({0})", "japanese_switch": "{0}の一括ブロック",
+        "korean_switch": "{0} 통합 차단", "french_switch": "Blocage combiné ({0})",
+        "spanish_switch": "Bloqueo combinado ({0})", "hindi_switch": "संयुक्त ब्लॉक ({0})",
+        "arabic_switch": "حظر مشترك ({0})", "russian_switch": "Общая блокировка ({0})",
+        "slovenian_switch": "Skupna blokada ({0})",
+    },
+})
+
 def _duration_text(lang, seconds):
     """把秒数说成人话:60 → 「60 秒」,300 → 「5 分钟」,3600 → 「1 小时」。"""
     seconds = int(seconds or 0)
@@ -1337,6 +1402,19 @@ class _WebDecisionAPI:
                 if not session.owner._remember_alert_decision(request, choice, repeat):
                     session.decision_error = True
                     return False
+
+                # 合并进来的同类告警各有自己的 action,必须逐条落规则:
+                # 只写主条目的话,另一类(如进程启动)下次还会再问一遍。
+                for follower in request.followers:
+                    if not getattr(follower, 'rule', None):
+                        continue
+
+                    try:
+                        if not session.owner._remember_alert_decision(follower, choice, repeat):
+                            logging.getLogger('PYAS.Dialog').warning(
+                                'merged alert rule not remembered: %s', follower.action)
+                    except Exception:
+                        log_exception('PYAS_Dialog.decide.follower_rule')
             with session.queue.condition:
                 if session.queue.active is not request or session.queue.closed:
                     return False
@@ -2585,7 +2663,13 @@ class DialogMixin(AlertPolicyMixin):
             # 队列去重按"内容"而不是路径:rule['key'] 含 source(完整路径),
             # 同一份内容的多个副本(自测按 4 个文件名各写一份 EICAR)会各自弹窗。
             # sha256 + 检测结果相同就该只问一次,后续副本作为 follower 共享裁决。
-            dedup_key=(rule['action'], rule['sha256'], rule['target'], rule['detection'], pid) if rule else None,
+            # 合并键:文件/进程/延迟扫描命中同一份内容时合并成一条告警(用户看到的是一件事),
+            # 网络拦截的目标是地址,不能和文件类合并,仍按 action + target 区分。
+            dedup_key=(
+                (rule['sha256'], rule['detection'])
+                if rule['action'] in MERGE_ACTIONS
+                else (rule['action'], rule['sha256'], rule['target'], rule['detection'], pid)
+            ) if rule else None,
             process_name=str(process_name or ''), process_path=str(process_path or ''),
             repeat_count=repeat_count, action=action, source=source, target=target, evidence=evidence,
             agent=str(agent or ''), agent_verified=bool(agent_verified))

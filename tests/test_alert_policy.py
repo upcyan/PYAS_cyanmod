@@ -243,13 +243,46 @@ class AlertPolicyTests(unittest.TestCase):
             self.assertTrue(queue.condition.wait_for(lambda: bool(first.followers), timeout=1))
         session = _WebThreatDialogSession('en', 'test', 'test', None, str, queue, self.owner)
         data = session.api.snapshot()
-        self.assertEqual(data['count'], 4)
-        self.assertEqual([group['count'] for group in data['events']], [3, 1])
+        # 重复告警合并成 follower 后只算一个事件:count 数的是「事件」不是「条目」
+        self.assertEqual(data['count'], 3)
+        self.assertEqual([group['count'] for group in data['events']], [2, 1])
         self.assertTrue(session.api.decide(first.id, 'allow'))
         worker.join(1)
         self.assertFalse(worker.is_alive())
         self.assertEqual(duplicate.choice, 'allow')
         self.assertIs(queue.active, second)
+
+    def test_file_and_process_alerts_merge_into_one_event(self):
+        """同一份内容先被文件防护拦、再被进程防护拦:合成一条,标题写明覆盖两类动作。"""
+        queue = _ThreatPromptQueue()
+        self.addCleanup(queue.close)
+        file_alert = self.request()
+        file_alert.lang = 'simplified_switch'
+        file_alert.category = 'file'
+        file_alert.title = '文件防护'
+        file_alert.dedup_key = ('sha', 'detection')
+        file_alert.message = '文件被拦截\r\n来源：C:////fixture////a.exe'
+
+        process_alert = copy.copy(file_alert)
+        process_alert.done = threading.Event()
+        process_alert.followers = []
+        process_alert.category = 'process'
+        process_alert.title = '进程防护'
+        process_alert.message = '进程被拦截\r\n来源：C:////fixture////a.exe'
+
+        queue.pending.append(file_alert)
+        queue.take_next()
+        queue.worker = object()
+        worker = threading.Thread(target=queue.submit, args=(process_alert,))
+        worker.start()
+        with queue.condition:
+            self.assertTrue(queue.condition.wait_for(lambda: bool(file_alert.followers), timeout=1))
+        worker.join(1)
+
+        self.assertEqual(file_alert.title, '文件 & 进程综合拦截')
+        self.assertEqual(queue.count, 1, '合并后队列只算一个事件')
+        self.assertIn('进程被拦截', file_alert.message, '正文要合入另一类拦截的内容')
+        self.assertEqual(file_alert.message.count('来源'), 1, '相同的来源行不应重复')
 
     def test_shutdown_releases_deduplicated_waiter(self):
         queue = _ThreatPromptQueue()
