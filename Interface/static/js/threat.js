@@ -291,6 +291,32 @@ document.addEventListener('DOMContentLoaded', () => {
         return !!element && !!element.closest('.app-container');
     };
 
+    // 窗口高度跟随内容:AI 关掉或只是条短告警时,固定 720 会在下面留一大片空白。
+    // 只在变化超过 10px 时才通知后端,避免每次轮询都抖。
+    let requestedHeight = 0;
+    const requestWindowHeight = () => {
+        const api = window.pywebview?.api;
+
+        if (!api?.resize) return;
+
+        const bar = document.querySelector('.navigate-window');
+        const layout = document.querySelector('.threat-layout');
+        const detail = document.querySelector('.threat-detail');
+        const footer = document.querySelector('.threat-footer');
+
+        if (!layout || !detail || !footer) return;
+
+        const style = getComputedStyle(layout);
+        const total = Math.ceil((bar?.offsetHeight || 0)
+            + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+            + detail.scrollHeight + footer.offsetHeight);
+
+        if (!total || Math.abs(total - requestedHeight) < 10) return;
+
+        requestedHeight = total;
+        Promise.resolve(api.resize(total)).catch(() => {});
+    };
+
     const refresh = async () => {
         if (disposed) return;
         clearTimeout(nextTimer);
@@ -464,6 +490,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 byId('threat_message').focus({ preventScroll: true });
             }
             if (!initialized) { await waitForBridge(api.ready()); initialized = true; }
+            requestWindowHeight();
         } catch (error) {
             if (disposed || requestRevision !== revision) return;
             if (!error.deferred) console.error('Threat UI refresh failed', error);

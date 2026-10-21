@@ -156,11 +156,24 @@ def build_assets():
     return version
 
 
-def ensure_cert():
+def cert_is_usable():
+    """pfx 存在且非空才算可复用 —— 构建会清 build/,0 字节残留不能当证书。"""
+    try:
+        return CERT_PFX.is_file() and CERT_PFX.stat().st_size > 512
+    except OSError:
+        return False
+
+
+def ensure_cert(force=False):
     CERT_PFX.parent.mkdir(parents=True, exist_ok=True)
-    if CERT_PFX.exists():
+
+    if not force and cert_is_usable():
         print("[证书] 复用已有自签证书")
         return
+
+    if CERT_PFX.exists():
+        CERT_PFX.unlink()
+        print("[证书] 旧证书不可用,重新生成")
     ps = f'''
 $cert = New-SelfSignedCertificate -Type Custom -Subject "{CERT_SUBJECT}" `
     -KeyUsage DigitalSignature -FriendlyName "PYAS Menu Signing" `
@@ -197,6 +210,7 @@ def pack_and_sign(version, makeappx, signtool):
     if result.returncode != 0:
         print((result.stdout or "")[-2000:], (result.stderr or "")[-1000:])
         die("makeappx 打包失败")
+    ensure_cert()
     result = subprocess.run(
         [str(signtool), "sign", "/fd", "SHA256", "/f", str(CERT_PFX), "/p", f"{CERT_PWD}", str(msix)],
         capture_output=True, text=True)
@@ -215,8 +229,15 @@ $cert = (Get-PfxData -FilePath "{CERT_PFX}" -Password $menuSigningPassword).EndE
 }} catch {{ [Console]::Error.WriteLine($_.Exception.Message); exit 1 }}
 '''
     exported = run_powershell(ps)
+
     if exported.returncode != 0 or not CERT_CER.is_file():
-        die('菜单签名公钥证书导出失败', (exported.stderr or '')[:500])
+        # build/ 被清掉后 pfx 可能已不在:重建一次再导,别让整包构建失败
+        print('[证书] 导出失败,重建证书后重试')
+        ensure_cert(force=True)
+        exported = run_powershell(ps)
+
+        if exported.returncode != 0 or not CERT_CER.is_file():
+            die('菜单签名公钥证书导出失败', (exported.stderr or '')[:500])
     print("[证书] 公钥证书已导出:", CERT_CER.name)
     return msix
 

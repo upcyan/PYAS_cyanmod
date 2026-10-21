@@ -1342,6 +1342,56 @@ class _WebDecisionAPI:
         self._session.ready.set()
         return True
 
+    def resize(self, height):
+        """按内容高度收缩窗口,保持右下角不动。
+
+        弹窗内容长短差很多(AI 关掉后少一整块,单条短告警只有两三百像素),
+        固定 720 会在下方留一大片空白。下限沿用 min_size,上限给工作区高度,
+        变化小于 8px 不动,避免每次轮询都抖一下。
+        """
+        window = getattr(self._session, "window", None)
+
+        if window is None:
+            return False
+
+        try:
+            target = int(height)
+        except (TypeError, ValueError):
+            return False
+
+        # 上限取「工作区高度」而不是固定 1000:小屏 + 高 DPI 下 1000 会把窗口顶出屏幕
+        limit = 1000
+        scale = 1.0
+
+        try:
+            work = ctypes.wintypes.RECT
+            area = work()
+            scale = (get_dpi() or 96) / 96.0
+
+            if ctypes.windll.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(area), 0):
+                limit = min(limit, int((area.bottom - area.top) / scale))
+        except Exception:
+            pass
+
+        target = max(int(THREAT_WINDOW_MIN_SIZE[1]), min(target, limit))
+
+        try:
+            current = int(window.height or THREAT_WINDOW_HEIGHT)
+            new_y = int(window.y) + current - target
+
+            if new_y < 0:
+                new_y = 0
+
+            if abs(current - target) < 8:
+                return True
+
+            window.resize(THREAT_WINDOW_WIDTH, target)
+            window.move(int(window.x), new_y)
+            return True
+        except Exception:
+            log_exception("PYAS_Dialog._WebDecisionAPI.resize")
+            return False
+
     def snapshot(self):
         session = self._session
         # Read display/countdown flags without waiting for unrelated config writes.

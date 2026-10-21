@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from PYAS_Detection import detection_result, detection_view
-from PYAS_Dialog import DialogMixin, _DecisionRequest, _ThreatPromptQueue, _WebThreatDialogSession
+from PYAS_Dialog import (DialogMixin, THREAT_WINDOW_HEIGHT, THREAT_WINDOW_MIN_SIZE, _DecisionRequest, _ThreatPromptQueue, _WebDecisionAPI, _WebThreatDialogSession)
 
 
 class App(DialogMixin):
@@ -126,3 +126,54 @@ class DialogEvidenceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _FakeWindow:
+    def __init__(self):
+        self.width = 720
+        self.height = THREAT_WINDOW_HEIGHT
+        self.x, self.y = 100, 50
+        self.calls = []
+
+    def resize(self, width, height):
+        self.calls.append(('resize', width, height))
+        self.width, self.height = width, height
+
+    def move(self, x, y):
+        self.calls.append(('move', x, y))
+        self.x, self.y = x, y
+
+
+class _FakeSession:
+    def __init__(self, window):
+        self.window = window
+
+
+class DialogResizeTests(unittest.TestCase):
+    """窗口跟随内容:矮内容收缩、长内容受限,且右下角固定。"""
+
+    def make(self):
+        window = _FakeWindow()
+        return window, _WebDecisionAPI(_FakeSession(window))
+
+    def test_short_content_shrinks_to_min_size_and_keeps_bottom_right(self):
+        window, api = self.make()
+        bottom = window.y + window.height
+
+        self.assertTrue(api.resize(419))
+        self.assertEqual(window.height, THREAT_WINDOW_MIN_SIZE[1], '低于下限要停在 min_size')
+        self.assertEqual(window.y + window.height, bottom, '右下角必须保持不动')
+
+    def test_oversized_content_is_capped(self):
+        window, api = self.make()
+        api.resize(5000)
+        self.assertEqual(window.height, 1000)
+
+    def test_tiny_change_does_not_touch_the_window(self):
+        window, api = self.make()
+        api.resize(THREAT_WINDOW_HEIGHT - 3)
+        self.assertEqual(window.calls, [], '几像素的差异不该触发重排')
+
+    def test_missing_window_does_not_raise(self):
+        api = _WebDecisionAPI(_FakeSession(None))
+        self.assertFalse(api.resize(500))
