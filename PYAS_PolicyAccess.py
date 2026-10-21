@@ -189,8 +189,50 @@ class PolicyAccessMixin:
             return super()._remember_alert_decisions(items, choice, repeat)
 
         target = super()._remember_alert_decisions
-        return self._policy_call({'alert_allow_rules'}, lambda: target(items, choice, repeat),
-                                 False, 'permanent-allow')
+        return self._policy_transaction({'alert_allow_rules'},
+                                       lambda: target(items, choice, repeat),
+                                       False, 'permanent-allow')
+
+    def _policy_transaction(self, scope, callback, failure=False, operation='change'):
+        """一次授权、一次提交:callback 里的多次 save 先暂存,最后统一落盘。"""
+        store = getattr(self, '_policy_store', None)
+
+        if store is None:
+            return failure if getattr(self, '_policy_required', False) else callback()
+
+        scope = frozenset(scope)
+        existing = getattr(store.local, 'lease', None)
+
+        # 已经在授权/事务里:直接执行,提交由外层负责
+        if existing:
+            return callback() if scope.issubset(existing.scope) else failure
+
+        try:
+            lease = store.begin(scope, operation, False)
+        except (PolicyDenied, OSError, ValueError) as error:
+            self._policy_notice(str(error))
+            return failure
+
+        previous_user_only = getattr(store.local, 'user_only', False)
+        store.local.user_only = False
+        store.begin_stage()
+
+        try:
+            result = callback()
+
+            if result is False:
+                store.rollback_stage()
+                return failure
+
+            if not store.commit_stage():
+                store.rollback_stage()
+                return failure
+
+            return result
+        finally:
+            store.rollback_stage()  # 幂等:commit_stage 已经关掉暂存时什么都不做
+            store.local.user_only = previous_user_only
+            store.finish(lease)
 
     def _remember_suppression(self, request, reason, note, scope):
         target = super()._remember_suppression

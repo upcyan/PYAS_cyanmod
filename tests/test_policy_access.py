@@ -181,6 +181,34 @@ class PolicyAccessTests(unittest.TestCase):
         self.assertIn('exited 49', result['detail'])
         self.assertEqual(self.owner.effects, [])
         self.assertFalse(self.owner.pyas_config['process_switch'])
+    def test_merged_permanent_allow_rolls_back_when_one_rule_fails(self):
+        """一条规则失效时整批不落盘:不能出现「提示失败但第一条已生效」。"""
+        owner = DecisionsOwner(self.backend)
+        self.assertTrue(owner.initialize_security_policy()['ok'])
+        owner.load_config()
+        self.backend.prompts = 0
+
+        directory = Path(tempfile.mkdtemp())
+        good = directory / 'good.bin'
+        bad = directory / 'bad.bin'
+        good.write_bytes(b'good fixture')
+        bad.write_bytes(b'bad fixture')
+
+        rule_good = alert_identity('File Block', str(good), None, {'rule': 'merged'})
+        rule_bad = alert_identity('Process Block', str(bad), None, {'rule': 'merged'})
+        bad.write_bytes(b'changed after identity')  # 提交前内容变了 → 这条规则失效
+
+        requests = [_DecisionRequest('english_switch', 't', 'm', None, rule=rule, category='file')
+                    for rule in (rule_good, rule_bad)]
+
+        before_document = copy.deepcopy(self.backend.document)
+        before_list = copy.deepcopy(owner.pyas_config.get('alert_allow_rules'))
+
+        self.assertFalse(owner._remember_alert_decisions(requests, 'permanent'))
+        self.assertEqual(self.backend.document, before_document, '失败时磁盘上不能有新规则')
+        self.assertEqual(owner.pyas_config.get('alert_allow_rules'), before_list, '内存也要回滚')
+        self.assertEqual(self.backend.prompts, 1, '仍然只需要一次授权')
+
     def test_merged_permanent_allow_opens_one_authorization(self):
         """文件 + 进程合并告警:一次 UAC,写两条规则。"""
         owner = DecisionsOwner(self.backend)

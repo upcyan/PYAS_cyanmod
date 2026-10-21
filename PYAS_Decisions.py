@@ -1,4 +1,5 @@
 """Narrow, content-bound exceptions for interactive alerts, never scan exclusions."""
+import copy
 import hashlib
 import json
 import re
@@ -400,14 +401,27 @@ class AlertPolicyMixin:
         return True
 
     def _remember_alert_decisions(self, requests, choice, repeat=False):
-        """一次裁决覆盖多条规则(合并告警):逐条写,全部成功才算成功。"""
+        """一次裁决覆盖多条规则(合并告警):全成功才算成功,失败要整体回退。
+
+        策略层会把这一批包进一次授权 + 一次提交(PYAS_PolicyAccess._policy_transaction);
+        但内存里的 pyas_config 是逐条改的,所以这里自己留一份快照 —— 否则提交失败时
+        界面显示「失败」,内存里却已经留下了第一条规则。
+        """
         items = [item for item in requests if getattr(item, 'rule', None)]
 
         if not items:
             return False
 
+        snapshot = copy.deepcopy(self.pyas_config.get('alert_allow_rules'))
         results = [self._remember_alert_decision(item, choice, repeat) for item in items]
-        return all(results)
+
+        if all(results):
+            return True
+
+        if snapshot is not None:
+            self.pyas_config['alert_allow_rules'] = snapshot
+
+        return False
 
     def _remember_alert_decision(self, request, choice, repeat=False):
         rule = request.rule

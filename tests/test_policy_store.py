@@ -82,6 +82,34 @@ class PolicyStoreTests(unittest.TestCase):
         # 拒绝写入即可,但状态不能被这类后台写入打成错误:
         # 面板会把 status.error 直接显给用户,一句「需要管理员授权」会把整块设置变成红条
         self.assertEqual(self.store.status.get('error'), '')
+    def test_staged_saves_commit_only_once_at_the_end(self):
+        self.initialize()
+        before = copy.deepcopy(self.backend.document)
+        lease = self.store.begin({'alert_allow_rules'})
+        try:
+            self.store.begin_stage()
+            self.assertTrue(self.store.save({**self.config, 'alert_allow_rules': [{'x': 1}]}))
+            self.assertTrue(self.store.save({**self.config, 'alert_allow_rules': [{'x': 1}, {'y': 2}]}))
+            self.assertEqual(self.backend.document, before, '暂存期间不得落盘')
+            self.assertTrue(self.store.commit_stage())
+            self.assertEqual(self.backend.document['alert_allow_rules'], [{'x': 1}, {'y': 2}],
+                             '只提交最后一次暂存的内容')
+        finally:
+            self.store.finish(lease)
+
+    def test_rollback_discards_staged_changes(self):
+        self.initialize()
+        before = copy.deepcopy(self.backend.document)
+        lease = self.store.begin({'alert_allow_rules'})
+        try:
+            self.store.begin_stage()
+            self.assertTrue(self.store.save({**self.config, 'alert_allow_rules': [{'x': 1}]}))
+            self.store.rollback_stage()
+            self.assertEqual(self.backend.document, before)
+            self.assertEqual(self.store.values.get('alert_allow_rules', []), [])
+        finally:
+            self.store.finish(lease)
+
     def test_conflict_is_not_retried_or_overwritten(self):
         self.initialize(); lease = self.store.begin({'process_switch'})
         self.backend.document['_revision'] = 'different'

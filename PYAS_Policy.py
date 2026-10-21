@@ -236,6 +236,11 @@ class PolicyStore:
         if getattr(self.local, 'user_only', False):
             return True
         proposed = policy_values(config)
+
+        # 事务模式:多次 save 只保留最后一次,由 commit_stage 统一提交
+        if getattr(self.local, 'staging', False):
+            self.local.staged = proposed
+            return True
         lease = getattr(self.local, 'lease', None)
         if not lease:
             # Ordinary writes cannot change authority, including unknown keys.
@@ -253,10 +258,47 @@ class PolicyStore:
                 return False
 
             return True
+        return self._commit_policy(proposed)
+
+    # ---- 事务:暂存多次 save,最后一次性提交 ----
+
+    def begin_stage(self):
+        """进入暂存模式:此后的 save() 只记录待提交的策略值,不落盘。"""
+        self.local.staging = True
+        self.local.staged = None
+
+    def staged(self):
+        return getattr(self.local, "staging", False)
+
+    def commit_stage(self):
+        """把最后一次暂存的策略值提交一次;没有暂存内容时视为无事。"""
+        proposed = getattr(self.local, "staged", None)
+        self.local.staging = False
+        self.local.staged = None
+
+        if proposed is None:
+            return True
+
+        return self._commit_policy(proposed)
+
+    def rollback_stage(self):
+        """丢弃暂存内容,磁盘与内存里的策略都保持原样。"""
+        self.local.staging = False
+        self.local.staged = None
+        return True
+
+    def _commit_policy(self, proposed):
+        lease = getattr(self.local, "lease", None)
+
+        if not lease:
+            return False
+
         updates = {key: proposed[key] for key in lease.scope if key in proposed}
         expected = policy_values(self.values)
+
         if self.revision is not None and all(expected.get(k) == value for k, value in updates.items()):
             return True
+
         try:
             document = lease.commit(updates)
             if not document or document.get('_format') != FORMAT or not document.get('_revision'):
