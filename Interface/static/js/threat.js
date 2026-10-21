@@ -268,6 +268,20 @@ document.addEventListener('DOMContentLoaded', () => {
         setText('threat_status', message(latestLanguage, failed ? 'evidence_unavailable' : 'evidence_idle'));
         setText('threat_message', ''); setText('threat_process', '');
     };
+    // 用户正在弹窗里选文字时暂停 DOM 更新。
+    // 轮询每 400ms 跑一次,任何一次重写文本节点都会把选区打掉 ——
+    // 表现就是「选中就消失,复制不了」。宁可让倒计时停几百毫秒。
+    const selectionInsideDialog = () => {
+        const selection = window.getSelection();
+
+        if (!selection || selection.isCollapsed || !selection.toString().trim()) return false;
+
+        const node = selection.anchorNode;
+        const element = node && (node.nodeType === 1 ? node : node.parentElement);
+
+        return !!element && !!element.closest('.app-container');
+    };
+
     const refresh = async () => {
         if (disposed) return;
         clearTimeout(nextTimer);
@@ -278,6 +292,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await readSnapshot(api);
             if (requestRevision !== revision) return;
             if (!data) { clearActive(); return; }
+
+            // 正在复制内容:这一帧什么都不改,下一帧再看
+            if (selectionInsideDialog()) return;
             const changed = currentId !== data.id;
             currentId = data.id;
             if (decisionTimeoutId !== currentId) decisionTimeoutId = null;

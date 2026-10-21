@@ -271,6 +271,21 @@ DIALOG_TEXTS.update({
         "russian_switch": "Это оповещение появилось {0} раз за последний час. Если считаете его ложным срабатыванием, используйте опцию сообщения ниже, чтобы снять это содержимое файла.",
         "slovenian_switch": "To opozorilo se je v zadnji uri pojavilo {0}-krat. Če menite, da gre za lažni alarm, uporabite spodnjo možnost prijave in odstranite vsebino te datoteke.",
     },
+    # 没有误报入口时(如告警不带可锚定的规则/内容身份)不能承诺"用下方按钮",
+    # 否则界面会出现"让你点一个不存在的按钮"
+    "repeat_trigger_hint_plain": {
+        "simplified_switch": "该告警在 1 小时内已重复出现 {0} 次。",
+        "traditional_switch": "該告警在 1 小時內已重複出現 {0} 次。",
+        "english_switch": "This alert has appeared {0} times within the last hour.",
+        "japanese_switch": "このアラートは過去 1 時間に {0} 回発生しました。",
+        "korean_switch": "이 알림은 최근 1시간 내 {0}회 발생했습니다.",
+        "french_switch": "Cette alerte est apparue {0} fois au cours de la dernière heure.",
+        "spanish_switch": "Esta alerta ha aparecido {0} veces en la última hora.",
+        "hindi_switch": "यह अलर्ट पिछले घंटे में {0} बार आया है।",
+        "arabic_switch": "ظهرت هذه التنبيه {0} مرة خلال الساعة الماضية.",
+        "russian_switch": "Это оповещение появилось {0} раз за последний час.",
+        "slovenian_switch": "To opozorilo se je v zadnji uri pojavilo {0}-krat.",
+    },
     "countdown_ai_execute": {
         "simplified_switch": "{0} 秒后自动执行 AI 建议",
         "traditional_switch": "{0} 秒後自動執行 AI 建議",
@@ -1088,6 +1103,19 @@ class _WebDecisionAPI:
             process_path = request.process_path or ""
             if not process_name and request.action in ("File Block", "Deferred Scan Block"):
                 process_name = loc_dialog_text(request.lang, "process_unknown")
+            fp_view = fp_snapshot_view(request, signer_ok=True)
+
+            # 文件告警却没有误报入口,多半是这条告警没带可锚定的规则/内容身份。
+            # 只记一次,避免 400ms 轮询把日志刷满。
+            if (fp_view is None and request.category == "file"
+                    and not getattr(request, "_fp_missing_logged", False)):
+                request._fp_missing_logged = True
+                logging.getLogger("PYAS.Dialog").warning(
+                    "false-positive entry unavailable (rule=%s, hash=%s)",
+                    "set" if request.rule else "none",
+                    "set" if (request.rule or {}).get("sha256") else "none",
+                )
+
             result = {
                 "id": request.id, "title": request.title, "message": request.message,
                 "remaining": remaining,
@@ -1104,7 +1132,10 @@ class _WebDecisionAPI:
                 "target": request.target or "",
                 "summary": loc_threat_description(request.lang, request.action) if request.action else "",
                 "repeat_hint": (
-                    loc_dialog_text(request.lang, "repeat_trigger_hint").replace("{0}", str(request.repeat_count))
+                    loc_dialog_text(
+                        request.lang,
+                        "repeat_trigger_hint" if fp_view else "repeat_trigger_hint_plain",
+                    ).replace("{0}", str(request.repeat_count))
                     if request.repeat_count >= 2 else ""
                 ),
                 "process_label": loc_dialog_text(request.lang, 'label_pid'),
@@ -1129,7 +1160,7 @@ class _WebDecisionAPI:
                 # This option requests verification, not a claim of a trusted signer.
                 # _remember_suppression verifies signature + file identity on submit.
                 # Never spawn PowerShell from a 400ms UI refresh.
-                "fp": fp_snapshot_view(request, signer_ok=True),
+                "fp": fp_view,
             }
         # 主题/语言只用于界面显示:直接读配置字典,不进全局配置锁。
         # snapshot 在 pywebview 桥接线程上每 400ms 轮询一次;若在这里等
@@ -2329,6 +2360,20 @@ class DialogMixin(AlertPolicyMixin):
                         users = [cached]
                 except Exception:
                     log_exception("PYAS_Dialog.request_block_decision.file_users_cache")
+
+            # 第二优先:问驱动「最近是谁写的这个文件」。
+            # 这是历史记录,文件关掉之后仍然查得到 —— 正是 Restart Manager 覆盖不了的场景。
+            if not users:
+                query_owner = getattr(self, 'query_write_owner', None)
+
+                if callable(query_owner):
+                    try:
+                        owner_pid = query_owner(source)
+
+                        if owner_pid:
+                            users = [(owner_pid, '')]
+                    except Exception:
+                        log_exception("PYAS_Dialog.request_block_decision.driver_owner")
 
             if not users:
                 try:

@@ -133,6 +133,46 @@ const buildSnapshot = (events, overrides) => Object.assign({
         assert.ok(detailOverflow <= 0, `误报面板不该让页脚自身滚动(${detailOverflow}px)`);
         await page.close();
 
+        // 4: 长正文 + 重复提示 —— 只允许一个滚动容器,提示留在固定区,选中不被刷新打掉
+        page = await open(buildSnapshot([{ id: 'a1', title: '文件防护', count: 1, active: true }], {
+            message: Array.from({ length: 14 }, (_, i) => `第 ${i + 1} 行:检测到可疑文件已创建。`).join('\n'),
+            repeat_hint: '该告警在 1 小时内已重复出现 2 次。若确认为误报,可用下方「误报抑制」排除该文件内容。',
+        }));
+        const layout = await page.evaluate(() => {
+            const msg = document.getElementById('threat_message');
+            const hint = document.getElementById('threat_repeat_hint');
+            const footer = document.querySelector('.threat-footer');
+            const detail = document.querySelector('.threat-detail');
+            return {
+                msgOverflow: getComputedStyle(msg).overflowY,
+                msgScroll: msg.scrollHeight - msg.clientHeight,
+                detailScrolls: detail.scrollHeight > detail.clientHeight,
+                hintInFooter: footer.contains(hint),
+                hintVisible: !!hint.offsetHeight,
+            };
+        });
+        assert.equal(layout.msgOverflow, 'visible', '正文本身不能是滚动容器(否则滚动条套滚动条)');
+        assert.ok(layout.msgScroll <= 1, `正文不该被内部裁切,实差 ${layout.msgScroll}px`);
+        assert.ok(layout.detailScrolls, '长内容应由外层详情区滚动');
+        assert.ok(layout.hintInFooter, '重复提示必须放在固定区(页脚),否则内容一长就被滚走');
+        assert.ok(layout.hintVisible, '重复提示应可见');
+
+        const keepSelection = await page.evaluate(async () => {
+            const msg = document.getElementById('threat_message');
+            const range = document.createRange();
+            range.selectNodeContents(msg);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            const before = String(selection).length;
+            await new Promise(resolve => setTimeout(resolve, 1200));
+            return { before, after: String(window.getSelection()).length };
+        });
+        assert.ok(keepSelection.before > 0, '测试前应能选中正文');
+        assert.equal(keepSelection.after, keepSelection.before,
+            '刷新轮询不得重置选区(否则用户无法复制)');
+        await page.close();
+
         assert.deepEqual(errors, []);
         console.log('Threat density UI: PASS (单条/多条无滚动, 四列证据, 误报面板不顶飞按钮)');
     } finally {

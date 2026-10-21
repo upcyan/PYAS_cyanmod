@@ -41,7 +41,8 @@
 .threat-summary { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 .threat-summary svg { width: 36px; height: 36px; flex-shrink: 0; color: var(--accent-color); }
 .threat-summary h1 { font-size: var(--text-4xl); font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
-.threat-message { flex: 1; min-height: 0; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--text-md); line-height: 1.65; user-select: text; }
+/* 只留一个滚动容器(.threat-detail):这里再开 auto 就是滚动条套滚动条 */
+.threat-message { overflow: visible; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--text-md); line-height: 1.65; user-select: text; }
 .threat-status { font-size: var(--text-sm); line-height: 1.5; color: var(--text-secondary); flex-shrink: 0; }
 .threat-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; flex-shrink: 0; }
 .threat-actions button { min-height: 40px; min-width: 96px; font-size: var(--text-md); white-space: normal; }
@@ -122,7 +123,7 @@
 }
 
 .threat-repeat-hint {
-    margin-top: 8px;
+    margin: 0 0 10px;
     padding: 8px 10px;
     border: 1px solid var(--color-warning-border);
     border-radius: 8px;
@@ -226,7 +227,10 @@
 .event-details summary { cursor: pointer; padding: 2px 0; }
 .event-details summary:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 3px; }
 .file-hash { display: flex; flex-direction: column; gap: 2px; margin: 4px 0; }
-.threat-message { max-height: 88px; font-size: var(--text-xs); flex: none; }
+/* 这里原本有 max-height: 88px,于是正文被切成一个 88px 的小滚动框,
+   外面 .threat-detail 再滚一次 —— 用户看到的就是两条滚动条。
+   高度交给外层统一管理,正文只保留更小的字号。 */
+.threat-message { font-size: var(--text-xs); }
 .threat-footer { padding: 0 var(--space-5) 10px; max-height: 54vh; overflow-y: auto; }
 .threat-status { padding: 6px 0; border-top: 1px solid var(--border-color); font-size: var(--text-xs); font-weight: 500; }
 .threat-meta { margin-bottom: 8px; gap: 4px; }
@@ -692,9 +696,11 @@ body:has(#threat_fp_panel:not(.hidden)) .threat-actions { display: none; }
 .threat-repeat { align-items: center; }
 .threat-repeat input { margin-top: 0; }
 
-/* 事件详情:展开时给足高度,避免第三条(进程)被裁掉 */
+/* 事件详情不再单独限高:132px 的上限让它自己变成一个滚动框,
+   外层详情区同时也在滚 —— 两条滚动条就是这么来的。
+   展开后让正文完整铺开,由 .threat-detail 统一滚动。 */
 #threat_event_details .threat-message {
-    max-height: 132px;
+    max-height: none;
 }
 
 /* 三个决定按钮统一高度,避免白底那颗被 flex 拉伸得更胖 */
