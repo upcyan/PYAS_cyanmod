@@ -110,6 +110,9 @@ const assert = require('node:assert/strict');
         await page.locator('#threat_permanent').click();
         assert.equal(await page.locator('#threat_confirmation').isVisible(), true);
         assert.equal(await page.evaluate(() => window.fixture.decisions.length), 1, 'permanent requires confirmation');
+        // 永久允许会走提权写规则,确认文案必须预告 UAC,否则用户不知道为什么弹管理员窗口
+        const confirmText = await page.locator('#threat_confirmation_text').textContent();
+        assert.ok(/UAC/.test(confirmText), `确认文案应预告 UAC 提权,实为: ${confirmText}`);
         await page.locator('#threat_cancel').click();
         assert.equal(await page.locator('#threat_confirmation').isVisible(), false);
         await page.locator('#threat_permanent').click();
