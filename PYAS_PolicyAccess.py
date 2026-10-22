@@ -124,7 +124,9 @@ class PolicyAccessMixin:
         if key in USER_KEYS:
             return self._user_data_call(lambda: target(key, value))
         if key not in POLICY_KEYS:
-            self._policy_notice('Unknown configuration field')
+            # 带上键名:这类问题的唯一线索就是这条日志(2026-10-22 溯源/行为
+            # 防护开关冻结,排查时无键名只能全仓翻 schema)
+            self._policy_notice(f'Unknown configuration field: {key}')
             return self.pyas_config.get(key)
         # Coupled menu fallback is still part of this explicit authorization.
         scope = {'context_switch', 'classic_menu_switch'} if key in ('context_switch', 'classic_menu_switch') else {key}
