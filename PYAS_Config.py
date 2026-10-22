@@ -159,12 +159,20 @@ class ConfigMixin:
                         return False
 
                     return bool(self.stop_system_driver())
+                elif key == "etw_attribution_switch":
+                    # 未提权时开启会走到这里返回 False:开关回拨,
+                    # 界面 revertSwitch 还原 —— 与驱动开关失败同款体验
+                    if state:
+                        return bool(self.start_etw_consumer())
+
+                    return bool(self.stop_etw_consumer())
                 elif key == "context_switch":
                     return self.register_context_menu(state, retry=bool(state)) is not False
                 elif key == "classic_menu_switch":
                     return self.manage_classic_context_menu(state)
                 elif key == "autostart_switch":
-                    return bool(self.manage_autostart(state))
+                    # 仅设置页开关允许弹 UAC 申请提权自启动;开机复核走默认不弹窗
+                    return bool(self.manage_autostart(state, allow_elevate=True))
                 elif key == "document_switch" and not state:
                     self._cancel_pending_file_scans()
                     # 先 CancelIoEx 再关句柄:同步读挂起期间直接 CloseHandle 会

@@ -4,7 +4,10 @@ import io
 import csv
 import json
 import sys
+import base64
 import winreg
+import tempfile
+import uuid
 import subprocess
 import ctypes
 import ctypes.wintypes
@@ -355,14 +358,18 @@ if ($Legacy -and (Resolve-Sid $Legacy.Definition.Principal.UserId) -eq $Sid -and
         )
         return True
 
-    def manage_autostart(self, enable):
+    def manage_autostart(self, enable, allow_elevate=False):
         """按权限路由:管理员走提权计划任务,普通权限走 HKCU Run 注册表。
 
-        两条路径都让「开机自启动」开关真实生效;提权任务是增强(开机即带
-        管理员令牌),注册表是保底,不再出现「开关开着但什么都没配」的状态。
+        allow_elevate 仅供设置页开关传入:普通权限下主动弹 UAC 申请注册
+        提权任务,用户拒绝或失败时回退注册表,开关照样生效;开机复核等
+        后台路径维持默认 False,绝不弹窗。
         """
         if self._is_elevated():
             return self._manage_task_autostart(enable)
+
+        if enable and allow_elevate and self._manage_task_autostart_elevated(enable):
+            return True
 
         return self._manage_registry_autostart(enable)
 
@@ -416,6 +423,171 @@ if ($Legacy -and (Resolve-Sid $Legacy.Definition.Principal.UserId) -eq $Sid -and
             self.autostart_mode = "unavailable"
             self.write_log("WARN", "manage_autostart", detail=str(e), success=False)
             return False
+
+    def _elevated_task_command(self, enable, sid, result_path):
+        """把任务脚本包上结果采集壳,编码成 powershell -EncodedCommand 参数。
+
+        隐藏窗口下 stdout 不可见,脚本结果落盘到 result_path 回传;整段经
+        base64(UTF-16LE) 传递,规避命令行引号转义问题。
+        """
+        core = self._autostart_task_script(enable, sid)
+        wrapper = (
+            "$ResultPath = '" + result_path.replace("'", "''") + "'\n"
+            "try {\n"
+            "    $Output = & {\n" + core + "\n    }\n"
+            "    $Outcome = @{ ok = $true; output = ($Output -join \"`n\") }\n"
+            "} catch {\n"
+            "    $Outcome = @{ ok = $false; output = $_.Exception.Message }\n"
+            "}\n"
+            "[IO.File]::WriteAllText($ResultPath, ($Outcome | ConvertTo-Json -Compress),"
+            " [Text.UTF8Encoding]::new($false))\n"
+            "exit $(if ($Outcome.ok) { 0 } else { 1 })\n"
+        )
+        encoded = base64.b64encode(wrapper.encode("utf-16-le")).decode("ascii")
+        parameters = subprocess.list2cmdline(
+            [
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-WindowStyle",
+                "Hidden",
+                "-EncodedCommand",
+                encoded,
+            ]
+        )
+        return "powershell.exe", parameters
+
+    def _manage_task_autostart_elevated(self, enable):
+        """普通权限下弹 UAC 申请注册提权任务;拒绝或失败一律返回 False。
+
+        只允许设置页开关(allow_elevate=True)走到这里;UAC 拒绝不算错误,
+        调用方会立即回退注册表路径。脚本与管理员在线时的注册路径完全相同
+        (同一份 _autostart_task_script,含 SID 校验与回读验证)。
+        """
+        try:
+            sid = self._get_autostart_user_sid()
+        except Exception:
+            log_exception("PYAS_Autostart.AutostartMixin._manage_task_autostart_elevated.sid")
+            return False
+
+        result_path = os.path.join(
+            tempfile.gettempdir(),
+            "pyas_autostart_{}_{}.json".format(os.getpid(), uuid.uuid4().hex),
+        )
+        elevated_file, parameters = self._elevated_task_command(enable, sid, result_path)
+
+        class _Icon(ctypes.Union):
+            _fields_ = [("icon", ctypes.wintypes.HANDLE), ("monitor", ctypes.wintypes.HANDLE)]
+
+        class _ExecuteInfo(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", ctypes.wintypes.DWORD),
+                ("fMask", ctypes.wintypes.ULONG),
+                ("hwnd", ctypes.wintypes.HWND),
+                ("lpVerb", ctypes.wintypes.LPCWSTR),
+                ("lpFile", ctypes.wintypes.LPCWSTR),
+                ("lpParameters", ctypes.wintypes.LPCWSTR),
+                ("lpDirectory", ctypes.wintypes.LPCWSTR),
+                ("nShow", ctypes.c_int),
+                ("hInstApp", ctypes.wintypes.HINSTANCE),
+                ("lpIDList", ctypes.c_void_p),
+                ("lpClass", ctypes.wintypes.HKEY),
+                ("hkeyClass", ctypes.wintypes.HKEY),
+                ("dwHotKey", ctypes.wintypes.DWORD),
+                ("icon", _Icon),
+                ("hProcess", ctypes.wintypes.HANDLE),
+            ]
+
+        info = _ExecuteInfo()
+        info.cbSize = ctypes.sizeof(info)
+        info.fMask = 0x40 | 0x100 | 0x400  # NOCLOSEPROCESS|NOASYNC|FLAG_DDEWAIT,与策略提权一致
+        info.lpVerb = "runas"
+        info.lpFile = os.path.join(
+            os.environ.get("SystemRoot", r"C:\Windows"),
+            "System32",
+            "WindowsPowerShell",
+            "v1.0",
+            "powershell.exe",
+        )
+        info.lpParameters = parameters
+        info.nShow = 0
+
+        shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+        shell32.ShellExecuteExW.argtypes = [ctypes.POINTER(_ExecuteInfo)]
+        shell32.ShellExecuteExW.restype = ctypes.wintypes.BOOL
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.WaitForSingleObject.argtypes = [ctypes.wintypes.HANDLE, ctypes.wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype = ctypes.wintypes.DWORD
+        kernel32.CloseHandle.argtypes = [ctypes.wintypes.HANDLE]
+        kernel32.CloseHandle.restype = ctypes.wintypes.BOOL
+
+        outcome = None
+
+        try:
+            if not shell32.ShellExecuteExW(ctypes.byref(info)):
+                error = ctypes.get_last_error()
+                if error == 1223:  # ERROR_CANCELLED:用户在 UAC 里点了「否」
+                    return False
+
+                raise ctypes.WinError(error)
+
+            if info.hProcess and kernel32.WaitForSingleObject(info.hProcess, 120000) != 0:
+                raise OSError("Elevated autostart setup timed out")
+
+            with open(result_path, encoding="utf-8-sig") as handle:
+                outcome = json.load(handle)
+        except (OSError, ValueError):
+            log_exception("PYAS_Autostart.AutostartMixin._manage_task_autostart_elevated")
+            self.write_log(
+                "WARN",
+                "manage_autostart",
+                detail="Elevated autostart setup failed; using the standard startup entry instead",
+                success=False,
+            )
+            return False
+        finally:
+            if info.hProcess:
+                kernel32.CloseHandle(info.hProcess)
+
+            try:
+                os.remove(result_path)
+            except OSError:
+                pass
+
+        state = {}
+
+        if outcome:
+            try:
+                state = json.loads(outcome.get("output") or "{}")
+            except ValueError:
+                state = {}
+
+        if (
+            not outcome
+            or outcome.get("ok") is not True
+            or state.get("verified") is not True
+            or state.get("userSid") != sid
+            or state.get("taskName") != self._elevated_task_name(sid)
+            or state.get("enabled") is not bool(enable)
+        ):
+            self.write_log(
+                "WARN",
+                "manage_autostart",
+                detail="Elevated autostart setup failed; using the standard startup entry instead",
+                success=False,
+            )
+            return False
+
+        self._set_registry_autostart(False)
+        self.autostart_mode = "task"
+        self.write_log(
+            "INFO",
+            "manage_autostart",
+            source=state["taskName"],
+            detail="Autostart configured via scheduled task (administrator at startup)",
+            success=True,
+        )
+        return True
 
     def get_startup_list(self):
         items = []

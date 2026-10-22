@@ -5,6 +5,7 @@
 现在普通权限必须真实写入 HKCU Run,与「启动项管理」页展示同源。
 """
 
+import base64
 import threading
 import unittest
 from unittest.mock import patch
@@ -118,6 +119,64 @@ class RegistryFallbackTests(unittest.TestCase):
             self.assertFalse(owner.manage_autostart(True))
 
         self.assertEqual(owner.autostart_mode, "unavailable")
+
+
+class ElevationUpgradeTests(unittest.TestCase):
+    """设置页开关在普通权限下主动弹 UAC 升级提权任务;开机复核与关闭绝不弹窗。"""
+
+    def test_toggle_tries_elevated_then_falls_back_to_registry(self):
+        owner = _Owner(elevated=False)
+        tried = []
+        owner._manage_task_autostart_elevated = lambda enable: tried.append(enable) or False
+
+        self.assertTrue(owner.manage_autostart(True, allow_elevate=True))
+        self.assertEqual(tried, [True])
+        self.assertEqual(owner.registry_calls, [True], "UAC 未通过时必须回退注册表,开关不能空转")
+        self.assertEqual(owner.autostart_mode, "registry")
+
+    def test_toggle_skips_registry_when_elevated_succeeds(self):
+        owner = _Owner(elevated=False)
+        owner._manage_task_autostart_elevated = lambda enable: True
+
+        self.assertTrue(owner.manage_autostart(True, allow_elevate=True))
+        self.assertEqual(owner.registry_calls, [], "提权成功后不应再写注册表启动项")
+
+    def test_recheck_never_triggers_elevation(self):
+        owner = _Owner(elevated=False)
+
+        def forbidden(enable):
+            raise AssertionError("开机复核不得弹 UAC")
+
+        owner._manage_task_autostart_elevated = forbidden
+
+        self.assertTrue(owner.manage_autostart(True))
+        self.assertEqual(owner.registry_calls, [True])
+
+    def test_disable_never_triggers_elevation(self):
+        owner = _Owner(elevated=False)
+
+        def forbidden(enable):
+            raise AssertionError("关闭自启动不得弹 UAC")
+
+        owner._manage_task_autostart_elevated = forbidden
+
+        self.assertTrue(owner.manage_autostart(False, allow_elevate=True))
+        self.assertEqual(owner.registry_calls, [False])
+
+    def test_elevated_command_wraps_script_and_result_path(self):
+        owner = _Owner(elevated=False)
+        result_path = "C:\\Users\\someone\\AppData\\Local\\Temp\\result.json"
+        file_name, parameters = owner._elevated_task_command(
+            True, "S-1-5-21-0-0-0-1001", result_path
+        )
+
+        self.assertEqual(file_name, "powershell.exe")
+        encoded = parameters.split()[-1]
+        wrapper = base64.b64decode(encoded).decode("utf-16-le")
+        self.assertIn("$ResultPath = '" + result_path + "'", wrapper)
+        self.assertIn("$Sid = 'S-1-5-21-0-0-0-1001'", wrapper)
+        self.assertIn("PYAS_Security_ATS_' + $Sid", wrapper)
+        self.assertIn("RegisterTaskDefinition", wrapper)
 
 
 class ElevatedPathTests(unittest.TestCase):
