@@ -188,7 +188,7 @@ class PolicyStore:
                             item['last_hit'] = max(0, metadata['last_hit'])
         return result
 
-    def begin(self, scope, operation='change', initialize=False):
+    def begin(self, scope, operation='change', initialize=False, relaunch_pid=None):
         scope = frozenset(scope)
         if not scope or scope - POLICY_KEYS:
             raise PolicyDenied('Unsupported policy operation')
@@ -202,7 +202,7 @@ class PolicyStore:
             if self.revision is None and not initialize:
                 raise PolicyDenied('Initialize administrator policy first')
             self.status = {'state': 'authorizing', 'error': ''}
-            lease = self.backend.authorize(scope, self.revision, operation, initialize)
+            lease = self.backend.authorize(scope, self.revision, operation, initialize, relaunch_pid)
             if not lease or not lease.authorized or self.cancelled:
                 if lease: lease.close()
                 raise PolicyDenied('Administrator authorization was cancelled')

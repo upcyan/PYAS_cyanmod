@@ -568,8 +568,8 @@ class WindowsPolicyBackend:
             return value
         except (OSError, ValueError): return None
 
-    def authorize(self, scope, revision, operation, initialize):
-        lease = WindowsPolicyLease(self, scope, revision, operation, initialize)
+    def authorize(self, scope, revision, operation, initialize, relaunch_pid=None):
+        lease = WindowsPolicyLease(self, scope, revision, operation, initialize, relaunch_pid)
         with self.lock: self.leases.add(lease)
         try: lease.start(); return lease
         except BaseException: lease.close(); raise
@@ -588,11 +588,15 @@ class WindowsPolicyBackend:
 
 
 class WindowsPolicyLease:
-    def __init__(self, backend, scope, revision, operation, initialize):
+    def __init__(self, backend, scope, revision, operation, initialize, relaunch_pid=None):
         self.backend, self.scope, self.revision = backend, frozenset(scope), revision
         self.nonce = uuid4().hex
         self.header = dict(protocol=1, nonce=self.nonce, scope=sorted(scope), revision=revision,
             operation=str(operation)[:80], initialize=bool(initialize), pid=os.getpid())
+        if relaunch_pid:
+            # helper 提交成功后以管理员令牌拉起新实例(等旧 pid 退出)。
+            # 位于请求头内,自动被 digest 覆盖,helper 端可信
+            self.header['relaunch_pid'] = int(relaunch_pid)
         self.path = os.path.join(user_data_dir(), 'PolicyRequests', self.nonce + '.request')
         self.file = None; self.process = None; self.native_process = None
         self.authorized = False; self.committed = False; self.sent = False; self.closed = False
@@ -758,6 +762,33 @@ def helper_failure(code, phase):
     return message
 
 
+def _relaunch_elevated_from_request(request):
+    """从已验证的请求头读取 relaunch_pid,经 launcher 等旧实例退出后提权接管。
+
+    请求头在 verify_request_owner 时已通过 digest 与属主校验;这里只接受正
+    整数 pid,启动固定 launcher(--restart <pid>),不含任何可执行内容。
+    重启失败不影响已提交的策略,旧实例按原状继续运行。
+    """
+    try:
+        with open(request, 'rb') as stream:
+            size = struct.unpack('<I', stream.read(4))[0]
+            if size < 2 or size > 60000: return
+            header = json.loads(stream.read(size).decode('utf-8'))
+        pid = header.get('relaunch_pid')
+        if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0: return
+        launcher = os.path.join(os.path.dirname(sys.executable), 'PYAS_Launcher.exe')
+        if not os.path.isfile(launcher): return
+        subprocess.Popen(
+            [launcher, '--restart', str(pid)],
+            cwd=os.path.dirname(launcher),
+            creationflags=0x00000008 | 0x08000000,  # DETACHED_PROCESS | CREATE_NO_WINDOW
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            close_fds=True,
+        )
+    except Exception:
+        pass
+
+
 def helper_main(arguments):
     request = arguments[0] if len(arguments) >= 2 else ''
     if os.name != 'nt' or not getattr(sys, 'frozen', False) or len(arguments) != 2: return 2
@@ -788,6 +819,10 @@ def helper_main(arguments):
                 code = 4; return code
             stdout_text = (out or b'').decode('utf-8', 'replace')[-1200:]
             stderr_text = (err or b'').decode('utf-8', 'replace')[-1200:]
+            if code == 0:
+                # 提交成功:按请求要求以管理员令牌拉起新实例,把"授权+重启"
+                # 合并为一次 UAC。失败不影响提交结果本身
+                _relaunch_elevated_from_request(request)
         finally:
             for handle in reversed(handles): _close(handle)
     except OSError as error:

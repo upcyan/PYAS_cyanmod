@@ -1004,8 +1004,13 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
         return True
 
     def restart_to_apply_policy(self):
-        """策略保存后的重启走提权:新策略里的防护开关(进程溯源/行为防护)
-        需要管理员令牌才能生效,同级重启会让它们继续处于"已授权但没在跑"。"""
+        """策略保存后的重启:非提权走 UAC 提权重启(新策略里的防护开关需要
+        管理员令牌),已提权则同级重启即可。"""
+        from PYAS_ETW import is_elevated
+
+        if is_elevated():
+            return self.restart_application()
+
         title = self._loc({
             "traditional_switch": "需要管理員權限",
             "simplified_switch": "需要管理员权限",

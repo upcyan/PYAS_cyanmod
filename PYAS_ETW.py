@@ -1268,45 +1268,6 @@ ETW_LOG_TEXTS = {
         "russian_switch": "Не запущено при инициализации движка; см. предыдущую запись",
         "slovenian_switch": "Ni zagnano pri inicializaciji mehanizma; glej prejšnji vnos",
     },
-    "feature_etw": {
-        "traditional_switch": "進程溯源",
-        "simplified_switch": "进程溯源",
-        "english_switch": "process attribution",
-        "japanese_switch": "プロセス追跡",
-        "korean_switch": "프로세스 추적",
-        "french_switch": "le traçage de processus",
-        "spanish_switch": "el rastreo de procesos",
-        "hindi_switch": "प्रक्रिया ट्रेसिंग",
-        "arabic_switch": "تتبع العمليات",
-        "russian_switch": "отслеживание процессов",
-        "slovenian_switch": "sledenje procesom",
-    },
-    "feature_behavior": {
-        "traditional_switch": "行為防護",
-        "simplified_switch": "行为防护",
-        "english_switch": "behavior defense",
-        "japanese_switch": "ビヘイビア防御",
-        "korean_switch": "행동 방어",
-        "french_switch": "la défense comportementale",
-        "spanish_switch": "la defensa conductual",
-        "hindi_switch": "व्यवहार रक्षा",
-        "arabic_switch": "الحماية السلوكية",
-        "russian_switch": "поведенческую защиту",
-        "slovenian_switch": "vedenjsko zaščito",
-    },
-    "elevation_restart_body": {
-        "traditional_switch": "即將以管理員身份重啟 PYAS 以啟用{0}；重啟後開關自動生效，請重新打開界面。",
-        "simplified_switch": "即将以管理员身份重启 PYAS 以启用{0}；重启后开关自动生效，请重新打开界面。",
-        "english_switch": "PYAS will restart with administrator rights to enable {0}; the switch takes effect automatically after the restart.",
-        "japanese_switch": "{0} を有効にするため、PYAS を管理者権限で再起動します。再起動後はスイッチが自動的に有効になります。",
-        "korean_switch": "{0}을(를) 활성화하기 위해 PYAS를 관리자 권한으로 다시 시작합니다. 다시 시작 후 스위치가 자동으로 적용됩니다.",
-        "french_switch": "PYAS va redémarrer avec des droits administrateur pour activer {0} ; l'interrupteur prendra effet automatiquement après le redémarrage.",
-        "spanish_switch": "PYAS se reiniciará con permisos de administrador para activar {0}; el interruptor surte efecto automáticamente tras el reinicio.",
-        "hindi_switch": "{0} सक्षम करने के लिए PYAS व्यवस्थापक अधिकारों के साथ पुनः प्रारंभ होगा; पुनः प्रारंभ के बाद स्विच स्वतः प्रभावी होगा।",
-        "arabic_switch": "سيُعاد تشغيل PYAS بصلاحيات المسؤول لتفعيل {0}؛ يصبح المفتاح ساريًا تلقائيًا بعد إعادة التشغيل.",
-        "russian_switch": "PYAS перезапустится с правами администратора, чтобы включить {0}; переключатель вступит в силу автоматически после перезапуска.",
-        "slovenian_switch": "PYAS se bo znova zagnal s skrbniškimi pravicami za omogočanje {0}; stikalo velja samodejno po ponovnem zagonu.",
-    },
     "burst_detail": {
         "traditional_switch": "{0} 在 {1} 秒內改寫了 {2} 個文件類檔案，疑似勒索行為",
         "simplified_switch": "{0} 在 {1} 秒内改写了 {2} 个文档类文件，疑似勒索行为",
@@ -1338,28 +1299,6 @@ class EtwMixin:
     def _etw_log_text(self, key: str, *args: object) -> str:
         """按当前语言取日志文案;占位符按各语言语序填充。"""
         return self._loc(ETW_LOG_TEXTS[key]).format(*args)
-
-    def _etw_availability(self):
-        """供 update_config 判断当前进程能否建 ETW 会话(不落日志)。"""
-        return available()
-
-    def _etw_restart_notice(self, feature_key: str):
-        """提权重启前的托盘提示 → (标题, 正文)。"""
-        feature = self._loc(ETW_LOG_TEXTS[feature_key])
-        title = self._loc({
-            "traditional_switch": "需要管理員權限",
-            "simplified_switch": "需要管理员权限",
-            "english_switch": "Administrator rights required",
-            "japanese_switch": "管理者権限が必要です",
-            "korean_switch": "관리자 권한이 필요합니다",
-            "french_switch": "Droits administrateur requis",
-            "spanish_switch": "Se requieren permisos de administrador",
-            "hindi_switch": "व्यवस्थापक अधिकार आवश्यक",
-            "arabic_switch": "يلزم صلاحيات المسؤول",
-            "russian_switch": "Требуются права администратора",
-            "slovenian_switch": "Zahtevane skrbniške pravice",
-        })
-        return (title, self._loc(ETW_LOG_TEXTS["elevation_restart_body"]).format(feature))
 
     def _stop_etw_with_behavior_notice(self) -> bool:
         stopped = bool(self.stop_etw_consumer())

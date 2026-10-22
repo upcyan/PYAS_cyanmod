@@ -79,7 +79,7 @@ class PolicyAccessTests(unittest.TestCase):
         self.initialize()
         entered, release = threading.Event(), threading.Event()
         original = self.backend.authorize
-        def authorize(*args):
+        def authorize(*args, **kwargs):
             self.assertTrue(self.owner.pyas_config['process_switch'])
             entered.set(); release.wait(2)
             return original(*args)
@@ -170,7 +170,7 @@ class PolicyAccessTests(unittest.TestCase):
     def test_commit_failure_returns_detail_and_does_not_start_protection(self):
         from PYAS_Policy import PolicyDenied
         original = self.backend.authorize
-        def authorize(*args):
+        def authorize(*args, **kwargs):
             lease = original(*args)
             lease.commit = Mock(side_effect=PolicyDenied('Administrator helper exited 49: atomic replacement failed'))
             return lease

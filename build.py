@@ -774,6 +774,7 @@ BUILD_CONTRACT_PATTERNS = (
     'test_log_action_i18n.py',
     'test_behavior_defense.py',
     'test_policy_config_keys.py',
+    'test_policy_relaunch.py',
     'test_write_owner_query.py',
 )
 

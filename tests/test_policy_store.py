@@ -20,7 +20,7 @@ class Backend:
     def read_user(self): return copy.deepcopy(self.user)
     def read_policy(self): return copy.deepcopy(self.document)
     def write_user(self, value): self.user = copy.deepcopy(value)
-    def authorize(self, scope, revision, operation, initialize):
+    def authorize(self, scope, revision, operation, initialize, relaunch_pid=None):
         self.prompts += 1
         return Lease(self, scope, revision, self.allow)
     def cancel(self): pass

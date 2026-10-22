@@ -41,6 +41,11 @@ _BASIC_MODE_TEXTS = {
 }
 
 class PolicyAccessMixin:
+    # 打开即需要管理员令牌的防护开关:非提权下切换值随正常路径持久化,
+    # 授权(一次 UAC)由策略 helper 提交,提交后 helper 以管理员拉起新实例,
+    # 重启后由引擎初始化接管 —— 不再有第二次 UAC 和进程内必败的启动尝试
+    ELEVATION_SWITCHES = frozenset({'etw_attribution_switch', 'behavior_defense_switch'})
+
     def _load_scoped_config(self):
         import atexit
         from PYAS_Policy import PolicyStore
@@ -90,7 +95,8 @@ class PolicyAccessMixin:
         result['policy_status'] = self.get_policy_status()
         return result
 
-    def _policy_call(self, scope, callback, failure=False, operation='change', initialize=False):
+    def _policy_call(self, scope, callback, failure=False, operation='change', initialize=False,
+                     relaunch_pid=None):
         store = getattr(self, '_policy_store', None)
         if store is None:
             return failure if getattr(self, '_policy_required', False) else callback()
@@ -103,7 +109,7 @@ class PolicyAccessMixin:
             try: return callback()
             finally: store.local.user_only = previous_user_only
         try:
-            lease = store.begin(scope, operation, initialize)
+            lease = store.begin(scope, operation, initialize, relaunch_pid)
         except (PolicyDenied, OSError, ValueError) as error:
             self._policy_notice(str(error))
             return failure
@@ -111,7 +117,12 @@ class PolicyAccessMixin:
         store.local.user_only = False
         try:
             if getattr(self, 'closing', False): return failure
-            return callback()
+            result = callback()
+            # helper 已按请求以管理员拉起新实例(等本 pid 退出):尽快让位,
+            # 让 launcher 的等待立即满足。提交失败时 helper 不会拉起,不退出
+            if relaunch_pid and result not in (None, False) and getattr(lease, 'committed', False):
+                self.start_daemon_thread(self._restart_after_reply)
+            return result
         finally:
             store.local.user_only = previous_user_only
             store.finish(lease)
@@ -154,7 +165,14 @@ class PolicyAccessMixin:
             if self.pyas_config.get(key) == value:
                 if not self.save_config(): return self.pyas_config.get(key)
             return result
-        return self._policy_call(scope, update, self.pyas_config.get(key), 'setting:' + key)
+        from PYAS_ETW import is_elevated
+
+        relaunch = (
+            key in self.ELEVATION_SWITCHES and bool(value)
+            and not is_elevated()
+        )
+        return self._policy_call(scope, update, self.pyas_config.get(key), 'setting:' + key,
+                                 relaunch_pid=os.getpid() if relaunch else None)
 
     def reset_config(self):
         target = super().reset_config
@@ -367,8 +385,11 @@ class PolicyAccessMixin:
                 store.status = {'state': 'restart_required', 'error': ''}
                 return {'ok': True, 'restart_required': True}
             return {'ok': False, 'error': 'policy_commit_failed'}
+        from PYAS_ETW import is_elevated
+
         result = self._policy_call(POLICY_KEYS, initialize,
-            {'ok': False, 'error': 'administrator_authorization_required'}, 'initialize', initialize=True)
+            {'ok': False, 'error': 'administrator_authorization_required'}, 'initialize', initialize=True,
+            relaunch_pid=os.getpid() if not is_elevated() else None)
         if not result.get('ok'):
             status = store.snapshot()
             result = {**result, 'state': status['state'], 'detail': status.get('error', ''),
