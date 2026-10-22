@@ -20,6 +20,8 @@ LANGS = (
 # 动作字面量 = write_log( 的第二个实参(第一个是级别)
 _STR = r'"((?:[^"\\]|\\.)*)"'
 _CALL = re.compile(r"write_log\(\s*" + _STR + r"\s*,\s*" + _STR, re.S)
+# 动作经由模块常量传入 write_log 时(ACTION_XXX = "名字")字面量扫描看不到,单独收集
+_ACTION_CONST = re.compile(r'^([A-Z0-9_]*ACTION[A-Z0-9_]*)\s*=\s*"([^"]+)"', re.M)
 
 
 def i18n_blocks():
@@ -42,6 +44,9 @@ def code_action_literals():
         text = py.read_text(encoding="utf-8")
 
         for m in _CALL.finditer(text):
+            actions.setdefault(m.group(2), set()).add(py.name)
+
+        for m in _ACTION_CONST.finditer(text):
             actions.setdefault(m.group(2), set()).add(py.name)
 
     return actions

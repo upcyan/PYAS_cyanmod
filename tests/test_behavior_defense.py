@@ -173,6 +173,9 @@ class RollbackHost(BehaviorMixin):
     def is_in_whitelist(self, path):
         return path in self._whitelist
 
+    def _spawn_behavior_worker(self, target, name):
+        target()  # 测试内联执行,消除线程时序
+
 
 class RollbackTests(unittest.TestCase):
     def prepare(self, tmp):
@@ -273,7 +276,7 @@ class RollbackTests(unittest.TestCase):
             creations = []
 
             class StubVss:
-                def create_if_due(self, drive, now):
+                def create_if_due(self, drive, now=None):
                     creations.append((drive, now))
                     return SNAP_DEVICE if len(creations) == 1 else None
 

@@ -38,7 +38,6 @@ import base64
 import json
 import logging
 import os
-import re
 import shutil
 import subprocess
 import threading
@@ -463,6 +462,10 @@ class BehaviorMixin:
 
     # -- 写事件入口(EtwMixin._on_etw_write 调用,已在监控后缀闸门之后) ------
 
+    def _spawn_behavior_worker(self, target, name: str) -> None:
+        """慢操作(PowerShell 快照/逐文件回滚)的后台派发;测试宿主覆盖为内联。"""
+        threading.Thread(target=target, name=name, daemon=True).start()
+
     def _behavior_on_write(self, pid: int, path: str, now: float | None = None) -> None:
         """写/删事件统一入口:开关关闭直接返回,内部只记文档类目标。"""
         if not self._behavior_switch_cached():
@@ -481,30 +484,38 @@ class BehaviorMixin:
             self._behavior_escalate(pid, path, stamp)
 
     def _behavior_escalate(self, pid: int, path: str, stamp: float) -> None:
-        """L2:抢在加密蔓延前留存快照;失败只记日志,不影响告警链路。"""
+        """L2:抢在加密蔓延前留存快照;失败只记日志,不影响告警链路。
+
+        PowerShell 建快照可达数十秒,绝不能在 ETW 回调线程里同步执行 ——
+        事件消费被堵住会撑爆内核缓冲。派后台线程,冷却由 create_if_due 把关。
+        """
         self._ensure_vss_manager()
         drive = path[:2].upper()
-        device = self._vss.create_if_due(drive, stamp)
 
-        if device:
-            self.write_log(
-                "INFO",
-                ACTION_SNAPSHOT,
-                detail=self._loc(BEHAVIOR_LOG_TEXTS["snapshot_created"]).format(drive),
-                pid=pid,
-                source=path,
-            )
-        else:
-            self.write_log(
-                "WARN",
-                ACTION_SNAPSHOT,
-                detail=self._loc(BEHAVIOR_LOG_TEXTS["snapshot_failed"]).format(
-                    getattr(self._vss, "last_error", "") or "unknown"
-                ),
-                pid=pid,
-                source=path,
-                success=False,
-            )
+        def worker():
+            device = self._vss.create_if_due(drive)
+
+            if device:
+                self.write_log(
+                    "INFO",
+                    ACTION_SNAPSHOT,
+                    detail=self._loc(BEHAVIOR_LOG_TEXTS["snapshot_created"]).format(drive),
+                    pid=pid,
+                    source=path,
+                )
+            else:
+                self.write_log(
+                    "WARN",
+                    ACTION_SNAPSHOT,
+                    detail=self._loc(BEHAVIOR_LOG_TEXTS["snapshot_failed"]).format(
+                        getattr(self._vss, "last_error", "") or "unknown"
+                    ),
+                    pid=pid,
+                    source=path,
+                    success=False,
+                )
+
+        self._spawn_behavior_worker(worker, "PYAS-Behavior-Snapshot")
 
     def _ensure_vss_manager(self) -> None:
         if getattr(self, "_vss", None) is None:
@@ -519,7 +530,10 @@ class BehaviorMixin:
         if not self._behavior_switch_cached() or not self._behavior_auto_rollback_cached():
             return
 
-        self.rollback_process_writes(pid)
+        # 回滚是逐文件 I/O,同样不能堵 ETW 回调线程;台账加锁并发安全
+        self._spawn_behavior_worker(
+            lambda: self.rollback_process_writes(pid), "PYAS-Behavior-Rollback"
+        )
 
     def rollback_process_writes(self, pid: int, now: float | None = None) -> dict:
         """把该进程在快照之后改写的文件恢复为快照版本,新文件移入隔离目录。"""
