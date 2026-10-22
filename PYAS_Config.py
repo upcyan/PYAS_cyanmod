@@ -1,5 +1,6 @@
 from PYAS_Diagnostics import log_exception
 from PYAS_AI import mask_ai_key
+from PYAS_ETW import ETW_LOG_TEXTS
 from PYAS_Version import UPSTREAM_TRACKED
 import os
 import copy
@@ -160,32 +161,53 @@ class ConfigMixin:
 
                     return bool(self.stop_system_driver())
                 elif key == "etw_attribution_switch":
-                    # 未提权时开启会走到这里返回 False:开关回拨,
-                    # 界面 revertSwitch 还原 —— 与驱动开关失败同款体验
+                    # 未提权时消费者起不来,进程内切换永远失败 —— 弹 UAC 以
+                    # 管理员重启(开关意愿已随正常路径持久化,重启后由引擎
+                    # 初始化接管);用户拒绝 UAC 则回拨开关
                     if state:
+                        ok, reason = self._etw_availability()
+
+                        if not ok:
+                            if reason == "elevated-required" and self.restart_application_elevated(
+                                *self._etw_restart_notice("feature_etw")
+                            ):
+                                return True
+
+                            from PYAS_ETW import UNAVAILABLE_REASON_KEYS
+
+                            self.write_log(
+                                "WARN",
+                                "ETW Attribution",
+                                detail=self._loc(ETW_LOG_TEXTS[UNAVAILABLE_REASON_KEYS[reason]])
+                                if reason in UNAVAILABLE_REASON_KEYS else f"Unavailable: {reason}",
+                                success=False,
+                            )
+                            return False
+
                         return bool(self.start_etw_consumer())
 
-                    stopped = bool(self.stop_etw_consumer())
-
-                    # 行为防护的数据源是 ETW:源关了它就休眠,如实提醒
-                    with self.lock_config:
-                        behavior_on = bool(self.pyas_config.get("behavior_defense_switch", False))
-
-                    if stopped and behavior_on:
-                        from PYAS_Behavior import BEHAVIOR_LOG_TEXTS
-
-                        self.write_log(
-                            "WARN",
-                            "ETW Attribution",
-                            detail=self._loc(BEHAVIOR_LOG_TEXTS["etw_source_lost"]),
-                            success=False,
-                        )
-
-                    return stopped
+                    return self._stop_etw_with_behavior_notice()
                 elif key == "behavior_defense_switch":
-                    # 数据源是 ETW:先确保消费者在跑(同样要求管理员),
-                    # 起不来就回拨开关 —— 与驱动/溯源开关同款体验
+                    # 数据源是 ETW:未提权时同款提权重启;起不来回拨开关
                     if state:
+                        ok, reason = self._etw_availability()
+
+                        if not ok:
+                            if reason == "elevated-required" and self.restart_application_elevated(
+                                *self._etw_restart_notice("feature_behavior")
+                            ):
+                                return True
+
+                            from PYAS_Behavior import ACTION_DEFENSE, BEHAVIOR_LOG_TEXTS
+
+                            self.write_log(
+                                "WARN",
+                                ACTION_DEFENSE,
+                                detail=self._loc(BEHAVIOR_LOG_TEXTS["requires_etw"]),
+                                success=False,
+                            )
+                            return False
+
                         if not self.start_etw_consumer():
                             from PYAS_Behavior import ACTION_DEFENSE, BEHAVIOR_LOG_TEXTS
 

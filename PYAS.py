@@ -935,6 +935,74 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
             except Exception:
                 log_exception("PYAS._MainMixin._restart_after_reply.notify")
 
+    def restart_application_elevated(self, notice_title, notice_body):
+        """弹 UAC 以管理员令牌重启自身,用于"开关需要提权才生效"的场景。
+
+        进程溯源/行为防护的 ETW 消费者必须在提权进程内建会话,进程内切换
+        做不到 —— 与 autostart 的 ShellExecuteExW 提权同一套做法:经提权的
+        launcher(--restart <pid>)等本实例退出后接管,新实例继承管理员令牌,
+        引擎初始化读到已持久化的开关后自动拉起消费者。用户拒绝 UAC 返回
+        False,调用方回拨开关;dev 运行没有 launcher,同样返回 False。
+        """
+        if getattr(self, "closing", False):
+            return False
+
+        launcher = os.path.join(os.path.dirname(sys.executable), "PYAS_Launcher.exe")
+
+        if not getattr(sys, "frozen", False) or not os.path.isfile(launcher):
+            return False
+
+        class _Icon(ctypes.Union):
+            _fields_ = [("icon", ctypes.wintypes.HANDLE), ("monitor", ctypes.wintypes.HANDLE)]
+
+        class _ExecuteInfo(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", ctypes.wintypes.DWORD),
+                ("fMask", ctypes.wintypes.ULONG),
+                ("hwnd", ctypes.wintypes.HWND),
+                ("lpVerb", ctypes.wintypes.LPCWSTR),
+                ("lpFile", ctypes.wintypes.LPCWSTR),
+                ("lpParameters", ctypes.wintypes.LPCWSTR),
+                ("lpDirectory", ctypes.wintypes.LPCWSTR),
+                ("nShow", ctypes.c_int),
+                ("hInstApp", ctypes.wintypes.HINSTANCE),
+                ("lpIDList", ctypes.c_void_p),
+                ("lpClass", ctypes.wintypes.HKEY),
+                ("hkeyClass", ctypes.wintypes.HKEY),
+                ("dwHotKey", ctypes.wintypes.DWORD),
+                ("icon", _Icon),
+                ("hProcess", ctypes.wintypes.HANDLE),
+            ]
+
+        info = _ExecuteInfo()
+        info.cbSize = ctypes.sizeof(info)
+        info.fMask = 0x00000040 | 0x00000400  # NOASYNC | FLAG_DDEWAIT:拿到 hProcess 即返回,不等待
+        info.lpVerb = "runas"
+        info.lpFile = launcher
+        info.lpParameters = f"--restart {os.getpid()}"
+        info.nShow = 0
+
+        shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+        shell32.ShellExecuteExW.argtypes = [ctypes.POINTER(_ExecuteInfo)]
+        shell32.ShellExecuteExW.restype = ctypes.wintypes.BOOL
+
+        try:
+            if not shell32.ShellExecuteExW(ctypes.byref(info)):
+                error = ctypes.get_last_error()
+
+                if error == 1223:  # ERROR_CANCELLED:用户在 UAC 里点了「否」
+                    return False
+
+                raise ctypes.WinError(error)
+        except Exception:
+            log_exception("PYAS._MainMixin.restart_application_elevated")
+            return False
+
+        # 开关值在 update_config 的正常路径里先落盘,这里只负责让位
+        self.dispatch_notification(notice_title, notice_body)
+        self.start_daemon_thread(self._restart_after_reply)
+        return True
+
     def destroy_window_with_timeout(self, window, timeout=1.0):
         if not window:
             return
