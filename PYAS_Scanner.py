@@ -1,5 +1,6 @@
 from PYAS_Diagnostics import log_exception
 from PYAS_Diagnostics import observe_future, exception_sequence
+from PYAS_ETW import ETW_LOG_TEXTS
 import os
 import json
 import time
@@ -100,7 +101,7 @@ class ScannerMixin(CloudQueueMixin):
                     self.write_log(
                         "WARN",
                         "ETW Attribution",
-                        detail="Not started at engine init (see previous reason)",
+                        detail=self._loc(ETW_LOG_TEXTS["engine_init_skipped"]),
                         success=False,
                     )
 

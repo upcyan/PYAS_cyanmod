@@ -1163,6 +1163,127 @@ def convert_property(in_type: int, raw: ctypes.Array, size: int):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# 日志文案(写时本地化):detail 在 write_log 之前就按当前语言成形,
+# 前端 translateLogDetail 查不到句式时原文就是用户语言 —— 与 PYAS_Agents
+# 的 _AUDIT_TEXTS 同一模式。动作列("ETW Attribution"/"Ransomware Heuristic")
+# 的翻译在 i18n.js,两者缺一不可,契约由 tests/test_log_action_i18n.py 强制。
+# ---------------------------------------------------------------------------
+
+# available() 原因码 → 文案键
+UNAVAILABLE_REASON_KEYS = {
+    "elevated-required": "unavailable_elevated",
+    "unsupported-platform": "unavailable_platform",
+}
+
+ETW_LOG_TEXTS = {
+    "unavailable_elevated": {
+        "traditional_switch": "需要管理員權限，進程溯源未啟動",
+        "simplified_switch": "需要管理员权限，进程溯源未启动",
+        "english_switch": "Administrator rights required; attribution not started",
+        "japanese_switch": "管理者権限が必要のため、プロセス追跡を開始できませんでした",
+        "korean_switch": "관리자 권한이 필요하여 프로세스 추적을 시작하지 못했습니다",
+        "french_switch": "Droits administrateur requis ; traçage non démarré",
+        "spanish_switch": "Se requieren permisos de administrador; rastreo no iniciado",
+        "hindi_switch": "व्यवस्थापक अधिकार आवश्यक; प्रक्रिया ट्रेसिंग प्रारंभ नहीं हुई",
+        "arabic_switch": "يلزم صلاحيات المسؤول؛ لم يبدأ تتبع العمليات",
+        "russian_switch": "Требуются права администратора; отслеживание не запущено",
+        "slovenian_switch": "Zahtevane skrbniške pravice; sledenje ni zagnano",
+    },
+    "unavailable_platform": {
+        "traditional_switch": "當前平台不支援",
+        "simplified_switch": "当前平台不支持",
+        "english_switch": "Not supported on this platform",
+        "japanese_switch": "このプラットフォームでは対応していません",
+        "korean_switch": "이 플랫폼은 지원되지 않습니다",
+        "french_switch": "Non pris en charge sur cette plateforme",
+        "spanish_switch": "No compatible con esta plataforma",
+        "hindi_switch": "इस प्लेटफ़ॉर्म पर समर्थित नहीं",
+        "arabic_switch": "غير مدعوم على هذه المنصة",
+        "russian_switch": "Не поддерживается на этой платформе",
+        "slovenian_switch": "Na tej platformi ni podprto",
+    },
+    "start_failed": {
+        "traditional_switch": "啟動失敗： {0}",
+        "simplified_switch": "启动失败： {0}",
+        "english_switch": "Start failed: {0}",
+        "japanese_switch": "開始に失敗しました: {0}",
+        "korean_switch": "시작 실패: {0}",
+        "french_switch": "Échec du démarrage : {0}",
+        "spanish_switch": "Error al iniciar: {0}",
+        "hindi_switch": "प्रारंभ विफल: {0}",
+        "arabic_switch": "فشل البدء: {0}",
+        "russian_switch": "Не удалось запустить: {0}",
+        "slovenian_switch": "Zagon ni uspel: {0}",
+    },
+    "started": {
+        "traditional_switch": "即時記錄檔案寫入方已開啟",
+        "simplified_switch": "实时记录文件写入方已开启",
+        "english_switch": "Real-time write attribution started",
+        "japanese_switch": "ファイル書き込み元の記録を開始しました",
+        "korean_switch": "파일 작성 프로세스 추적을 시작했습니다",
+        "french_switch": "Traçage des écritures démarré",
+        "spanish_switch": "Seguimiento de escrituras iniciado",
+        "hindi_switch": "फ़ाइल लेखक ट्रैकिंग प्रारंभ",
+        "arabic_switch": "بدأ تتبع كاتب الملفات",
+        "russian_switch": "Отслеживание записывающих процессов запущено",
+        "slovenian_switch": "Sledenje zapisovalcem datotek je zagnano",
+    },
+    "stopped": {
+        "traditional_switch": "即時記錄檔案寫入方已停止",
+        "simplified_switch": "实时记录文件写入方已停止",
+        "english_switch": "Real-time write attribution stopped",
+        "japanese_switch": "ファイル書き込み元の記録を停止しました",
+        "korean_switch": "파일 작성 프로세스 추적을 중지했습니다",
+        "french_switch": "Traçage des écritures arrêté",
+        "spanish_switch": "Seguimiento de escrituras detenido",
+        "hindi_switch": "फ़ाइल लेखक ट्रैकिंग बंद",
+        "arabic_switch": "أُوقف تتبع كاتب الملفات",
+        "russian_switch": "Отслеживание записывающих процессов остановлено",
+        "slovenian_switch": "Sledenje zapisovalcem datotek je ustavljeno",
+    },
+    "stop_failed": {
+        "traditional_switch": "停止失敗",
+        "simplified_switch": "停止失败",
+        "english_switch": "Stop failed",
+        "japanese_switch": "停止に失敗しました",
+        "korean_switch": "중지 실패",
+        "french_switch": "Échec de l'arrêt",
+        "spanish_switch": "Error al detener",
+        "hindi_switch": "बंद करना विफल",
+        "arabic_switch": "فشل الإيقاف",
+        "russian_switch": "Не удалось остановить",
+        "slovenian_switch": "Ustavitev ni uspela",
+    },
+    "engine_init_skipped": {
+        "traditional_switch": "引擎初始化時未啟動，原因見上一條",
+        "simplified_switch": "引擎初始化时未启动，原因见上一条",
+        "english_switch": "Not started during engine init; see previous entry",
+        "japanese_switch": "エンジン初期化時に開始できませんでした。前の項目を参照",
+        "korean_switch": "엔진 초기화 중 시작하지 못했습니다. 이전 항목을 참조하세요",
+        "french_switch": "Non démarré à l'init du moteur ; voir l'entrée précédente",
+        "spanish_switch": "No iniciado durante la inicialización; ver la entrada anterior",
+        "hindi_switch": "इंजन आरंभीकरण में प्रारंभ नहीं हुआ; पिछली प्रविष्टि देखें",
+        "arabic_switch": "لم يبدأ أثناء تهيئة المحرك؛ راجع القيد السابق",
+        "russian_switch": "Не запущено при инициализации движка; см. предыдущую запись",
+        "slovenian_switch": "Ni zagnano pri inicializaciji mehanizma; glej prejšnji vnos",
+    },
+    "burst_detail": {
+        "traditional_switch": "{0} 在 {1} 秒內改寫了 {2} 個文件類檔案，疑似勒索行為",
+        "simplified_switch": "{0} 在 {1} 秒内改写了 {2} 个文档类文件，疑似勒索行为",
+        "english_switch": "{0} modified {2} documents within {1}s, possible ransomware",
+        "japanese_switch": "{0} が {1} 秒間に {2} 件の文書ファイルを書き換えました（ランサムウェアの疑い）",
+        "korean_switch": "{0}이(가) {1}초 내에 문서 {2}개를 변경했습니다(랜섬웨어 의심)",
+        "french_switch": "{0} a modifié {2} documents en {1} s, rançongiciel possible",
+        "spanish_switch": "{0} modificó {2} documentos en {1} s, posible ransomware",
+        "hindi_switch": "{0} ने {1} सेकंड में {2} दस्तावेज़ बदले, रैंसमवेयर संभावित",
+        "arabic_switch": "{0} عدّل {2} ملفًا خلال {1} ثانية، احتمال برمجيات فدية",
+        "russian_switch": "{0} изменил(а) {2} документов за {1} с, возможно шифровальщик",
+        "slovenian_switch": "{0} je v {1} s spremenil {2} dokumentov, mogoč izsiljevalski program",
+    },
+}
+
+
 class EtwMixin:
     """etw_attribution_switch 的执行体:启动/停止消费者、溯源入缓存、
     勒索启发告警。依赖宿主提供 lock_etw/lock_config/pyas_config/
@@ -1175,12 +1296,22 @@ class EtwMixin:
         watcher = self.etw_watcher
         return bool(watcher and watcher.running)
 
+    def _etw_log_text(self, key: str, *args: object) -> str:
+        """按当前语言取日志文案;占位符按各语言语序填充。"""
+        return self._loc(ETW_LOG_TEXTS[key]).format(*args)
+
     def start_etw_consumer(self) -> bool:
         ok, reason = available()
 
         if not ok:
-            # 未提权等场景:返回 False,update_config 会回拨开关并还原界面
-            self.write_log("WARN", "ETW Attribution", detail=f"Unavailable: {reason}", success=False)
+            # 未提权等场景:返回 False,update_config 会回拨开关并还原界面。
+            # detail 写时本地化;未知原因码退回原样(不应发生,留诊断线索)
+            detail = (
+                self._etw_log_text(UNAVAILABLE_REASON_KEYS[reason])
+                if reason in UNAVAILABLE_REASON_KEYS
+                else f"Unavailable: {reason}"
+            )
+            self.write_log("WARN", "ETW Attribution", detail=detail, success=False)
             return False
 
         with self.lock_etw:
@@ -1204,14 +1335,17 @@ class EtwMixin:
 
             if not watcher.start():
                 self.write_log(
-                    "WARN", "ETW Attribution", detail=f"Start failed: {watcher.last_error}", success=False
+                    "WARN",
+                    "ETW Attribution",
+                    detail=self._etw_log_text("start_failed", watcher.last_error),
+                    success=False,
                 )
                 return False
 
             self.etw_watcher = watcher
             self.etw_started_at = time.time()
 
-        self.write_log("INFO", "ETW Attribution", detail="Consumer started")
+        self.write_log("INFO", "ETW Attribution", detail=self._etw_log_text("started"))
         return True
 
     def stop_etw_consumer(self) -> bool:
@@ -1226,7 +1360,7 @@ class EtwMixin:
         self.write_log(
             "INFO",
             "ETW Attribution",
-            detail="Consumer stopped" if stopped else "Stop failed",
+            detail=self._etw_log_text("stopped" if stopped else "stop_failed"),
             success=stopped,
         )
         return stopped
@@ -1303,7 +1437,9 @@ class EtwMixin:
         self.write_log(
             "WARN",
             "Ransomware Heuristic",
-            detail=f"{suspect} modified {burst.count} documents within {BURST_WINDOW_SECONDS:.0f}s",
+            detail=self._etw_log_text(
+                "burst_detail", suspect, int(BURST_WINDOW_SECONDS), burst.count
+            ),
             pid=burst.pid,
             source=suspect,
             success=False,
