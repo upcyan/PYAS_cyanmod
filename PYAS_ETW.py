@@ -1416,6 +1416,10 @@ class EtwMixin:
         except Exception:
             logger.debug("etw attribution record failed", exc_info=True)
 
+        # 行为防护(L1 台账 + L2 升级快照;开关关闭时内部自判)。
+        # 必须在勒索告警之前:告警若触发自动回滚,台账要已包含当前这条写入
+        self._behavior_on_write(pid, path)
+
         burst = self._etw_heuristic.record(pid, path)
 
         if burst:
@@ -1425,6 +1429,9 @@ class EtwMixin:
         # 删除不进溯源缓存(文件已不在),但计入勒索启发:加密常伴随删除原文件
         if not self._etw_should_track(path):
             return
+
+        # 行为防护:删除同样进台账,回滚时才能从快照找回被删文件(先于告警)
+        self._behavior_on_write(pid, path)
 
         burst = self._etw_heuristic.record(pid, path)
 
@@ -1444,6 +1451,10 @@ class EtwMixin:
             source=suspect,
             success=False,
         )
+
+        # L3:行为防护开启且 auto_rollback 时,这里顺带执行回滚
+        if getattr(self, "_behavior_maybe_rollback", None):
+            self._behavior_maybe_rollback(burst.pid)
 
         title = self._loc({
             "traditional_switch": "勒索行為警告",

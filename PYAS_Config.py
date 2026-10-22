@@ -165,7 +165,41 @@ class ConfigMixin:
                     if state:
                         return bool(self.start_etw_consumer())
 
-                    return bool(self.stop_etw_consumer())
+                    stopped = bool(self.stop_etw_consumer())
+
+                    # 行为防护的数据源是 ETW:源关了它就休眠,如实提醒
+                    with self.lock_config:
+                        behavior_on = bool(self.pyas_config.get("behavior_defense_switch", False))
+
+                    if stopped and behavior_on:
+                        from PYAS_Behavior import BEHAVIOR_LOG_TEXTS
+
+                        self.write_log(
+                            "WARN",
+                            "ETW Attribution",
+                            detail=self._loc(BEHAVIOR_LOG_TEXTS["etw_source_lost"]),
+                            success=False,
+                        )
+
+                    return stopped
+                elif key == "behavior_defense_switch":
+                    # 数据源是 ETW:先确保消费者在跑(同样要求管理员),
+                    # 起不来就回拨开关 —— 与驱动/溯源开关同款体验
+                    if state:
+                        if not self.start_etw_consumer():
+                            from PYAS_Behavior import ACTION_DEFENSE, BEHAVIOR_LOG_TEXTS
+
+                            self.write_log(
+                                "WARN",
+                                ACTION_DEFENSE,
+                                detail=self._loc(BEHAVIOR_LOG_TEXTS["requires_etw"]),
+                                success=False,
+                            )
+                            return False
+
+                        return True
+
+                    return True
                 elif key == "context_switch":
                     return self.register_context_menu(state, retry=bool(state)) is not False
                 elif key == "classic_menu_switch":

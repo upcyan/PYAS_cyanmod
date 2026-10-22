@@ -7,6 +7,9 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from PYAS_Engine import rule_scanner, pe_scanner, cloud_scanner
 from PYAS_ETW import BurstHeuristic, IS_WINDOWS as ETW_WINDOWS
+from PYAS_Behavior import (
+    L2_SNAPSHOT_COOLDOWN_SECONDS, L2_THRESHOLD, L2_WINDOW_SECONDS, TouchedFilesLedger,
+)
 from PYAS_Version import VERSION
 
 
@@ -73,6 +76,23 @@ class RuntimeMixin:
         self._etw_heuristic = BurstHeuristic() if ETW_WINDOWS else None
         self._etw_suffixes = frozenset()
         self._etw_suffix_stamp = 0.0
+
+        # 行为防护(渐进监控 + 紧急卷影回滚,PYAS_Behavior.BehaviorMixin 使用)
+        self._behavior_ledger = TouchedFilesLedger() if ETW_WINDOWS else None
+        self._behavior_l2 = (
+            BurstHeuristic(
+                threshold=L2_THRESHOLD,
+                window_seconds=L2_WINDOW_SECONDS,
+                cooldown_seconds=L2_SNAPSHOT_COOLDOWN_SECONDS,
+            )
+            if ETW_WINDOWS
+            else None
+        )
+        self._vss = None
+        self._behavior_switch_value = False
+        self._behavior_switch_stamp = 0.0
+        self._behavior_auto_value = False
+        self._behavior_auto_stamp = 0.0
 
         self.ui_ready_event = threading.Event()
         self.engine_initialized = False
@@ -176,6 +196,10 @@ class RuntimeMixin:
             # 实时消费 Kernel-File 事件,无需驱动,但要求管理员令牌。
             # 开关关闭时两层都不记录,弹窗退回系统占用查询。
             "etw_attribution_switch": True,
+            # 行为防护:渐进监控 + 紧急卷影 + 回滚(数据源是 ETW,需管理员)。
+            # 自动回滚默认关:恢复操作可能把合法批量写入打回旧版本,须显式开启
+            "behavior_defense_switch": False,
+            "behavior_auto_rollback": False,
             "network_switch": False,
             "extension_switch": False,
             "sensitive_switch": False,

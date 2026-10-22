@@ -772,6 +772,7 @@ BUILD_CONTRACT_PATTERNS = (
     'test_attribution_cache.py',
     'test_etw_consumer.py',
     'test_log_action_i18n.py',
+    'test_behavior_defense.py',
     'test_write_owner_query.py',
 )
 

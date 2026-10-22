@@ -73,6 +73,34 @@ NT 设备路径经 QueryDosDevice 映射转盘符路径后进 `PYAS_Attribution`
 - 会话异常退出（如被 `logman` 等外部工具停止）会把状态沉到 `error` 并记日志，
   不自动重启；重新开关一次「进程溯源」即可恢复。
 
+## 行为防护（渐进监控 + 行为回滚，v3.7.1-19 起）
+
+`PYAS_Behavior` 在 ETW 溯源的数据流上加了三级渐进响应，防护页开关
+`behavior_defense_switch`（默认关，开启需要管理员 —— 数据源就是 ETW）：
+
+- **L1 关注**：文档类写入进每进程台账（`TouchedFilesLedger`，30 分钟 TTL）。
+- **L2 升级**：同进程 10 秒窗口改写 ≥8 个不同文档类文件（未到勒索阈值，
+  但趋势可疑）→ 对所在卷创建紧急 VSS 快照（每卷冷却 600 秒，ClientAccessible
+  上下文，经 PowerShell `Invoke-CimMethod` 落 JSON 回传）。抢在加密蔓延前
+  留住内容 —— 这正是「ETW 负责知道，快照负责留住」的用户态实现。
+- **L3 告警**：≥40 个（既有勒索启发）→ 托盘告警；`behavior_auto_rollback`
+  （默认关）开启时自动回滚。
+
+回滚（`rollback_process_writes`）只恢复「快照建立之后」被该进程改写/删除
+的文件：快照里有 → copy2 覆盖回原样；快照里没有（进程新建的）→ 移入
+`%ALLUSERSPROFILE%\PYAS\BehaviorRollback\` 隔离，绝不直接删除。
+白名单文件一律跳过。重启后旧快照保留但时间基准失效，不参与回滚。
+
+已知边界（诚实声明）：
+
+- 回滚不还原 ACL/ADS/硬链接（copy2 尽力保留时间戳/只读位）。
+- System Restore 被禁用的卷可能创建不了快照（ClientAccessible 上下文依赖），
+  失败记 WARN，告警链路不受影响。
+- 自动回滚默认关是刻意的：把合法批量写入（网盘首同步、批量转换）打回旧
+  版本本身是破坏性的，必须显式 opt-in。
+- 快照持久化状态在 `%ALLUSERSPROFILE%\PYAS\vss_snapshots.json`，
+  只记录本程序创建的快照 ID，不碰系统还原点。
+
 ## 驱动构建（本地）
 
 VS 的驱动平台工具集由 WDK 的 VSIX 安装、只认 VS2022；本机主 VS 是 18，工具集注册不上（MSB8020）。
