@@ -163,11 +163,24 @@ document.addEventListener('DOMContentLoaded', () => {
         restarting = true; notice = '';
         render({ state: 'restart_required', initialized: true });
         setTimeout(() => { if (restarting) restartFailed(); }, 25000);
-        Promise.resolve().then(() => api()?.restart_application?.()).then(result => {
-            if (result === true) return;   // the launcher takes over after this process exits
-            restartFailed();
-        }).catch(restartFailed);
+        // 新策略里的防护开关(进程溯源/行为防护)需要管理员令牌,重启必须提权;
+        // 旧后端没有该方法时退回同级重启
+        Promise.resolve()
+            .then(() => api()?.restart_to_apply_policy?.() ?? api()?.restart_application?.())
+            .then(result => {
+                if (result === true) return;   // the launcher takes over after this process exits
+                restartFailed();
+            }).catch(restartFailed);
     });
+    // 首次安装只主动弹一次:策略未初始化时自动打开审核对话框,把需要提权的
+    // 默认防护(进程溯源/行为防护)一次性交给用户授权;取消后本次安装不再打扰
+    if (!localStorage.getItem('pyas_policy_offer_shown')) {
+        localStorage.setItem('pyas_policy_offer_shown', '1');
+        const offerOnce = () => {
+            if (status && !status.initialized && status.state === 'not_initialized') setup(false);
+        };
+        setTimeout(offerOnce, 1200);
+    }
     window.addEventListener('pywebviewready', refresh);
     window.addEventListener('pyas-policy-refresh', refresh);
     let timer = setInterval(refresh, 1000);

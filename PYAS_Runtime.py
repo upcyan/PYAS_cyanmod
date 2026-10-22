@@ -197,8 +197,9 @@ class RuntimeMixin:
             # 开关关闭时两层都不记录,弹窗退回系统占用查询。
             "etw_attribution_switch": True,
             # 行为防护:渐进监控 + 紧急卷影 + 回滚(数据源是 ETW,需管理员)。
-            # 自动回滚默认关:恢复操作可能把合法批量写入打回旧版本,须显式开启
-            "behavior_defense_switch": False,
+            # 默认开 —— 随首次策略授权一次性启用;自动回滚保持默认关:
+            # 恢复操作可能把合法批量写入打回旧版本,须显式开启
+            "behavior_defense_switch": True,
             "behavior_auto_rollback": False,
             "network_switch": False,
             "extension_switch": False,

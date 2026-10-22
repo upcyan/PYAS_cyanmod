@@ -76,7 +76,9 @@ NT 设备路径经 QueryDosDevice 映射转盘符路径后进 `PYAS_Attribution`
 ## 行为防护（渐进监控 + 行为回滚，v3.7.1-19 起）
 
 `PYAS_Behavior` 在 ETW 溯源的数据流上加了三级渐进响应，防护页开关
-`behavior_defense_switch`（默认关，开启需要管理员 —— 数据源就是 ETW）：
+`behavior_defense_switch`（默认开 —— 随首次策略授权一次性启用，开启需要
+管理员，数据源就是 ETW；非提权进程内开关会引导提权重启；拒绝授权则随
+基础防护模式保持关闭）：
 
 - **L1 关注**：文档类写入进每进程台账（`TouchedFilesLedger`，30 分钟 TTL）。
 - **L2 升级**：同进程 10 秒窗口改写 ≥8 个不同文档类文件（未到勒索阈值，

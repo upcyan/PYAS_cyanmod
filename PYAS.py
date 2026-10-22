@@ -1003,6 +1003,37 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
         self.start_daemon_thread(self._restart_after_reply)
         return True
 
+    def restart_to_apply_policy(self):
+        """策略保存后的重启走提权:新策略里的防护开关(进程溯源/行为防护)
+        需要管理员令牌才能生效,同级重启会让它们继续处于"已授权但没在跑"。"""
+        title = self._loc({
+            "traditional_switch": "需要管理員權限",
+            "simplified_switch": "需要管理员权限",
+            "english_switch": "Administrator rights required",
+            "japanese_switch": "管理者権限が必要です",
+            "korean_switch": "관리자 권한이 필요합니다",
+            "french_switch": "Droits administrateur requis",
+            "spanish_switch": "Se requieren permisos de administrador",
+            "hindi_switch": "व्यवस्थापक अधिकार आवश्यक",
+            "arabic_switch": "يلزم صلاحيات المسؤول",
+            "russian_switch": "Требуются права администратора",
+            "slovenian_switch": "Zahtevane skrbniške pravice",
+        })
+        body = self._loc({
+            "traditional_switch": "即將以管理員身份重啟 PYAS 以套用新的安全策略；重啟後防護開關自動生效。",
+            "simplified_switch": "即将以管理员身份重启 PYAS 以应用新的安全策略；重启后防护开关自动生效。",
+            "english_switch": "PYAS will restart with administrator rights to apply the new security policy; protection switches take effect automatically after the restart.",
+            "japanese_switch": "新しいセキュリティポリシーを適用するため、PYAS を管理者権限で再起動します。再起動後は保護スイッチが自動的に有効になります。",
+            "korean_switch": "새 보안 정책을 적용하기 위해 PYAS를 관리자 권한으로 다시 시작합니다. 다시 시작 후 보호 스위치가 자동으로 적용됩니다.",
+            "french_switch": "PYAS va redémarrer avec des droits administrateur pour appliquer la nouvelle stratégie de sécurité ; les interrupteurs prendront effet automatiquement après le redémarrage.",
+            "spanish_switch": "PYAS se reiniciará con permisos de administrador para aplicar la nueva directiva de seguridad; los interruptores surten efecto automáticamente tras el reinicio.",
+            "hindi_switch": "नई सुरक्षा नीति लागू करने के लिए PYAS व्यवस्थापक अधिकारों के साथ पुनः प्रारंभ होगा; पुनः प्रारंभ के बाद सुरक्षा स्विच स्वतः प्रभावी होंगे।",
+            "arabic_switch": "سيُعاد تشغيل PYAS بصلاحيات المسؤول لتطبيق نهج الأمان الجديد؛ تصبح مفاتيح الحماية سارية تلقائيًا بعد إعادة التشغيل.",
+            "russian_switch": "PYAS перезапустится с правами администратора для применения новой политики безопасности; переключатели защиты вступят в силу автоматически после перезапуска.",
+            "slovenian_switch": "PYAS se bo znova zagnal s skrbniškimi pravicami za uporabo nove varnostne politike; zaščitna stikala veljajo samodejno po ponovnem zagonu.",
+        })
+        return self.restart_application_elevated(title, body)
+
     def destroy_window_with_timeout(self, window, timeout=1.0):
         if not window:
             return

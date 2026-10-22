@@ -23,6 +23,23 @@ def _append_missing_white_list(candidate, defaults):
         if key:
             existing.add(key)
 
+
+# 用户在首次策略授权时拒绝:需提权的防护保持关闭(运行时显示值,见
+# initialize_security_policy 的取消分支)。detail 写时本地化。
+_BASIC_MODE_TEXTS = {
+    'traditional_switch': '未授權管理員權限，進程溯源與行為防護保持關閉（基礎防護不受影響）',
+    'simplified_switch': '未授权管理员权限，进程溯源与行为防护保持关闭（基础防护不受影响）',
+    'english_switch': 'Administrator rights not granted; process attribution and behavior defense stay off (basic protection unaffected)',
+    'japanese_switch': '管理者権限が許可されなかったため、プロセス追跡とビヘイビア防御はオフのままです（基本保護には影響しません）',
+    'korean_switch': '관리자 권한이 허용되지 않아 프로세스 추적과 행동 방어는 꺼진 상태로 유지됩니다(기본 보호에는 영향 없음)',
+    'french_switch': "Droits administrateur non accordés ; traçage de processus et défense comportementale restent désactivés (la protection de base n'est pas affectée)",
+    'spanish_switch': 'Permisos de administrador no concedidos; el rastreo de procesos y la defensa conductual permanecen desactivados (la protección básica no se ve afectada)',
+    'hindi_switch': 'व्यवस्थापक अधिकार स्वीकृत नहीं; प्रक्रिया ट्रेसिंग और व्यवहार रक्षा बंद रहेंगी (बुनियादी सुरक्षा अप्रभावित)',
+    'arabic_switch': 'لم تُمنح صلاحيات المسؤول؛ يبقى تتبع العمليات والحماية السلوكية مغلقين (الحماية الأساسية غير متأثرة)',
+    'russian_switch': 'Права администратора не предоставлены; отслеживание процессов и поведенческая защита остаются выключенными (базовая защита не затронута)',
+    'slovenian_switch': 'Skrbniške pravice niso odobrene; sledenje procesom in vedenjska zaščita ostajajo izklopljeni (osnovna zaščita ni prizadeta)',
+}
+
 class PolicyAccessMixin:
     def _load_scoped_config(self):
         import atexit
@@ -358,4 +375,11 @@ class PolicyAccessMixin:
                       'cancelled': status.get('cancelled', False)}
             if result['detail'] and result['error'] == 'policy_commit_failed':
                 self._policy_notice(result['detail'])
+            if result.get('cancelled'):
+                # 用户拒绝授权:需提权的防护保持关闭并让界面如实显示(仅运行时
+                # 显示值,不落盘 —— 下次启动策略仍未初始化时会再次提供选择)
+                with self.lock_config:
+                    for key in ('etw_attribution_switch', 'behavior_defense_switch'):
+                        self.pyas_config[key] = False
+                self.write_log('INFO', 'Policy Authorization', detail=self._loc(_BASIC_MODE_TEXTS))
         return result
