@@ -30,3 +30,51 @@
 4. 如需驱动事件的交互允许，再设计有界等待、用户态失联、队列上限、重入与超时策略。不能让内核回调无限等待用户，也不能把同类事件自动允许扩展到不同目标。
 
 v3.7.0-13 先修复自身菜单组件遗漏：将安装目录内确切的 `PYAS_Menu.exe` 加入现有自动白名单，并在注册菜单前同步完成初始化。这是按程序放行，不是按行为限定的例外；驱动消息协议与细粒度交互机制尚未在本轮修改。
+
+## ETW 溯源与可扩展方向（尚未实现）
+
+现状：`PYAS_ETW.available()` 只做能力探测（管理员 + 消费者模块），
+`PYAS_Attribution` 已有「驱动事件 → ETW」两级缓存与查询顺序，
+但 **ETW 消费者尚未接入**，因此 ETW 这一层目前恒为空，启动日志会记
+`attribution: switch=True etw=False (consumer-missing)`。
+
+原因：消费 `Microsoft-Windows-Kernel-File` 实时会话需要
+`StartTraceW / EnableTraceEx2 / OpenTraceW / ProcessTrace` 一整套，
+现有依赖里没有可直接复用的（`pywintrace` 未安装，`win32evtlog` 只能读事件日志通道）。
+可选路线：vendored `pywintrace`，或自研 C++ 助手（与驱动同栈，体积小、需签名）。
+
+消费者就绪后可在同一份数据上做：
+
+- 写入时间线：某文件被谁在何时写入、重命名、删除，构成事件链。
+- 勒索启发：短时间内大量 `WRITE + RENAME`、写入熵升高，可在改完前拦。
+- 落地关联：浏览器/邮件客户端写入 → 立刻执行，补上「下载即运行」这条盲区。
+- 进程画像：按进程聚合「写过哪些文件」，异常写入突增可直接告警。
+
+需要注意的代价与边界：
+
+- 事件量极大（编译、解压可到每秒上千条），必须做路径前缀过滤、事件去重与背压，
+  否则 CPU/内存会被吃满。
+- **ETW 只提供「谁在何时动了哪个文件」，不保存文件内容**。
+  回滚需要内容留存，属于驱动侧（首次 `IRP_MJ_WRITE` 前做 COW 备份到隔离区）或 VSS，
+  两者不可互相替代：ETW 负责知道，驱动负责留住。
+- 回滚还需处理元数据一致性：ACL、ADS、硬链接与只读属性。
+
+## 驱动构建（本地）
+
+VS 的驱动平台工具集由 WDK 的 VSIX 安装、只认 VS2022；本机主 VS 是 18，工具集注册不上（MSB8020）。
+因此提供直连方案，不依赖该工具集：
+
+```bash
+python build_driver.py          # 编译 + 链接，产物 Output/PYAS_Driver.sys
+python build_driver.py --check  # 只编译，查语法与类型
+```
+
+脚本自动挑选最新的 MSVC 与 WDK（`Windows Kits\10\Lib\<ver>\km\x64`），
+用 `cl /kernel` 编译、`link /DRIVER /SUBSYSTEM:NATIVE /ENTRY:GsDriverEntry` 链接。
+
+注意事项：
+
+- 内核头文件会引用 `<excpt.h>`，MSVC 的 include 必须一并加入（脚本已处理）。
+- 源文件含中文注释，编译需 `/utf-8`，否则 C4819 且注释可能截断代码。
+- 产出的 .sys 未签名。常规系统无法加载，需要代码签名；测试环境可开启测试签名模式。
+- 仓库与安装目录目前都不含 .sys，`build.py` 也不打包它 —— 装驱动需要单独交付。

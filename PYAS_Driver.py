@@ -28,6 +28,29 @@ from PYAS_WinAPI import (
 )
 
 
+def _dos_path_to_device_path(file_path):
+    r"""把盘符路径换算成设备路径(设备路径形如 \Device\HarddiskVolume3\...)。
+
+    驱动用 FltGetFileNameInformation 拿到的规范化名字是设备路径,
+    用户态只有盘符路径 —— 不换算就永远对不上哈希。"""
+    try:
+        path = os.path.abspath(file_path)
+        drive, rest = os.path.splitdrive(path)
+
+        if not drive:
+            return ""
+
+        buffer = ctypes.create_unicode_buffer(1024)
+
+        if not ctypes.windll.kernel32.QueryDosDeviceW(drive, buffer, 1024):
+            return ""
+
+        return buffer.value + rest
+    except Exception:
+        log_exception('PYAS_Driver._dos_path_to_device_path')
+        return ""
+
+
 class DriverMixin:
     DRIVER_START_ERROR_HINTS = {
         2: "the driver file is missing (system cannot find the file specified)",
@@ -1285,6 +1308,52 @@ class DriverMixin:
             except Exception:
                 log_exception("PYAS_Driver.DriverMixin.load_driver_rule_file:751")
                 return False
+
+    def query_write_owner(self, file_path):
+        r"""问驱动:这个文件最近是谁写的。返回 PID,没有记录返回 None。
+
+        与 Restart Manager 的区别:这是**历史**记录,文件关掉之后仍然查得到。
+        驱动侧按规范化设备路径(`\Device\HarddiskVolumeN\...`)做哈希,
+        所以这里要先把盘符路径换算成设备路径,哈希在驱动里算,用户态不参与。
+        """
+        if not file_path:
+            return None
+
+        try:
+            from PYAS_WinAPI import PYAS_USER_MESSAGE, PYAS_WRITE_OWNER_REPLY
+
+            device_path = _dos_path_to_device_path(file_path)
+
+            if not device_path:
+                return None
+
+            with self.lock_driver:
+                if not self.driver_port:
+                    return None
+
+                msg = PYAS_USER_MESSAGE()
+                msg.Command = 8  # PyasCommandQueryWriteOwner
+                msg.Path = device_path
+
+                reply = PYAS_WRITE_OWNER_REPLY()
+                returned = ctypes.wintypes.DWORD(0)
+
+                status = self.fltlib.FilterSendMessage(
+                    self.driver_port,
+                    ctypes.byref(msg),
+                    ctypes.sizeof(msg),
+                    ctypes.byref(reply),
+                    ctypes.sizeof(reply),
+                    ctypes.byref(returned),
+                )
+
+            if status != 0 or not reply.Found or not reply.ProcessId:
+                return None
+
+            return int(reply.ProcessId)
+        except Exception:
+            log_exception('PYAS_Driver.query_write_owner')
+            return None
 
     def _cancel_driver_receive(self, port, overlapped):
         try:

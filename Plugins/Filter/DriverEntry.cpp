@@ -443,6 +443,35 @@ static NTSTATUS PortMessage(
         goto Exit;
     }
 
+    if (Message.Command == PyasCommandQueryWriteOwner) {
+        if (Path.Length == 0) {
+            Status = STATUS_INVALID_PARAMETER;
+            goto Exit;
+        }
+
+        if (!OutputBuffer || OutputBufferLength < sizeof(PYAS_WRITE_OWNER_REPLY) || !ReturnOutputBufferLength) {
+            Status = STATUS_BUFFER_TOO_SMALL;
+            goto Exit;
+        }
+
+        PYAS_WRITE_OWNER_REPLY Reply;
+        Reply.Found = 0;
+        Reply.ProcessId = 0;
+        Status = PyasQueryWriteOwner(&Path, &Reply);
+
+        if (NT_SUCCESS(Status)) {
+            __try {
+                *(PPYAS_WRITE_OWNER_REPLY)OutputBuffer = Reply;
+                *ReturnOutputBufferLength = sizeof(Reply);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {
+                Status = GetExceptionCode();
+            }
+        }
+
+        goto Exit;
+    }
+
     if (Message.Command == PyasCommandAuthorizeUnload) {
         DriverState = InterlockedCompareExchange(
             &GlobalData.DriverState,
@@ -641,6 +670,7 @@ extern "C" NTSTATUS DriverEntry(
     KeInitializeSpinLock(&GlobalData.PortMutex);
     KeInitializeSpinLock(&GlobalData.TrackerMutex);
     KeInitializeSpinLock(&GlobalData.PidLock);
+    PyasInitializeWriteOwner();
     ExInitializeRundownProtection(&GlobalData.PortRundown);
     KeInitializeEvent(&GlobalData.CleanupCompleteEvent, NotificationEvent, FALSE);
     InterlockedExchange(&GlobalData.PortStopping, 0);

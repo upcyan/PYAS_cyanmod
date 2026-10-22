@@ -62,6 +62,21 @@ const fs = require('node:fs'), path = require('node:path'), http = require('node
    assert.equal(cases.unregistered, '已取消注册');
    assert.equal(cases.missing, '注册文件缺失');
   });
+  await check('ai suggestion details localize their verdict', async () => {
+   await useLanguage('simplified_switch');
+   const cases = await page.evaluate(() => ({
+     block: window.translateLogDetail('model=mimo-flash verdict=block from_cache=False elapsed=14.46s reason=混淆代码'),
+     allow: window.translateLogDetail('model=mimo-flash verdict=allow from_cache=True elapsed=3.4s reason=looks benign'),
+     appliedBlock: window.translateLogDetail('Trojan.JS/Loader.1 / block'),
+     failed: window.translateLogDetail('model=mimo-flash state=failed from_cache=False elapsed=1.2s'),
+     skipped: window.translateLogDetail('model=mimo-flash skipped: decided within 30s delay window'),
+   }));
+   assert.equal(cases.block, '模型 mimo-flash 建议拦截（用时 14.46 秒）：混淆代码');
+   assert.equal(cases.allow, '模型 mimo-flash 建议放行（用时 3.4 秒）：looks benign');
+   assert.equal(cases.appliedBlock, '已按 AI 建议拦截：Trojan.JS/Loader.1');
+   assert.equal(cases.failed, '模型 mimo-flash 分析失败（用时 1.2 秒）');
+   assert.equal(cases.skipped, '模型 mimo-flash 跳过分析：用户已在 30 秒延迟窗口内做出决定');
+  });
   await check('a language without the sentence keeps the English original', async () => {
    await useLanguage('japanese_switch');
    const text = await page.evaluate(() => window.translateLogDetail('Engine Initialization Complete'));
@@ -86,12 +101,19 @@ const fs = require('node:fs'), path = require('node:path'), http = require('node
      'File events were dropped during heavy activity; running a full rescan',
      'File monitoring hit an error; running a full rescan',
      'File monitoring stopped responding; running a full rescan',
+     'model=mimo-flash skipped: decided within 30s delay window',
+     'model=mimo-flash cancelled after 12.5s (user decided)',
+     'model=mimo-flash state=failed from_cache=False elapsed=1.2s',
+     'model=mimo-flash verdict=allow from_cache=True elapsed=3.4s reason=looks benign',
+     'model=mimo-flash verdict=block from_cache=False elapsed=14.46s reason=混淆代码',
+     'Trojan.JS/Loader.1 / block',
+     'Trojan.JS/Loader.1 / allow',
     ];
     const failures = [];
     for (const lang of langs) {
       // Every section must declare a pattern table, not rely on silent fallback.
       const patterns = window.AppI18n.dict[lang]?.log_detail_patterns;
-      if (!Array.isArray(patterns) || patterns.length !== 8) { failures.push(lang + ':patterns'); continue; }
+      if (!Array.isArray(patterns) || patterns.length !== 15) { failures.push(lang + ':patterns'); continue; }
       for (const sample of samples) {
         const after = window.translateLogDetail(sample);
         if (typeof after !== 'string' || !after) failures.push(lang + ':' + sample);

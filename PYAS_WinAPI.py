@@ -92,6 +92,12 @@ class PYAS_USER_MESSAGE(ctypes.Structure):
     _fields_ = [("Command", ctypes.wintypes.ULONG), ("Path", ctypes.wintypes.WCHAR * 1024)]
 
 
+class PYAS_WRITE_OWNER_REPLY(ctypes.Structure):
+    """驱动 PyasCommandQueryWriteOwner 的返回:最近写过该文件的进程。"""
+
+    _fields_ = [("Found", ctypes.wintypes.ULONG), ("ProcessId", ctypes.wintypes.ULONG)]
+
+
 class COPYDATASTRUCT(ctypes.Structure):
     _fields_ = [
         ("dwData", ctypes.c_size_t),

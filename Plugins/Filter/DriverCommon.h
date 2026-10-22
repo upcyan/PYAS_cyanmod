@@ -126,13 +126,32 @@ typedef enum _PYAS_COMMAND {
     PyasCommandClearRules = 4,
     PyasCommandAuthorizeUnload = 5,
     PyasCommandRevokeUnload = 6,
-    PyasCommandQueryState = 7
+    PyasCommandQueryState = 7,
+    // 查询「最近是谁写过这个文件」。用户态只拿到 PID,拿不到路径 —— 见下方环形缓冲说明。
+    PyasCommandQueryWriteOwner = 8
 } PYAS_COMMAND;
+
+// 最近写入环形缓冲:只存路径的 64 位哈希,不存路径本身。
+// 内核里没有现成字符串容器:存全路径要么在写回调这种高频路径上动态分配,
+// 要么每槽留 2KB(128 槽 = 256KB 常驻)。哈希 24 字节/槽,总开销约 3KB。
+// 代价是碰撞:128 条记录下命中错误 PID 的概率约 128/2^64,对「显示发起进程」可忽略。
+#define PYAS_WRITE_RING_CAPACITY 128
+
+typedef struct _PYAS_WRITE_OWNER_REPLY {
+    ULONG Found;      // 1 = 命中, 0 = 无记录
+    ULONG ProcessId;  // 命中时为写入方 PID
+} PYAS_WRITE_OWNER_REPLY, * PPYAS_WRITE_OWNER_REPLY;
 
 typedef struct _PYAS_USER_MESSAGE {
     ULONG Command;
     WCHAR Path[MAX_PATH_LEN];
 } PYAS_USER_MESSAGE, * PPYAS_USER_MESSAGE;
+
+// 路径哈希:大小写不敏感(FNV-1a over upcased UTF-16),用户态必须用同一算法。
+VOID PyasInitializeWriteOwner(VOID);
+ULONGLONG PyasHashPath(PCUNICODE_STRING Path);
+VOID PyasRecordWriteOwner(PCUNICODE_STRING Path, ULONG ProcessId);
+NTSTATUS PyasQueryWriteOwner(PCUNICODE_STRING Path, PPYAS_WRITE_OWNER_REPLY Reply);
 
 typedef struct _PYAS_CONNECTION_CONTEXT {
     ULONG Size;
