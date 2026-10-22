@@ -1,6 +1,7 @@
 from PYAS_Diagnostics import log_exception
 import ctypes
 import ctypes.wintypes
+import logging
 import os
 import threading
 import time
@@ -1583,6 +1584,167 @@ class _WebDecisionAPI:
         return True
 
 
+def _polish_threat_window_hwnd(hwnd):
+    """威胁弹窗窗口的原生化收尾:补最小化/可缩放样式位 + Win11 圆角。
+
+    与主窗口 PYAS.WindowHook.hook 同一套逻辑:无边框窗口默认没有这三样样式位,
+    DWM 不给最小化任务栏动画、系统也不认它是可缩放窗口;圆角属性(33=
+    DWMWA_WINDOW_CORNER_PREFERENCE,值 2=DWMWCP_ROUND)在 Win10 上不存在,
+    DwmSetWindowAttribute 返回错误码,静默忽略即可。
+    """
+    try:
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        GWL_STYLE = -16
+        get_long, set_long = user32.GetWindowLongW, user32.SetWindowLongW
+        get_long.argtypes, get_long.restype = [ctypes.c_void_p, ctypes.c_int], ctypes.c_long
+        set_long.argtypes, set_long.restype = [ctypes.c_void_p, ctypes.c_int, ctypes.c_long], ctypes.c_long
+
+        before = get_long(hwnd, GWL_STYLE) or 0
+        # WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME
+        after = before | 0x00020000 | 0x00010000 | 0x00040000
+        set_long(hwnd, GWL_STYLE, after)
+        logging.getLogger("PYAS.Window").info(
+            "threat window style 0x%08x -> 0x%08x", before, after)
+    except Exception:
+        log_exception("PYAS_Dialog._polish_threat_window_hwnd.style")
+
+    try:
+        dwm = ctypes.WinDLL("dwmapi", use_last_error=True)
+        dwm.DwmSetWindowAttribute.argtypes = [
+            ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint]
+        preference = ctypes.c_int(2)  # DWMWCP_ROUND
+        dwm.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(preference), 4)
+    except Exception:
+        log_exception("PYAS_Dialog._polish_threat_window_hwnd.dwm")
+
+    # 白边修复:补了 WS_THICKFRAME 后必须声明"无非客户区"(NCCALCSIZE),
+    # 否则系统把客户区往里缩一圈,弹窗顶部就是一条白边
+    try:
+        _subclass_threat_window(hwnd)
+    except Exception:
+        log_exception("PYAS_Dialog._polish_threat_window_hwnd.subclass")
+
+
+class _MINMAXINFO(ctypes.Structure):
+    _fields_ = [
+        ("ptReserved", ctypes.wintypes.POINT),
+        ("ptMaxSize", ctypes.wintypes.POINT),
+        ("ptMaxPosition", ctypes.wintypes.POINT),
+        ("ptMinTrackSize", ctypes.wintypes.POINT),
+        ("ptMaxTrackSize", ctypes.wintypes.POINT),
+    ]
+
+
+class _ThreatNCCALCSIZE_PARAMS(ctypes.Structure):
+    """WM_NCCALCSIZE 的 lParam 结构:rgrc[0] 是待计算的窗口/客户区矩形。"""
+
+    _fields_ = [("rgrc", ctypes.wintypes.RECT * 3), ("lppos", ctypes.c_void_p)]
+
+
+# ---- 威胁弹窗的迷你窗口过程:只处理无边框化必需的消息,其余原样转发 ----
+_THREAT_WNDPROC_TYPE = ctypes.WINFUNCTYPE(
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p
+)
+_threat_old_procs = {}  # hwnd -> 原窗口过程(弹窗销毁重建会换 HWND,必须按窗口记账)
+_threat_wndproc_cb = None
+
+
+def _hwnd_int(hwnd):
+    """HWND 归一化为整数:回调给 int、FindWindowW 可能给 c_void_p,
+    而 user32 的 restype 被多方共享,防御性把 bytes/指针形式也兜住。"""
+    if isinstance(hwnd, ctypes.c_void_p):
+        return hwnd.value or 0
+
+    if isinstance(hwnd, bytes):
+        return int.from_bytes(hwnd, "little")
+
+    return int(hwnd)
+
+
+def _threat_wndproc(hwnd, msg, wparam, lparam):
+    user32 = ctypes.windll.user32
+
+    if msg == 0x0083 and wparam:  # WM_NCCALCSIZE
+        # 补了 WS_THICKFRAME 后,系统会把客户区往里缩一圈原生边框,
+        # 表现就是弹窗顶部一条白边 —— 声明"没有非客户区"即可无边框化。
+        # 最大化(Win+Up)时窗口矩形比工作区大一圈,需按边框厚度补偿,
+        # 否则四边内容被吃掉(与主窗口 PYAS.WindowHook 同一套逻辑)。
+        if not user32.IsZoomed(hwnd):
+            return 0
+
+        try:
+            params = ctypes.cast(lparam, ctypes.POINTER(_ThreatNCCALCSIZE_PARAMS)).contents
+            rect = params.rgrc[0]
+            pad_x = user32.GetSystemMetrics(32) + user32.GetSystemMetrics(92)
+            pad_y = user32.GetSystemMetrics(33) + user32.GetSystemMetrics(92)
+            rect.left += pad_x
+            rect.top += pad_y
+            rect.right -= pad_x
+            rect.bottom -= pad_y
+        except Exception:
+            log_exception("PYAS_Dialog._threat_wndproc:nccalcsize")
+
+        return 0
+
+    if msg == 0x0024:  # WM_GETMINMAXINFO:边缘可拖后钳最小尺寸,防布局拖破
+        try:
+            info = _MINMAXINFO.from_address(lparam)
+            info.ptMinTrackSize.x = 560
+            info.ptMinTrackSize.y = 420
+            return 0
+        except Exception:
+            log_exception("PYAS_Dialog._threat_wndproc:minmaxinfo")
+
+    old = _threat_old_procs.get(hwnd)
+
+    if not old:
+        return 0
+
+    return user32.CallWindowProcW(old, hwnd, msg, wparam, lparam)
+
+
+def _subclass_threat_window(hwnd):
+    """把迷你 wndproc 挂到威胁弹窗上(替换默认窗口过程)。
+
+    弹窗空窗期结束销毁后,下一条告警会建**新窗口**(新 HWND)——
+    所以按 HWND 记账,不能用全局"只挂一次"守卫,否则第二扇窗白边复发。
+    """
+    global _threat_wndproc_cb
+
+    user32 = ctypes.windll.user32
+    GWLP_WNDPROC = -4
+
+    # 不声明 argtypes 的话,64 位窗口过程地址塞不进默认的 c_int,
+    # 转发调用会 OverflowError —— 未处理消息就全部送不到原窗口过程了
+    user32.CallWindowProcW.argtypes = [
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+    user32.CallWindowProcW.restype = ctypes.c_void_p
+
+    hwnd = _hwnd_int(hwnd)
+
+    if hwnd in _threat_old_procs:
+        return
+
+    if ctypes.sizeof(ctypes.c_void_p) == 8:
+        get_proc, set_proc = user32.GetWindowLongPtrW, user32.SetWindowLongPtrW
+    else:
+        get_proc, set_proc = user32.GetWindowLongW, user32.SetWindowLongW
+
+    get_proc.argtypes, get_proc.restype = [ctypes.c_void_p, ctypes.c_int], ctypes.c_void_p
+    set_proc.argtypes, set_proc.restype = [ctypes.c_void_p, ctypes.c_int, _THREAT_WNDPROC_TYPE], ctypes.c_void_p
+
+    if _threat_wndproc_cb is None:
+        _threat_wndproc_cb = _THREAT_WNDPROC_TYPE(_threat_wndproc)
+
+    old = get_proc(hwnd, GWLP_WNDPROC)
+
+    if not old:
+        return
+
+    _threat_old_procs[hwnd] = old
+    set_proc(hwnd, GWLP_WNDPROC, _threat_wndproc_cb)
+
+
 class _WebThreatDialogSession:
     """A persistent secondary WebView using the main application's assets."""
 
@@ -1650,6 +1812,10 @@ class _WebThreatDialogSession:
         )
         self.hwnd = True  # Queue operations use post_message, not a native HWND.
         self.window.events.closing += self._on_closing
+        # 原生化收尾(样式位/Win11 圆角):与主窗口 PYAS.WindowHook.hook 同待遇,
+        # 让最小化也有任务栏动画、窗口跟随系统圆角。窗口由 webview 线程异步创建,
+        # 用后台线程按标题轮询拿 HWND
+        threading.Thread(target=self._polish_native_window, daemon=True).start()
         started = time.monotonic()
         idle = False
         active_id = None
@@ -1755,6 +1921,27 @@ class _WebThreatDialogSession:
         elif message == WM_CANCEL_PENDING:
             with self.queue.condition:
                 self.queue.condition.notify_all()
+
+    def _polish_native_window(self):
+        """等 pywebview 把窗口建出来,再按标题找到 HWND 做原生化收尾。"""
+        try:
+            user32 = ctypes.windll.user32
+            user32.FindWindowW.restype = ctypes.c_void_p
+        except Exception:
+            return
+
+        hwnd = None
+
+        for _ in range(40):  # 最长等 2 秒:窗口由 webview 线程异步创建
+            hwnd = user32.FindWindowW(None, "PYAS · Pending alerts")
+
+            if hwnd:
+                break
+
+            time.sleep(0.05)
+
+        if hwnd:
+            _polish_threat_window_hwnd(ctypes.c_void_p(hwnd))
 
 
 class _ThreatDialogSession:

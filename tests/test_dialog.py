@@ -75,6 +75,10 @@ class FakeApp(DialogMixin):
     get_block_action_title = pyas_app._MainMixin.get_block_action_title
     _loc = ConfigMixin._loc
 
+    def _ai_endpoint_config(self):
+        # 正式实现来自 AIMixin;测试无 AI 配置,返回空三元组即可
+        return "", "", ""
+
     def __init__(self, interactive=True, timeout=30, lang="simplified_switch"):
         self.lock_config = threading.RLock()
         self.lock_interactive = threading.RLock()

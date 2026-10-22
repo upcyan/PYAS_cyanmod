@@ -1738,6 +1738,19 @@ class WindowHook:
                 log_exception('PYAS.WindowHook.hook:style')
 
             try:
+                # Win11 显式圆角:窗口是 WS_POPUP 出身、THICKFRAME 是后补的,
+                # DWM 不一定按应用窗口给它自动圆角;属性 33 = DWMWA_WINDOW_CORNER_
+                # PREFERENCE,值 2 = DWMWCP_ROUND。Win10 无此属性(返回错误码),忽略
+                dwm = ctypes.WinDLL('dwmapi', use_last_error=True)
+                dwm.DwmSetWindowAttribute.argtypes = [
+                    ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint]
+                preference = ctypes.c_int(2)  # DWMWCP_ROUND
+                dwm.DwmSetWindowAttribute(
+                    ctypes.c_void_p(hwnd), 33, ctypes.byref(preference), 4)
+            except Exception:
+                log_exception('PYAS.WindowHook.hook:dwm')
+
+            try:
                 self.user32.ChangeWindowMessageFilterEx.argtypes = [
                     ctypes.c_void_p,
                     ctypes.c_uint,
