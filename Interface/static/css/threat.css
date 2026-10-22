@@ -536,6 +536,10 @@ body:has(#threat_fp_panel:not(.hidden)) .threat-decide { display: none; }
 .event-details summary {
     font-size: var(--text-2xs);
     color: var(--text-secondary);
+    /* 原生展开箭头是 outside 列表标记,悬挂在摘要内容盒左外侧;
+       .threat-detail 是滚动容器(overflow-y:auto)且左右 padding 已归零,
+       悬挂部分落在裁剪边界外 —— 箭头只剩半截。inside 排进首行,永远可见。 */
+    list-style-position: inside;
 }
 
 /* 文件/进程/哈希/SHA 行统一成 key-value 行 */

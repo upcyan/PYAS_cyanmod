@@ -2064,19 +2064,8 @@ def start_ui():
         logger.info("Initializing Python API")
         js_api = WindowAPI()
 
-        # 发起进程溯源:驱动事件(层 A)随时可用;ETW(层 B)需要管理员 + 消费者。
-        # 这里只探测并记录原因,拿不到不影响拦截,弹窗会退到系统占用查询。
-        try:
-            from PYAS_ETW import available as _etw_available
-
-            etw_ok, etw_reason = _etw_available()
-            switch_on = bool(js_api.pyas_config.get('etw_attribution_switch', True))
-            logging.getLogger('PYAS.Startup').info(
-                'attribution: switch=%s etw=%s (%s)', switch_on, etw_ok, etw_reason
-            )
-            js_api._attribution_status = {'switch': switch_on, 'etw': etw_ok, 'reason': etw_reason}
-        except Exception:
-            log_exception('PYAS.main.attribution_probe')
+        # 发起进程溯源的启动/状态已并入 init_engine_thread(PYAS_ETW.EtwMixin),
+        # 这里不再做只探测不启动的空记录 —— 旧 _attribution_status 无人消费。
         js_api.file_webview_log = STARTUP_LOG_PATH or js_api.file_webview_log
 
         stage = "profile"

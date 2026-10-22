@@ -31,33 +31,47 @@
 
 v3.7.0-13 先修复自身菜单组件遗漏：将安装目录内确切的 `PYAS_Menu.exe` 加入现有自动白名单，并在注册菜单前同步完成初始化。这是按程序放行，不是按行为限定的例外；驱动消息协议与细粒度交互机制尚未在本轮修改。
 
-## ETW 溯源与可扩展方向（尚未实现）
+## ETW 溯源（已实现）
 
-现状：`PYAS_ETW.available()` 只做能力探测（管理员 + 消费者模块），
-`PYAS_Attribution` 已有「驱动事件 → ETW」两级缓存与查询顺序，
-但 **ETW 消费者尚未接入**，因此 ETW 这一层目前恒为空，启动日志会记
-`attribution: switch=True etw=False (consumer-missing)`。
+`PYAS_ETW` 现在是真实的实时会话消费者：ctypes 直调
+`StartTraceW / EnableTraceEx2 / OpenTraceW / ProcessTrace`，属性解析走 TDH
+（按属性名取值，manifest 的 v0/v1 字段重排由 TDH 消化）。结构体布局与
+调用序列参照 pywintrace（FireEye，Apache-2.0），未引入其运行时。
 
-原因：消费 `Microsoft-Windows-Kernel-File` 实时会话需要
-`StartTraceW / EnableTraceEx2 / OpenTraceW / ProcessTrace` 一整套，
-现有依赖里没有可直接复用的（`pywintrace` 未安装，`win32evtlog` 只能读事件日志通道）。
-可选路线：vendored `pywintrace`，或自研 C++ 助手（与驱动同栈，体积小、需签名）。
+订阅模型（Kernel-File，关键字掩码 0x1E90，避开 Read 的洪流）：
+`10 NameCreate`/`12 Create` 建「句柄键 → 路径」关联表，`16 Write` 反查，
+`26 DeletePath`/`27 RenamePath`/`28 SetLinkPath` 直接带路径。
+NT 设备路径经 QueryDosDevice 映射转盘符路径后进 `PYAS_Attribution` 层 B，
+弹窗溯源链：驱动事件 → ETW → Restart Manager。
 
-消费者就绪后可在同一份数据上做：
+- 开关 `etw_attribution_switch` 真正生效：引擎初始化与设置页热切换都会
+  启停消费者；未提权时开启会被回拨（与驱动开关同款体验）。
+- 弹窗「操作进程未识别」按记账层三态选词（`select_unknown_process_key`）：
+  驱动开着说「文件已关闭」；仅 ETW 在跑说「未捕获写入进程」；
+  两层都没有才指向「内核驱动未启用」。
+- 勒索启发（`BurstHeuristic`）：单进程 10 秒窗口内改写 ≥40 个不同文档类
+  文件（目标后缀集见 `BURST_TARGET_EXTENSIONS`）→ 写审计日志 + 托盘告警，
+  60 秒冷却。只提醒不处置，自动处置需策略层配合。
 
-- 写入时间线：某文件被谁在何时写入、重命名、删除，构成事件链。
-- 勒索启发：短时间内大量 `WRITE + RENAME`、写入熵升高，可在改完前拦。
-- 落地关联：浏览器/邮件客户端写入 → 立刻执行，补上「下载即运行」这条盲区。
-- 进程画像：按进程聚合「写过哪些文件」，异常写入突增可直接告警。
+尚未做的扩展方向（同一份数据流之上）：
 
-需要注意的代价与边界：
+- 落地关联：订阅 Kernel-Process 的进程启动事件，浏览器/邮件写入的可执行
+  文件在短窗口内被启动 → 「下载即运行」告警。
+- 写入时间线/进程画像：`get_etw_status()` 已暴露统计（事件计数、关联表
+  占用、丢失数），UI 页面与按进程聚合视图待做。
+- 自动处置：启发命中后的挂起/终止需要与告警弹窗、白名单、误报抑制打通。
 
-- 事件量极大（编译、解压可到每秒上千条），必须做路径前缀过滤、事件去重与背压，
-  否则 CPU/内存会被吃满。
+仍然成立的边界：
+
+- 事件量：已按关键字 + 监控后缀闸门（`_etw_should_track`）两级过滤，
+  关联表与 pid 缓存均有 TTL 和容量上限；但管理员开启后仍有可感知的
+  常驻开销，属预期成本。
 - **ETW 只提供「谁在何时动了哪个文件」，不保存文件内容**。
   回滚需要内容留存，属于驱动侧（首次 `IRP_MJ_WRITE` 前做 COW 备份到隔离区）或 VSS，
   两者不可互相替代：ETW 负责知道，驱动负责留住。
 - 回滚还需处理元数据一致性：ACL、ADS、硬链接与只读属性。
+- 会话异常退出（如被 `logman` 等外部工具停止）会把状态沉到 `error` 并记日志，
+  不自动重启；重新开关一次「进程溯源」即可恢复。
 
 ## 驱动构建（本地）
 

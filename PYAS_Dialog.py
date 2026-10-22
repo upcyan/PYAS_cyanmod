@@ -257,6 +257,21 @@ DIALOG_TEXTS = {
         "russian_switch": "Не определён (драйвер ядра отключён)",
         "slovenian_switch": "Ni prepoznano (gonilnik jedra je izklopljen)",
     },
+    # ETW 溯源在跑但没查到:写入早于监听启动、超过缓存 TTL、或句柄关联未命中。
+    # 此时不能再说"内核驱动未启用"(那是旧版没有 ETW 层时的唯一解释)
+    "process_unknown_etw": {
+        "traditional_switch": "未識別（未擷取到寫入該檔案的程序）",
+        "simplified_switch": "未识别（未捕获到写入该文件的进程）",
+        "english_switch": "Not identified (the writing process was not captured)",
+        "japanese_switch": "特定できません（書き込んだプロセスを捕捉できませんでした）",
+        "korean_switch": "식별되지 않음(쓰기 프로세스를 캡처하지 못했습니다)",
+        "french_switch": "Non identifié (le processus d'écriture n'a pas été capturé)",
+        "spanish_switch": "No identificado (no se capturó el proceso de escritura)",
+        "hindi_switch": "पहचान नहीं हुई (लिखने वाली प्रक्रिया पकड़ी नहीं गई)",
+        "arabic_switch": "غير محدد (لم يتم التقاط عملية الكتابة)",
+        "russian_switch": "Не определён (записавший процесс не зафиксирован)",
+        "slovenian_switch": "Ni prepoznano (postopek pisanja ni bil zajet)",
+    },
     "rule_description_label": {
         "traditional_switch": "規則說明（英文原文）",
         "simplified_switch": "规则说明（英文原文）",
@@ -594,6 +609,20 @@ THREAT_DESCRIPTIONS = {
 }
 
 SUPPORTED_LANGS = frozenset(DIALOG_TEXTS["btn_block"].keys())
+
+
+def select_unknown_process_key(driver_enabled: bool, etw_running: bool) -> str:
+    """操作进程未识别时按「当前谁在记账」选文案键,不与事实相悖:
+    驱动开着 → 写历史理应有,没查到 = 文件已关闭/无进程占用;
+    只有 ETW 在跑 → 写入来源未被捕获(早于监听/超 TTL/关联未命中);
+    两层都没有 → 才指向内核驱动未启用。"""
+    if driver_enabled:
+        return "process_unknown"
+
+    if etw_running:
+        return "process_unknown_etw"
+
+    return "process_unknown_driver"
 
 
 def loc_dialog_text(lang, key):
@@ -1424,12 +1453,13 @@ class _WebDecisionAPI:
             process_name = request.process_name or ""
             process_path = request.process_path or ""
             if not process_name and request.action in ("File Block", "Deferred Scan Block"):
-                # 驱动关着就只能靠 Restart Manager 看"现在还开着吗",结论不一样:
-                # 说成"文件已关闭"会让用户以为是偶发,其实是没有写入历史可查。
+                # 未识别的措辞按"当前谁在记账"分三态:驱动开着说「文件已关闭」;
+                # 只有 ETW 在跑时如实说「未捕获」;两层都没有才指向驱动未启用
+                # —— 那句旧文案不能在 ETW 运行时出现,否则与事实相悖。
                 config_driver = bool(config.get("driver_switch")) if isinstance(config, dict) else False
+                etw_active = bool(getattr(session.owner, "etw_running", False))
                 process_name = loc_dialog_text(
-                    request.lang,
-                    "process_unknown" if config_driver else "process_unknown_driver",
+                    request.lang, select_unknown_process_key(config_driver, etw_active)
                 )
             fp_view = fp_snapshot_view(request, signer_ok=True)
 

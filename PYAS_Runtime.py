@@ -6,6 +6,7 @@ import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from PYAS_Engine import rule_scanner, pe_scanner, cloud_scanner
+from PYAS_ETW import BurstHeuristic, IS_WINDOWS as ETW_WINDOWS
 from PYAS_Version import VERSION
 
 
@@ -63,6 +64,15 @@ class RuntimeMixin:
         self.driver_listener_ready_event = threading.Event()
         self.driver_listener_failed_event = threading.Event()
         self.driver_listener_thread = None
+
+        # 发起进程溯源 ETW 消费者(PYAS_ETW.EtwMixin 使用)
+        self.lock_etw = threading.RLock()
+        self.etw_watcher = None
+        self.etw_started_at = None
+        self._etw_pid_info = None
+        self._etw_heuristic = BurstHeuristic() if ETW_WINDOWS else None
+        self._etw_suffixes = frozenset()
+        self._etw_suffix_stamp = 0.0
 
         self.ui_ready_event = threading.Event()
         self.engine_initialized = False
@@ -162,8 +172,9 @@ class RuntimeMixin:
             # 首页连驱动灯一起隐藏(忽略驱动防护状态的二级选项),默认关:
             # 绝大多数机器看得见五盏灯更有说服力,只有确实不关心驱动的人才会关掉
             "driver_home_hidden": False,
-            # 发起进程溯源:优先用驱动事件,其次 ETW,最后退回系统占用查询。
-            # 默认开启 —— 拿不到权限/消费者时会在状态里说明原因,不影响拦截。
+            # 发起进程溯源:驱动事件(层 A)优先;ETW(层 B)由 PYAS_ETW
+            # 实时消费 Kernel-File 事件,无需驱动,但要求管理员令牌。
+            # 开关关闭时两层都不记录,弹窗退回系统占用查询。
             "etw_attribution_switch": True,
             "network_switch": False,
             "extension_switch": False,

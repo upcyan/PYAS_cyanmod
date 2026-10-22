@@ -770,6 +770,7 @@ BUILD_CONTRACT_PATTERNS = (
     'test_update_install_guard.py', 'test_signature_trust.py', 'test_ai_cache_scope.py',
     'test_autostart_registry.py',
     'test_attribution_cache.py',
+    'test_etw_consumer.py',
     'test_write_owner_query.py',
 )
 

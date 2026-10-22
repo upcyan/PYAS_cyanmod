@@ -91,6 +91,19 @@ class ScannerMixin(CloudQueueMixin):
                             success=False,
                         )
 
+                # ETW 溯源与驱动相互独立:驱动没开时它是唯一能追溯写入者的层。
+                # 未提权/启动失败只记日志,不动用户开关 —— 提权重跑后应能直接生效。
+                with self.lock_config:
+                    etw_enabled = self.pyas_config.get("etw_attribution_switch", True)
+
+                if etw_enabled and not self.start_etw_consumer():
+                    self.write_log(
+                        "WARN",
+                        "ETW Attribution",
+                        detail="Not started at engine init (see previous reason)",
+                        success=False,
+                    )
+
         except Exception as e:
             log_exception("PYAS_Scanner.ScannerMixin.init_engine_thread:72")
             self.write_log("WARN", "init_engine_thread", detail=str(e), success=False)

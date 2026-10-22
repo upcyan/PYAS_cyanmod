@@ -77,13 +77,14 @@ from PYAS_WinAPI import (
     WINTRUST_FILE_INFO,
 )
 from PYAS_Driver import DriverMixin
+from PYAS_ETW import EtwMixin
 from PYAS_System import SystemMixin
 from PYAS_Realtime import RealtimeMixin
 from PYAS_Popup import PopupWindowMixin
 from PYAS_Dialog import DialogMixin
 
 
-class ProtectMixin(DialogMixin, DriverMixin, SystemMixin, RealtimeMixin, PopupWindowMixin):
+class ProtectMixin(DialogMixin, DriverMixin, SystemMixin, RealtimeMixin, PopupWindowMixin, EtwMixin):
     def is_in_whitelist(self, file_path):
         p = self.norm_path(file_path, must_exist=False)
 
