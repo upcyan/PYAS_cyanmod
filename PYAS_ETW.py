@@ -797,6 +797,7 @@ class EtwFileWatcher:
                 "last_error": self.last_error,
                 "key_map": len(self._key_map),
                 "object_map": len(self._object_map),
+                "device_map": len(self._device_map),
                 "stats": dict(self.stats),
             }
 
@@ -1455,6 +1456,14 @@ class EtwMixin:
             detail=self._loc(ETW_LOG_TEXTS["display_reconciled"]).format(", ".join(corrections)),
             success=False,
         )
+        # 界面的开关渲染自启动时缓存的配置,后端纠正不会自动反映 —— 显式推送
+        # DOM 状态(与自启动失败回退同一套通道),否则开关仍显示「开」而实际没跑。
+        # 注意不能派发 change:那会被当成一次需要授权的策略写
+        for key in corrections:
+            self.ui_queue.put(
+                "(()=>{const el=document.querySelector('[data-config-key=" + key + "]');"
+                "if(el)el.checked=false;})();"
+            )
         self.start_daemon_thread(lambda: self._offer_switch_restore(corrections))
 
     def _offer_switch_restore(self, keys: list[str]) -> None:
@@ -1505,10 +1514,14 @@ class EtwMixin:
         if result and is_elevated():
             self.start_etw_consumer()
 
-    def log_etw_stats_once(self, delay_seconds: float = 10.0) -> None:
-        """启动后探测一次消费流量:溯源是否真的在工作,一条日志可验证。"""
+    def log_etw_stats_once(self, delays=(10.0, 30.0)) -> None:
+        """启动后探测消费流量:溯源是否真的在工作,一条日志可验证。
 
-        def probe():
+        两个时点:10 秒看会话是否收到事件(create/write 应随系统写入增长),
+        30 秒确认持续消费。parse_errors 恒为 0 才算解析链路健康。
+        """
+
+        def probe(delay_seconds: float):
             time.sleep(delay_seconds)
 
             with self.lock_etw:
@@ -1520,14 +1533,18 @@ class EtwMixin:
             stats = watcher.status()
             counts = stats.get("stats", {})
             detail = (
-                "events: create={create} write={write} write_unresolved={write_unresolved} "
-                "rename={rename} delete={delete} other={other} parse_errors={parse_errors}; "
-                "maps: key={key_map} object={object_map}; state={state}"
-            ).format(key_map=stats.get("key_map", 0), object_map=stats.get("object_map", 0),
+                "consumption probe @{0}s: create={create} write={write} "
+                "write_unresolved={write_unresolved} rename={rename} delete={delete} "
+                "other={other} parse_errors={parse_errors}; maps: key={key_map} "
+                "object={object_map} devices={device_map}; state={state}"
+            ).format(int(delay_seconds), key_map=stats.get("key_map", 0),
+                     object_map=stats.get("object_map", 0),
+                     device_map=stats.get("device_map", 0),
                      state=stats.get("state", "?"), **counts)
             self.write_log("INFO", "ETW Attribution", detail=detail)
 
-        self.start_daemon_thread(probe)
+        for delay in delays:
+            self.start_daemon_thread(lambda d=delay: probe(d))
 
     def start_etw_consumer(self) -> bool:
         ok, reason = available()

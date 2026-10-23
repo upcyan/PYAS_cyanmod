@@ -294,27 +294,68 @@ document.addEventListener('DOMContentLoaded', () => {
     // 窗口高度跟随内容:AI 关掉或只是条短告警时,固定 720 会在下面留一大片空白。
     // 只在变化超过 10px 时才通知后端,避免每次轮询都抖。
     let requestedHeight = 0;
-    const requestWindowHeight = () => {
-        const api = window.pywebview?.api;
-
-        if (!api?.resize) return;
-
+    let heightAnimating = false;
+    const measureWindowHeight = () => {
         const bar = document.querySelector('.navigate-window');
         const layout = document.querySelector('.threat-layout');
         const detail = document.querySelector('.threat-detail');
         const footer = document.querySelector('.threat-footer');
 
-        if (!layout || !detail || !footer) return;
+        if (!layout || !detail || !footer) return 0;
 
         const style = getComputedStyle(layout);
-        const total = Math.ceil((bar?.offsetHeight || 0)
+        return Math.ceil((bar?.offsetHeight || 0)
             + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
             + detail.scrollHeight + footer.offsetHeight);
+    };
+    const requestWindowHeight = () => {
+        const api = window.pywebview?.api;
+
+        if (!api?.resize || heightAnimating) return;
+
+        const total = measureWindowHeight();
 
         if (!total || Math.abs(total - requestedHeight) < 10) return;
 
         requestedHeight = total;
         Promise.resolve(api.resize(total)).catch(() => {});
+    };
+    // 展开原始事件文本时窗口高度一次 SetWindowPos 到位,在系统动画开启的
+    // 机器上很突兀 —— 逐帧跟随内容目标高度(easeOutCubic),窗口跟着长。
+    // 轮询带来的其它 resize 请求在动画期间挂起,防止中途被拽直回目标值。
+    const animateWindowHeight = target => {
+        const api = window.pywebview?.api;
+
+        if (!api?.resize) return;
+
+        const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+        const from = requestedHeight || target;
+
+        if (reduced || Math.abs(target - from) < 10) {
+            requestedHeight = target;
+            Promise.resolve(api.resize(target)).catch(() => {});
+            return;
+        }
+
+        heightAnimating = true;
+        const duration = 180;
+        const start = performance.now();
+
+        const step = now => {
+            const t = Math.min(1, (now - start) / duration);
+            const eased = 1 - Math.pow(1 - t, 3);
+            requestedHeight = Math.round(from + (target - from) * eased);
+            Promise.resolve(api.resize(requestedHeight)).catch(() => {});
+
+            if (t < 1) {
+                requestAnimationFrame(step);
+            } else {
+                heightAnimating = false;
+                requestedHeight = target;
+                requestWindowHeight();
+            }
+        };
+        requestAnimationFrame(step);
     };
 
     const refresh = async () => {
@@ -529,6 +570,8 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     byId('threat_event_details')?.addEventListener('toggle', (event) => {
         eventDetailsOpen = !!event.target.open;
+        // 展开把窗口顶高/收起把窗口压矮:平滑过渡而不是一次 SetWindowPos 跳变
+        animateWindowHeight(measureWindowHeight());
     });
 
     allow.addEventListener('click', () => {
