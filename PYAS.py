@@ -1831,20 +1831,34 @@ class WindowHook:
             # 于是①点任务栏标签发来的 SC_MINIMIZE 被忽略、②DWM 不给最小化动画、
             # ③WM_NCLBUTTONDOWN + HTxxx 进不了缩放循环(窗口不是 sizable)。
             #
+            # WS_CAPTION 是 DWM 播放标准最小化/恢复动画(缩向任务栏/从任务栏
+            # 长出)的前提:没有它 DWM 把窗口当工具窗,动画直接跳过 —— 表现就是
+            # 和其它程序的动画不一样。视觉边框仍由下方 WM_NCCALCSIZE 整体去除
+            # (无白边),这个位只影响 DWM 对窗口「身份」的判定。
+            #
             # 注意不能复用 self.SetWindowLong:它的 argtypes 是按 SetWindowLongPtrW(GWLP_WNDPROC)
             # 声明的,第三参是 WNDPROC 函数指针;拿它写 GWL_STYLE 会 TypeError,
             # 而这里包了 try/except,失败是静默的 —— 样式根本没生效过。
             try:
                 GWL_STYLE = -16
-                WS_MINIMIZEBOX, WS_MAXIMIZEBOX, WS_THICKFRAME = 0x00020000, 0x00010000, 0x00040000
+                (WS_CAPTION, WS_MINIMIZEBOX, WS_MAXIMIZEBOX,
+                    WS_THICKFRAME) = 0x00C00000, 0x00020000, 0x00010000, 0x00040000
                 style32 = ctypes.WinDLL('user32', use_last_error=True)
                 style32.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
                 style32.GetWindowLongW.restype = ctypes.c_long
                 style32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_long]
                 style32.SetWindowLongW.restype = ctypes.c_long
                 before = style32.GetWindowLongW(ctypes.c_void_p(hwnd), GWL_STYLE) or 0
-                after = before | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME
+                after = before | WS_CAPTION | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME
                 style32.SetWindowLongW(ctypes.c_void_p(hwnd), GWL_STYLE, after)
+                # 样式写完必须通知一次非客户区变更,否则 DWM/系统按旧样式判定,
+                # 动画位要等下一次状态变化才生效
+                style32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int,
+                                                 ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+                style32.SetWindowPos.restype = ctypes.c_int
+                SWP_FRAMECHANGED = 0x0020
+                style32.SetWindowPos(ctypes.c_void_p(hwnd), None, 0, 0, 0, 0,
+                                     SWP_FRAMECHANGED | 0x0001 | 0x0002 | 0x0004)  # |NOMOVE|NOSIZE|NOZORDER
                 applied = style32.GetWindowLongW(ctypes.c_void_p(hwnd), GWL_STYLE) or 0
                 logging.getLogger('PYAS.Window').info(
                     'window style 0x%08x -> 0x%08x (readback 0x%08x)', before, after, applied
