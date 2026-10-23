@@ -1268,6 +1268,19 @@ ETW_LOG_TEXTS = {
         "russian_switch": "Не запущено при инициализации движка; см. предыдущую запись",
         "slovenian_switch": "Ni zagnano pri inicializaciji mehanizma; glej prejšnji vnos",
     },
+    "display_reconciled": {
+        "traditional_switch": "需要管理員權限的防護未在運行，界面已按實際狀態顯示為關閉： {0}",
+        "simplified_switch": "需要管理员权限的防护未在运行，界面已按实际状态显示为关闭： {0}",
+        "english_switch": "Elevation-gated protection is not running; the interface now shows it as off: {0}",
+        "japanese_switch": "管理者権限が必要な保護が実行されていないため、UI を実際の状態（オフ）に合わせました: {0}",
+        "korean_switch": "관리자 권한이 필요한 보호가 실행 중이 아니어서 UI가 실제 상태(꺼짐)로 표시됩니다: {0}",
+        "french_switch": "La protection soumise à élévation n'est pas active ; l'interface affiche désormais l'état réel (désactivé) : {0}",
+        "spanish_switch": "La protección que requiere elevación no se está ejecutando; la interfaz ahora lo muestra como desactivado: {0}",
+        "hindi_switch": "एलिवेशन-गेटेड सुरक्षा नहीं चल रही है; इंटरफ़ेस अब वास्तविक स्थिति (बंद) दिखाता है: {0}",
+        "arabic_switch": "الحماية التي تتطلب الرفع ليست قيد التشغيل؛ تعرض الواجهة الحالة الفعلية (مغلق) الآن: {0}",
+        "russian_switch": "Защита, требующая прав администратора, не запущена; интерфейс теперь показывает фактическое состояние (выкл): {0}",
+        "slovenian_switch": "Zaščita, ki zahteva povišane pravice, ni aktivna; vmesnik zdaj prikazuje dejansko stanje (izklopljeno): {0}",
+    },
     "burst_detail": {
         "traditional_switch": "{0} 在 {1} 秒內改寫了 {2} 個文件類檔案，疑似勒索行為",
         "simplified_switch": "{0} 在 {1} 秒内改写了 {2} 个文档类文件，疑似勒索行为",
@@ -1280,6 +1293,32 @@ ETW_LOG_TEXTS = {
         "arabic_switch": "{0} عدّل {2} ملفًا خلال {1} ثانية، احتمال برمجيات فدية",
         "russian_switch": "{0} изменил(а) {2} документов за {1} с, возможно шифровальщик",
         "slovenian_switch": "{0} je v {1} s spremenil {2} dokumentov, mogoč izsiljevalski program",
+    },
+    "relaunch_toast_title": {
+        "traditional_switch": "需要管理員權限",
+        "simplified_switch": "需要管理员权限",
+        "english_switch": "Administrator rights required",
+        "japanese_switch": "管理者権限が必要です",
+        "korean_switch": "관리자 권한이 필요합니다",
+        "french_switch": "Droits administrateur requis",
+        "spanish_switch": "Se requieren permisos de administrador",
+        "hindi_switch": "व्यवस्थापक अधिकार आवश्यक",
+        "arabic_switch": "يلزم صلاحيات المسؤول",
+        "russian_switch": "Требуются права администратора",
+        "slovenian_switch": "Zahtevane skrbniške pravice",
+    },
+    "relaunch_toast_body": {
+        "traditional_switch": "設定已保存，PYAS 正在以管理員身份重啟；重啟後新開關立即生效，視窗會自動重新出現。",
+        "simplified_switch": "设置已保存，PYAS 正在以管理员身份重启；重启后新开关立即生效，窗口会自动重新出现。",
+        "english_switch": "Settings saved. PYAS is restarting with administrator rights; new switches take effect and the window reappears automatically.",
+        "japanese_switch": "設定を保存しました。PYAS は管理者権限で再起動中です。再起動後、新しいスイッチが直ちに有効になり、ウィンドウは自動的に再表示されます。",
+        "korean_switch": "설정이 저장되었습니다. PYAS가 관리자 권한으로 다시 시작 중입니다. 다시 시작 후 새 스위치가 즉시 적용되고 창이 자동으로 다시 나타납니다.",
+        "french_switch": "Paramètres enregistrés. PYAS redémarre avec des droits administrateur ; les nouveaux interrupteurs prennent effet et la fenêtre réapparaît automatiquement.",
+        "spanish_switch": "Configuración guardada. PYAS se está reiniciando con permisos de administrador; los nuevos interruptores surten efecto y la ventana reaparece automáticamente.",
+        "hindi_switch": "सेटिंग्स सहेजी गईं। PYAS व्यवस्थापक अधिकारों के साथ पुनः प्रारंभ हो रहा है; नए स्विच प्रभावी होंगे और विंडो स्वतः दोबारा दिखाई देगी।",
+        "arabic_switch": "تم حفظ الإعدادات. يُعاد تشغيل PYAS بصلاحيات المسؤول؛ تصبح المفاتيح الجديدة سارية وتظهر النافذة تلقائيًا من جديد.",
+        "russian_switch": "Настройки сохранены. PYAS перезапускается с правами администратора; новые переключатели вступят в силу, окно появится автоматически.",
+        "slovenian_switch": "Nastavitve so shranjene. PYAS se znova zagne s skrbniškimi pravicami; nova stikala takoj veljajo in se okno samodejno znova prikaže.",
     },
 }
 
@@ -1318,6 +1357,57 @@ class EtwMixin:
             )
 
         return stopped
+
+    def reconcile_switch_display(self) -> None:
+        """启动核对:开关期望值(策略文档)与实际生效状态不一致时,把运行时
+        显示值纠正为实际,避免「显示开、实际没跑」。不回写策略文档 —— 那是
+        管理员的意愿,下次提权启动仍会尝试生效。"""
+        etw_running = bool(getattr(self, "etw_running", False))
+        corrections = []
+
+        with self.lock_config:
+            for key, actual in (
+                ("etw_attribution_switch", etw_running),
+                (
+                    "behavior_defense_switch",
+                    etw_running and bool(self.pyas_config.get("behavior_defense_switch")),
+                ),
+            ):
+                if bool(self.pyas_config.get(key)) and not actual:
+                    self.pyas_config[key] = False
+                    corrections.append(key)
+
+        if corrections:
+            self.write_log(
+                "WARN",
+                "ETW Attribution",
+                detail=self._loc(ETW_LOG_TEXTS["display_reconciled"]).format(", ".join(corrections)),
+                success=False,
+            )
+
+    def log_etw_stats_once(self, delay_seconds: float = 10.0) -> None:
+        """启动后探测一次消费流量:溯源是否真的在工作,一条日志可验证。"""
+
+        def probe():
+            time.sleep(delay_seconds)
+
+            with self.lock_etw:
+                watcher = self.etw_watcher
+
+            if not watcher:
+                return
+
+            stats = watcher.status()
+            counts = stats.get("stats", {})
+            detail = (
+                "events: create={create} write={write} write_unresolved={write_unresolved} "
+                "rename={rename} delete={delete} other={other} parse_errors={parse_errors}; "
+                "maps: key={key_map} object={object_map}; state={state}"
+            ).format(key_map=stats.get("key_map", 0), object_map=stats.get("object_map", 0),
+                     state=stats.get("state", "?"), **counts)
+            self.write_log("INFO", "ETW Attribution", detail=detail)
+
+        self.start_daemon_thread(probe)
 
     def start_etw_consumer(self) -> bool:
         ok, reason = available()

@@ -119,8 +119,15 @@ class PolicyAccessMixin:
             if getattr(self, 'closing', False): return failure
             result = callback()
             # helper 已按请求以管理员拉起新实例(等本 pid 退出):尽快让位,
-            # 让 launcher 的等待立即满足。提交失败时 helper 不会拉起,不退出
+            # 让 launcher 的等待立即满足。提交失败时 helper 不会拉起,不退出。
+            # 先弹托盘提示,否则旧窗口消失的 ~10 秒空窗会被当成闪退
             if relaunch_pid and result not in (None, False) and getattr(lease, 'committed', False):
+                from PYAS_ETW import ETW_LOG_TEXTS
+
+                self.dispatch_notification(
+                    self._loc(ETW_LOG_TEXTS["relaunch_toast_title"]),
+                    self._loc(ETW_LOG_TEXTS["relaunch_toast_body"]),
+                )
                 self.start_daemon_thread(self._restart_after_reply)
             return result
         finally:

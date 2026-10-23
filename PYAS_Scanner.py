@@ -104,6 +104,14 @@ class ScannerMixin(CloudQueueMixin):
                         detail=self._loc(ETW_LOG_TEXTS["engine_init_skipped"]),
                         success=False,
                     )
+                else:
+                    # 消费流量自检:启动 10 秒后报一次各事件计数,溯源是否
+                    # 真的在工作,一条日志可验证(parse_errors 应恒为 0)
+                    self.log_etw_stats_once()
+
+                # 开关期望值与实际生效状态的启动核对:起不来的防护不在界面
+                # 上冒充运行中(显示值纠正为实际,不回写策略文档)
+                self.reconcile_switch_display()
 
         except Exception as e:
             log_exception("PYAS_Scanner.ScannerMixin.init_engine_thread:72")
