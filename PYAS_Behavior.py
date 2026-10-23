@@ -309,18 +309,19 @@ class VssSnapshotManager:
         rel = dos_path[2:].lstrip("\\") if len(dos_path) > 2 else dos_path.lstrip("\\")
         return device.rstrip("\\") + "\\" + rel
 
-    # -- 快照创建:vssadmin 首选,CIM/PowerShell 后备 -------------------------
+    # -- 快照创建:CIM 与 WMI v1 两条代码路径互为后备 ------------------------
+    # 客户端 SKU 的 vssadmin 没有 create 命令(Server 专属,已实测「无效命令」)
 
     def _create(self, drive: str, stamp: float) -> str | None:
-        """双路创建:vssadmin 输出为稳定 token(GUID/设备名不随语言与序列化
-        行为变化),CIM/PowerShell 作后备;两路都失败才记失败。"""
+        """双路创建:CIM(Invoke-CimMethod)与 WMI v1(Get-WmiObject .Create)
+        走不同的服务代码路径,一条失败时另一条仍可能成功。"""
         diagnostics = []
 
-        for method in ("vssadmin", "cim"):
-            if method == "vssadmin":
-                shadow_id, device, diagnostic = self._create_via_vssadmin(drive)
-            else:
+        for method in ("cim", "wmi"):
+            if method == "cim":
                 shadow_id, device, diagnostic = self._create_via_cim(drive)
+            else:
+                shadow_id, device, diagnostic = self._create_via_wmi(drive)
 
             if shadow_id and device:
                 new_entry = {"id": shadow_id, "device": device, "last_attempt": stamp}
@@ -344,34 +345,37 @@ class VssSnapshotManager:
         logger.warning("VSS snapshot failed: %s", self.last_error)
         return None
 
-    def _create_via_vssadmin(self, drive: str):
-        """`vssadmin create shadow`:输出按稳定 token 解析(设备名与 GUID
-        不随系统语言变化),规避 CIM/JSON 序列化的环境差异。"""
+    def _create_via_wmi(self, drive: str):
+        """WMI v1 路径(Get-WmiObject .Create);返回 (id, device, 诊断)。"""
+        result_file = os.path.join(
+            os.path.dirname(self._state_path), f"pyas_vss_{uuid.uuid4().hex}.json"
+        )
+        script = (
+            "$ErrorActionPreference='Stop';"
+            "$p='" + result_file.replace("'", "''") + "';"
+            "try{"
+            "$r=(Get-WmiObject -List Win32_ShadowCopy).Create('" + drive + "\\', 'ClientAccessible');"
+            "if($r.ReturnValue -ne 0){throw ('return='+$r.ReturnValue)}"
+            "$sc=Get-WmiObject Win32_ShadowCopy -Filter \"ID='$($r.ShadowID)'\";"
+            "if(-not $sc){throw 'device query failed'}"
+            "@{id=$r.ShadowID;device=$sc.DeviceName}|ConvertTo-Json -Compress|Set-Content -LiteralPath $p -Encoding UTF8"
+            "}catch{$_.Exception.Message|Set-Content -LiteralPath $p -Encoding UTF8;exit 1}"
+        )
+
         try:
-            completed = subprocess.run(
-                ["vssadmin", "create", "shadow", f"/for={drive}"],
-                capture_output=True,
-                timeout=120,
-                text=True,
-                errors="replace",
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except Exception as error:
-            return (None, None, f"vssadmin spawn failed: {error}")
+            ok, payload, error_text = self._run_result_script(script, result_file)
 
-        output = ((completed.stdout or "") + "\n" + (completed.stderr or ""))[-2000:]
-        device_match = re.search(
-            r"\\\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy\d+", output, re.I
-        )
-        id_match = re.search(
-            r"\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}",
-            output,
-        )
+            if ok and payload.get("id") and payload.get("device"):
+                return (str(payload["id"]), str(payload["device"]), "")
 
-        if not (device_match and id_match):
-            return (None, None, f"exit={completed.returncode} output={output.strip()[:160]}")
-
-        return (id_match.group(0), device_match.group(0), "")
+            return (None, None, error_text
+                    or ("powershell exited nonzero" if not ok else "no id/device returned"))
+        finally:
+            try:
+                if os.path.exists(result_file):
+                    os.remove(result_file)
+            except OSError:
+                pass
 
     def _create_via_cim(self, drive: str):
         """CIM/PowerShell 后备路径;返回 (id, device, 诊断)。"""
@@ -446,6 +450,45 @@ class VssSnapshotManager:
         )
         ok, _ = self._runner(script, None)
         return ok
+
+    def _run_result_script(self, script: str, result_file: str):
+        """编码运行 PowerShell 脚本并解析其写出的 JSON 结果文件。
+        返回 (ok, payload, error_text)。"""
+        try:
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                 "-EncodedCommand",
+                 base64.b64encode(script.encode("utf-16-le")).decode("ascii")],
+                capture_output=True,
+                timeout=120,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except Exception as error:
+            return (False, {}, f"spawn failed: {error}")
+
+        ok = completed.returncode == 0
+        payload, error_text = {}, ""
+
+        if os.path.exists(result_file):
+            with open(result_file, "r", encoding="utf-8-sig") as stream:
+                content = stream.read().strip()
+
+            try:
+                loaded = json.loads(content)
+
+                if isinstance(loaded, dict):
+                    payload = loaded
+                else:
+                    error_text = str(loaded)[:200]
+            except ValueError:
+                # catch 分支写入的是纯文本错误
+                error_text = content[:200]
+
+        if payload.get("id") and payload.get("device"):
+            return (True, payload, "")
+
+        return (False, payload, error_text
+                or ("powershell exited nonzero" if not ok else "no id/device returned"))
 
     @staticmethod
     def _run_powershell(script: str, result_file: str | None):
