@@ -108,8 +108,8 @@ const assert = require('node:assert/strict');
 
         // ---- 拖动:保留 pywebview 的拖动区(原生 WM_NCLBUTTONDOWN 在 WebView2 上拖不动,已回退),
         //      但把每个 mousemove 一次的过桥压成每帧最多一次 ----
-        assert.equal(await page.locator('.pywebview-drag-region').count(), 2,
-            '标题栏与侧栏必须仍是拖动区,否则窗口拖不动');
+        assert.equal(await page.locator('.pywebview-drag-region').count(), 1,
+            '只有标题栏是拖动区:侧栏区域曾导致按钮点击拖走窗口,已移除');
         const burst = await page.evaluate(async () => {
             window.__bridge.length = 0;
             for (let i = 0; i < 5; i += 1) {
