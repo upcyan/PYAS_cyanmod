@@ -297,7 +297,11 @@ class PolicyStore:
         updates = {key: proposed[key] for key in lease.scope if key in proposed}
         expected = policy_values(self.values)
 
-        if self.revision is not None and all(expected.get(k) == value for k, value in updates.items()):
+        # 无变化短路:文档已一致时不必重写。带 relaunch 的租约例外 ——
+        # 「文档已一致但进程未提权」正是需要提权重启的场景,必须与 broker
+        # 完成一次往返,helper 才会在提交后代发提权重启
+        if (self.revision is not None and not getattr(lease, "relaunch_pid", 0)
+                and all(expected.get(k) == value for k, value in updates.items())):
             return True
 
         try:

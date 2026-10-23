@@ -597,6 +597,7 @@ class WindowsPolicyLease:
             # helper 提交成功后以管理员令牌拉起新实例(等旧 pid 退出)。
             # 位于请求头内,自动被 digest 覆盖,helper 端可信
             self.header['relaunch_pid'] = int(relaunch_pid)
+        self.relaunch_pid = int(relaunch_pid or 0)
         self.path = os.path.join(user_data_dir(), 'PolicyRequests', self.nonce + '.request')
         self.file = None; self.process = None; self.native_process = None
         self.authorized = False; self.committed = False; self.sent = False; self.closed = False

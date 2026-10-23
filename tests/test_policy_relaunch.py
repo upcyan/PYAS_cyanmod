@@ -1,6 +1,8 @@
-"""策略 relaunch 协议:请求头携带 relaunch_pid,helper 提交成功后经 launcher
+"""relaunch 租约协议:请求头携带 relaunch_pid,helper 提交成功后经 launcher
 等旧实例退出并以管理员接管 —— 「一次授权 + 一次重启」合并为一次 UAC。"""
 
+import copy
+import copy
 import json
 import struct
 import tempfile
@@ -8,8 +10,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from PYAS_Policy import PolicyStore
+from PYAS_Policy import FORMAT, PolicyStore
 from PYAS_PolicyWindows import WindowsPolicyLease, _relaunch_elevated_from_request
+
+SNAP_DEVICE = "\\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy9"
 
 
 class HeaderTests(unittest.TestCase):
@@ -18,11 +22,13 @@ class HeaderTests(unittest.TestCase):
                                    False, relaunch_pid=4242)
 
         self.assertEqual(lease.header['relaunch_pid'], 4242)
+        self.assertEqual(lease.relaunch_pid, 4242)
 
     def test_no_relaunch_by_default(self):
         lease = WindowsPolicyLease(None, {'process_switch'}, 'rev', 'change', False)
 
         self.assertNotIn('relaunch_pid', lease.header)
+        self.assertEqual(lease.relaunch_pid, 0)
 
 
 class BeginRelayTests(unittest.TestCase):
@@ -110,6 +116,73 @@ class RelaunchFromRequestTests(unittest.TestCase):
                 _relaunch_elevated_from_request(str(request))
 
                 self.assertEqual(popen.call_count, 0)
+
+
+class NoChangeRoundtripTests(unittest.TestCase):
+    """「文档已一致但进程未提权」是 relaunch 的核心场景:
+    无变化短路必须让位 —— 带 relaunch 的租约仍要与 broker 完成往返,
+    helper 才会代发提权重启。"""
+
+    def make_store(self):
+        state = {'commits': 0}
+
+        class Lease:
+            authorized = True
+            committed = False
+            relaunch_pid = 0
+            scope = frozenset({'process_switch'})
+
+            def start(self): pass
+            def close(self): pass
+
+            def commit(self, updates):
+                state['commits'] += 1
+                self.committed = True
+                backend = self.backend
+                backend.document = {**(backend.document or {}), **copy.deepcopy(updates),
+                                    '_format': FORMAT, '_revision': 'r2'}
+                return copy.deepcopy(backend.document)
+
+        class Backend:
+            def __init__(self):
+                self.user, self.document, self.prompts = {}, None, 0
+
+            def read_user(self): return copy.deepcopy(self.user)
+            def read_policy(self): return copy.deepcopy(self.document)
+            def write_user(self, value): self.user = copy.deepcopy(value)
+
+            def authorize(self, scope, revision, operation, initialize, relaunch_pid=None):
+                lease = Lease()
+                lease.backend = self
+                lease.scope = frozenset(scope)
+                lease.relaunch_pid = relaunch_pid or 0
+                return lease
+
+            def cancel(self): pass
+
+        backend = Backend()
+        store = PolicyStore({'process_switch': False}, backend)
+        backend.document = {'_format': FORMAT, '_revision': 'base', 'process_switch': False}
+        store.revision = 'base'
+        return store, backend, state
+
+    def test_no_change_without_relaunch_short_circuits(self):
+        store, backend, state = self.make_store()
+        lease = store.begin({'process_switch'}, 'setting:process_switch')
+
+        self.assertTrue(store.save({'process_switch': False}))
+        self.assertEqual(state['commits'], 0, "无变化且无 relaunch:不应与 broker 往返")
+        self.assertFalse(lease.committed)
+        store.finish(lease)
+
+    def test_no_change_with_relaunch_still_roundtrips(self):
+        store, backend, state = self.make_store()
+        lease = store.begin({'process_switch'}, 'setting:process_switch', relaunch_pid=4242)
+
+        self.assertTrue(store.save({'process_switch': False}))
+        self.assertEqual(state['commits'], 1, "带 relaunch 的租约必须完成 broker 往返")
+        self.assertTrue(lease.committed)
+        store.finish(lease)
 
 
 if __name__ == "__main__":
