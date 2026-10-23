@@ -270,12 +270,20 @@ class RuntimeMixin:
                     except queue.Empty:
                         break
 
+                # 窗口可能在取批次的间隙被销毁(重启/退出竞态):对已释放的
+                # WebView2 执行 evaluate_js 会抛 ObjectDisposedException,
+                # pywebview 会把它当脚本错误记成 ERROR —— closing 时这批
+                # JS 已无意义,直接丢弃且不按错误记
+                if getattr(self, "closing", False) or self._window is None:
+                    continue
+
                 if self._window:
                     self._window.evaluate_js("".join(batch))
             except queue.Empty:
                 continue
             except Exception:
-                log_exception("PYAS_Runtime.RuntimeMixin.ui_dispatcher_thread:146")
+                if not getattr(self, "closing", False):
+                    log_exception("PYAS_Runtime.RuntimeMixin.ui_dispatcher_thread:146")
                 pass
             finally:
                 for _ in batch:
