@@ -67,6 +67,7 @@ Name: "slovenian"; MessagesFile: "compiler:Languages\Slovenian.isl"
 ; 拒绝 DisableReadyPage/ShouldSkipPage 的跳过(实测 6.7.3),任务条目
 ; 不存在后 Ready 页为空,禁用指令才真正生效。桌面图标沿用既有设置。
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Check: ShowTasksPage
+Name: "adminrun"; Description: "{cm:AdminRunTask}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
 
 [Files]
 Source: "Redist\VC_redist.x64.exe"; DestDir: "{tmp}\PYAS_Redist"; Flags: deleteafterinstall ignoreversion; AfterInstall: EnsureVCRedist
@@ -108,11 +109,21 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: 
 Type: filesandordirs; Name: "{commonappdata}\PYAS"
 
 [Icons]
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\PYAS_Launcher.exe"; IconFilename: "{app}\{#AppExeName}"; Tasks: desktopicon
-Name: "{group}\{#AppName}"; Filename: "{app}\PYAS_Launcher.exe"; IconFilename: "{app}\{#AppExeName}"
+; 管理员变体(adminrun 勾选):安装后由 mark_shortcut_admin.ps1 给快捷方式
+; 打 SLDF_RUNAS_USER(Inno [Icons] 无提权标记,本机 COM 方案已实测);
+; 参数 --wait 让 launcher 常驻为父进程,规避 PyInstaller onefile 提权启动
+; 的父进程退出校验竞态(见 [Run] 注释)。普通变体维持既有行为。
+; [Icons] 的 Tasks 参数不支持 not 运算,互斥用 Check 函数表达。
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\PYAS_Launcher.exe"; Parameters: "--wait"; IconFilename: "{app}\{#AppExeName}"; Tasks: desktopicon; Check: AdminRunSelected
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\PYAS_Launcher.exe"; IconFilename: "{app}\{#AppExeName}"; Tasks: desktopicon; Check: NotAdminRunSelected
+Name: "{group}\{#AppName}"; Filename: "{app}\PYAS_Launcher.exe"; Parameters: "--wait"; IconFilename: "{app}\{#AppExeName}"; Tasks: adminrun
+Name: "{group}\{#AppName}"; Filename: "{app}\PYAS_Launcher.exe"; IconFilename: "{app}\{#AppExeName}"; Check: NotAdminRunSelected
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 
 [Run]
+; 勾选「以管理员身份运行」时给快捷方式打 SLDF_RUNAS_USER;脚本尽力而为
+; (输出被 runhidden 丢弃,失败不阻断安装)
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Menu\mark_shortcut_admin.ps1"" -ShortcutPath ""{autodesktop}\{#AppName}"",""{group}\{#AppName}"""; Flags: runhidden waituntilterminated; Tasks: adminrun
 ; 用原始(未提权)用户令牌启动应用:PyInstaller 6.22+ 的 onefile 防篡改校验
 ; 只对提权进程生效,提权 postinstall 启动存在祖先进程退出时序竞态,会弹
 ; "Security validation failure: invalid originating onefile parent process"
@@ -163,6 +174,18 @@ russian.PendingAlertWait=Осталось %1 с — можно ответить 
 slovenian.PendingAlertTitle=PYAS čaka na vašo odločitev
 slovenian.PendingAlertDesc=Varnostno opozorilo PYAS še ni rešeno. Izberite dejanje v tistem oknu; namestitev se bo nato nadaljevala samodejno.
 slovenian.PendingAlertWait=Še %1 s — lahko odgovorite tudi v oknu PYAS.
+english.AdminRunTask=Run PYAS with administrator rights. Full protection (process attribution, behavior defense) requires elevation; once enabled, no more UAC prompts are needed.
+chinesesimplified.AdminRunTask=以管理员身份运行 PYAS。完整防护（进程溯源、行为防护）需要管理员权限；启用后日常使用不再需要 UAC 授权。
+chinesetraditional.AdminRunTask=以管理員身份運行 PYAS。完整防護（進程溯源、行為防護）需要管理員權限；啟用後日常使用不再需要 UAC 授權。
+japanese.AdminRunTask=PYAS を管理者権限で実行します。完全な保護（プロセス追跡、ビヘイビア防御）には管理者権限が必要です。有効にすれば、日常使用で UAC の承認は不要になります。
+korean.AdminRunTask=관리자 권한으로 PYAS를 실행합니다. 전체 보호(프로세스 추적, 행동 방어)에는 관리자 권한이 필요하며, 활성화하면 일상 사용에서 UAC 승인이 더 이상 필요하지 않습니다.
+french.AdminRunTask=Exécuter PYAS avec droits administrateur. La protection complète (traçage de processus, défense comportementale) requiert une élévation ; une fois activée, plus aucune invite UAC n'est nécessaire.
+spanish.AdminRunTask=Ejecutar PYAS con permisos de administrador. La protección completa (rastreo de procesos, defensa conductual) requiere elevación; una vez activada, no se necesitan más ventanas UAC.
+hindi.AdminRunTask=PYAS को व्यवस्थापक अधिकारों के साथ चलाएँ। पूर्ण सुरक्षा (प्रक्रिया ट्रेसिंग, व्यवहार रक्षा) हेतु एलिवेशन आवश्यक है; सक्षम होने पर दैनिक उपयोग में UAC की आवश्यकता नहीं।
+arabic.AdminRunTask=تشغيل PYAS بصلاحيات المسؤول. الحماية الكاملة (تتبع العمليات، الحماية السلوكية) تتطلب الرفع؛ بعد التمكين لن تكون هناك حاجة لمطالبات UAC.
+russian.AdminRunTask=Запускать PYAS с правами администратора. Полная защита (отслеживание процессов, поведенческая защита) требует повышения прав; после включения запросы UAC больше не понадобятся.
+slovenian.AdminRunTask=Zaženi PYAS s skrbniškimi pravicami. Popolna zaščita (sledenje procesom, vedenjska zaščita) potrebuje povišane pravice; po omogočitvi UAC pozivi niso več potrebni.
+
 english.QuitRetry=PYAS could not be closed automatically (attempt %1 of 3). Right-click the PYAS tray icon and choose Exit, then click Retry.
 english.QuitRestart=PYAS is still running, so Setup cannot replace its files. Restart Windows and run Setup again.
 english.DependencyInstallFailed=Required Microsoft runtime installation failed. Setup cannot continue.
@@ -294,6 +317,16 @@ slovenian.DependencyInstallFailed=Namestitev zahtevanih Microsoftovih izvajalnih
 slovenian.WebView2InstallFailed=Microsoft Edge WebView2 Runtime ni bilo mogoče zaznati. Preverite povezavo ali ročno namestite Evergreen Runtime in poskusite znova.%n%nPodrobnosti: %1
 
 [Code]
+function AdminRunSelected(): Boolean;
+begin
+  Result := WizardIsTaskSelected('adminrun');
+end;
+
+function NotAdminRunSelected(): Boolean;
+begin
+  Result := not AdminRunSelected();
+end;
+
 var
   DependencyRestartRequired: Boolean;
   DependenciesReady: Boolean;
