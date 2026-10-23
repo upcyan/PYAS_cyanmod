@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import logging
 import os
 import threading
 from PYAS_Policy import (POLICY_KEYS, USER_KEYS, PolicyDenied, bounded_json, policy_values,
