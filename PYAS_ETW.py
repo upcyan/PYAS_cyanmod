@@ -1512,6 +1512,26 @@ class EtwMixin:
                 "shortcut elevation flags: %s", output.replace("\n", "; ")
             )
 
+    def _flag_shortcuts_if_pending(self) -> None:
+        """提权实例启动后补打快捷方式提权标记(非提权实例的恢复/切换流程
+        写入的待办标记);非提权实例无权限写公共位置,留给提权重启后。"""
+        from PYAS_DataPaths import user_data_dir
+
+        marker = os.path.join(user_data_dir(), "flag_shortcuts.pending")
+
+        if not os.path.isfile(marker):
+            return
+
+        if not is_elevated():
+            return
+
+        self._flag_user_shortcuts_elevated()
+
+        try:
+            os.remove(marker)
+        except OSError:
+            pass
+
     def restore_switches(self, keys: list[str]) -> None:
         """一次授权批量恢复开关到开启:提交成功后,非提权走 helper 提权重启,
         提权环境直接拉起消费者。提交失败时调用方看到的值保持纠正态。"""
