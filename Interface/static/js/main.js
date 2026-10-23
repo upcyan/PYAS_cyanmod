@@ -1148,11 +1148,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const sourceText = String(e.source || translateLogDetail(e.detail) || '');
             const rowText = [e.time_str || '', getMsg(lv) || lv, actionText, sourceText].join('\t');
             const copyText = rowText + (e.detail && e.detail !== sourceText ? '\n' + e.detail : '');
+            // 悬停提示给全量信息:行内只放得下 source(如智能体网络只有进程名),
+            // 端点/原因这类 detail 补进 tooltip,换行在原生提示里正常分行
+            const hoverText = e.detail && String(e.detail) !== sourceText
+                ? (sourceText ? sourceText + '\n' + e.detail : String(e.detail))
+                : sourceText;
             return '<li class="home-log-item lv-' + escapeHtml(lv) + '" data-copy-text="' + escapeHtml(copyText) + '"' + attrs + '>'
                 + '<span class="hl-time">' + escapeHtml(e.time_str || '') + '</span>'
                 + '<span class="hl-level">' + escapeHtml(getMsg(lv) || lv) + '</span>'
                 + '<span class="hl-action">' + escapeHtml(actionText) + '</span>'
-                + '<span class="hl-source" title="' + escapeHtml(sourceText) + '">' + escapeHtml(sourceText) + '</span>'
+                + '<span class="hl-source" title="' + escapeHtml(hoverText) + '">' + escapeHtml(sourceText) + '</span>'
                 + '</li>';
         }).join('');
     };
