@@ -106,8 +106,10 @@ class ScannerMixin(CloudQueueMixin):
                     )
                 else:
                     # 消费流量自检:启动 10 秒后报一次各事件计数,溯源是否
-                    # 真的在工作,一条日志可验证(parse_errors 应恒为 0)
+                    # 真的在工作(parse_errors 应恒为 0)
                     self.log_etw_stats_once()
+                    # 提权实例启动后补打快捷方式提权标记(有待办时)
+                    self.start_daemon_thread(self._flag_shortcuts_if_pending)
 
                 # 开关期望值与实际生效状态的启动核对:起不来的防护不在界面
                 # 上冒充运行中(显示值纠正为实际,不回写策略文档)

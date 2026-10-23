@@ -2,9 +2,59 @@
 # Inno Setup's [Icons] has no elevation flag; the official ShellLink data-list
 # COM interface is the supported way. Idempotent: sets the flag, keeps the rest.
 param(
-    [Parameter(Mandatory = $true)]
-    [string[]]$ShortcutPath
+    [Parameter(Mandatory = $false)]
+    [string[]]$ShortcutPath,
+    # 无显式路径时扫描桌面与开始菜单(用户+公共),目标指向安装目录的
+    # .lnk 一律打标 —— 快捷方式名称与位置随安装版本/机器而异
+    [Parameter(Mandatory = $false)]
+    [switch]$CommonLocations,
+    [Parameter(Mandatory = $false)]
+    [string]$InstallDir
 )
+
+$targets = @()
+
+if ($ShortcutPath) {
+    $targets += $ShortcutPath
+}
+
+if ($CommonLocations) {
+    $shell = New-Object -ComObject WScript.Shell
+    if (-not $InstallDir) {
+        Write-Output 'InstallDir is required with -CommonLocations'
+        exit 0
+    }
+
+    $roots = @(
+        [Environment]::GetFolderPath('Desktop'),
+        [Environment]::GetFolderPath('CommonDesktopDirectory'),
+        (Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs'),
+        (Join-Path ([Environment]::GetFolderPath('CommonStartMenu')) 'Programs')
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+
+    foreach ($root in $roots) {
+        $links = Get-ChildItem -LiteralPath $root -Filter *.lnk -Recurse -ErrorAction SilentlyContinue
+
+        foreach ($link in $links) {
+            $target = ''
+
+            try {
+                $target = $shell.CreateShortcut($link.FullName).TargetPath
+            } catch {
+                continue
+            }
+
+            if ($target -and ($target -like ($InstallDir + '*'))) {
+                $targets += $link.FullName
+            }
+        }
+    }
+}
+
+if (-not $targets) {
+    Write-Output 'no shortcut targets given'
+    exit 0
+}
 
 Add-Type -TypeDefinition @'
 using System;
@@ -84,21 +134,28 @@ namespace PYAS.Setup {
 }
 '@
 
-foreach ($path in $ShortcutPath) {
+$anyFailed = 0
+foreach ($path in @($targets)) {
     $full = [Environment]::ExpandEnvironmentVariables($path)
     if (-not (Test-Path -LiteralPath $full)) {
         Write-Output "skip (missing): $full"
         continue
     }
 
+    $failedNow = 0
+
     try {
         [PYAS.Setup.LinkElevator]::MarkRunAsAdmin($full)
         $flags = [PYAS.Setup.LinkElevator]::GetFlags($full)
         $marked = (($flags -band 0x2000) -ne 0)
         Write-Output ("marked={0}: {1}" -f $marked.ToString().ToLowerInvariant(), $full)
-        if (-not $marked) { exit 1 }
+        if ($failedNow) { $anyFailed = 1 } else { $failedNow = 0 }
+        if (-not $marked) { $anyFailed = 1 }
     } catch {
         Write-Output "failed: $full -> $($_.Exception.Message)"
-        exit 1
+        $anyFailed = 1
     }
 }
+
+if ($anyFailed) { exit 1 }
+

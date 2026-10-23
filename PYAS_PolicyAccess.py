@@ -125,6 +125,16 @@ class PolicyAccessMixin:
             if relaunch_pid and result not in (None, False) and getattr(lease, 'committed', False):
                 from PYAS_ETW import ETW_LOG_TEXTS
 
+                # 留下待办标记:提权重启后的新实例(此时有权限)补打快捷方式
+                # 的"以管理员身份运行"属性,日常启动不再退回普通权限
+                try:
+                    from PYAS_DataPaths import user_data_dir
+
+                    with open(os.path.join(user_data_dir(), 'flag_shortcuts.pending'), 'w') as handle:
+                        handle.write('1')
+                except OSError:
+                    pass
+
                 self.dispatch_notification(
                     self._loc(ETW_LOG_TEXTS["relaunch_toast_title"]),
                     self._loc(ETW_LOG_TEXTS["relaunch_toast_body"]),

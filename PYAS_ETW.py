@@ -1502,6 +1502,55 @@ class EtwMixin:
             return
 
         self.restore_switches(pending)
+        self._flag_user_shortcuts_elevated()
+
+    def _flag_user_shortcuts_elevated(self) -> None:
+        """把用户的桌面/开始菜单快捷方式打上提权标记:
+        否则每次普通权限启动都会退回非提权并再弹一次核对,循环往复。
+        随包分发的 mark_shortcut_admin.ps1 与安装器用同一份;尽力而为。"""
+        script = os.path.join(getattr(self, "path_pyas", ""), "Menu", "mark_shortcut_admin.ps1")
+
+        if not os.path.isfile(script):
+            return
+
+        try:
+            completed = subprocess.run(
+                [
+                    "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                    "-File", script, "-CommonLocations",
+                    "-InstallDir", getattr(self, "path_pyas", ""),
+                ],
+                capture_output=True, timeout=120,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            output = (completed.stdout or b"").decode("utf-8", "replace").strip()
+        except Exception:
+            logger.debug("shortcut flagging failed", exc_info=True)
+            return
+
+        if output:
+            logging.getLogger("PYAS.Policy").info(
+                "shortcut elevation flags: %s", output.replace("\n", "; ")
+            )
+
+    def _flag_shortcuts_if_pending(self) -> None:
+        """提权实例启动后补打快捷方式提权标记(非提权实例的恢复流程写入的待办)。"""
+        from PYAS_DataPaths import user_data_dir
+
+        marker = os.path.join(user_data_dir(), "flag_shortcuts.pending")
+
+        if not os.path.isfile(marker):
+            return
+
+        if not is_elevated():
+            return
+
+        self._flag_user_shortcuts_elevated()
+
+        try:
+            os.remove(marker)
+        except OSError:
+            pass
 
     def restore_switches(self, keys: list[str]) -> None:
         """一次授权批量恢复开关到开启:提交成功后,非提权走 helper 提权重启,
