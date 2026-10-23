@@ -1281,6 +1281,71 @@ ETW_LOG_TEXTS = {
         "russian_switch": "Защита, требующая прав администратора, не запущена; интерфейс теперь показывает фактическое состояние (выкл): {0}",
         "slovenian_switch": "Zaščita, ki zahteva povišane pravice, ni aktivna; vmesnik zdaj prikazuje dejansko stanje (izklopljeno): {0}",
     },
+    "reconcile_dialog_title": {
+        "traditional_switch": "防護開關狀態核對",
+        "simplified_switch": "防护开关状态核对",
+        "english_switch": "Protection switch state check",
+        "japanese_switch": "保護スイッチ状態の確認",
+        "korean_switch": "보호 스위치 상태 확인",
+        "french_switch": "Vérification des interrupteurs de protection",
+        "spanish_switch": "Comprobación de interruptores de protección",
+        "hindi_switch": "सुरक्षा स्विच स्थिति जांच",
+        "arabic_switch": "التحقق من حالة مفاتيح الحماية",
+        "russian_switch": "Проверка состояния переключателей защиты",
+        "slovenian_switch": "Preverjanje stanja zaščitnih stikal",
+    },
+    "reconcile_item": {
+        "traditional_switch": "{0}：設定為開啟，實際未在運行",
+        "simplified_switch": "{0}：设定为开启，实际未在运行",
+        "english_switch": "{0}: set to on, but not actually running",
+        "japanese_switch": "{0}: オンに設定されていますが、実際には実行されていません",
+        "korean_switch": "{0}: 켜짐으로 설정되었지만 실제로는 실행되지 않습니다",
+        "french_switch": "{0} : activé, mais ne tourne pas réellement",
+        "spanish_switch": "{0}: configurado como activado, pero no se está ejecutando",
+        "hindi_switch": "{0}: चालू पर सेट है, लेकिन वास्तव में नहीं चल रहा है",
+        "arabic_switch": "{0}: مضبوط على التشغيل لكنه لا يعمل فعليًا",
+        "russian_switch": "{0}: установлено «вкл», но фактически не работает",
+        "slovenian_switch": "{0}: nastavljeno na vklopljeno, dejansko pa ni v obratovanju",
+    },
+    "reconcile_question": {
+        "traditional_switch": "是否恢復原有設定（開啟）？可能彈出管理員授權。選擇「否」將保持當前實際狀態。",
+        "simplified_switch": "是否恢复原有设定（开启）？可能弹出管理员授权。选择「否」将保持当前实际状态。",
+        "english_switch": "Restore the original setting (on)? An administrator prompt may appear. Choose No to keep the current actual state.",
+        "japanese_switch": "元の設定（オン）を復元しますか？管理者承認が表示される場合があります。「いいえ」で現在の実際の状態を維持します。",
+        "korean_switch": "원래 설정(켬)을 복원하시겠습니까? 관리자 승인이 나타날 수 있습니다. '아니요'를 선택하면 현재 실제 상태가 유지됩니다.",
+        "french_switch": "Restaurer le réglage d'origine (activé) ? Une demande d'administrateur peut apparaître. Choisissez Non pour conserver l'état actuel.",
+        "spanish_switch": "¿Restaurar la configuración original (activado)? Puede aparecer una solicitud de administrador. Elija No para mantener el estado actual.",
+        "hindi_switch": "मूल सेटिंग (चालू) पुनर्स्थापित करें? व्यवस्थापक प्रॉम्प्ट दिखाई दे सकता है। वर्तमान वास्तविक स्थिति बनाए रखने के लिए 'नहीं' चुनें।",
+        "arabic_switch": "هل تريد استعادة الإعداد الأصلي (تشغيل)؟ قد تظهر مطالبة المسؤول. اختر «لا» للإبقاء على الحالة الفعلية الحالية.",
+        "russian_switch": "Восстановить исходную настройку (вкл)? Может появиться запрос администратора. «Нет» — сохранить текущее фактическое состояние.",
+        "slovenian_switch": "Obnovim izvorno nastavitev (vklopljeno)? Prikaz se lahko zahteva skrbniško potrditev. Z »ne« ostane trenutno dejansko stanje.",
+    },
+    "switch_label_etw": {
+        "traditional_switch": "進程溯源",
+        "simplified_switch": "进程溯源",
+        "english_switch": "Process attribution",
+        "japanese_switch": "プロセス追跡",
+        "korean_switch": "프로세스 추적",
+        "french_switch": "Traçage de processus",
+        "spanish_switch": "Rastreo de procesos",
+        "hindi_switch": "प्रक्रिया ट्रेसिंग",
+        "arabic_switch": "تتبع العمليات",
+        "russian_switch": "Отслеживание процессов",
+        "slovenian_switch": "Sledenje procesom",
+    },
+    "switch_label_behavior": {
+        "traditional_switch": "行為防護",
+        "simplified_switch": "行为防护",
+        "english_switch": "Behavior defense",
+        "japanese_switch": "ビヘイビア防御",
+        "korean_switch": "행동 방어",
+        "french_switch": "Défense comportementale",
+        "spanish_switch": "Defensa conductual",
+        "hindi_switch": "व्यवहार रक्षा",
+        "arabic_switch": "الحماية السلوكية",
+        "russian_switch": "Поведенческая защита",
+        "slovenian_switch": "Vedenjska zaščita",
+    },
     "burst_detail": {
         "traditional_switch": "{0} 在 {1} 秒內改寫了 {2} 個文件類檔案，疑似勒索行為",
         "simplified_switch": "{0} 在 {1} 秒内改写了 {2} 个文档类文件，疑似勒索行为",
@@ -1361,7 +1426,11 @@ class EtwMixin:
     def reconcile_switch_display(self) -> None:
         """启动核对:开关期望值(策略文档)与实际生效状态不一致时,把运行时
         显示值纠正为实际,避免「显示开、实际没跑」。不回写策略文档 —— 那是
-        管理员的意愿,下次提权启动仍会尝试生效。"""
+        管理员的意愿,下次提权启动仍会尝试生效。
+
+        纠正后弹窗询问是否恢复原有设定(一次授权批量恢复);用户不响应则
+        保持实际状态。弹窗在独立线程,不阻塞引擎初始化。
+        """
         etw_running = bool(getattr(self, "etw_running", False))
         corrections = []
 
@@ -1377,13 +1446,64 @@ class EtwMixin:
                     self.pyas_config[key] = False
                     corrections.append(key)
 
-        if corrections:
-            self.write_log(
-                "WARN",
-                "ETW Attribution",
-                detail=self._loc(ETW_LOG_TEXTS["display_reconciled"]).format(", ".join(corrections)),
-                success=False,
-            )
+        if not corrections:
+            return
+
+        self.write_log(
+            "WARN",
+            "ETW Attribution",
+            detail=self._loc(ETW_LOG_TEXTS["display_reconciled"]).format(", ".join(corrections)),
+            success=False,
+        )
+        self.start_daemon_thread(lambda: self._offer_switch_restore(corrections))
+
+    def _offer_switch_restore(self, keys: list[str]) -> None:
+        """列出「设定值 vs 实际状态」,询问是否恢复;不响应保持实际状态。"""
+        labels = {
+            "etw_attribution_switch": "switch_label_etw",
+            "behavior_defense_switch": "switch_label_behavior",
+        }
+        lines = "\n".join(
+            self._loc(ETW_LOG_TEXTS["reconcile_item"]).format(self._loc(ETW_LOG_TEXTS[labels[key]]))
+            for key in keys
+        )
+        message = lines + "\n\n" + self._loc(ETW_LOG_TEXTS["reconcile_question"])
+
+        if not self.ask_confirmation(
+            self._loc(ETW_LOG_TEXTS["reconcile_dialog_title"]), message
+        ):
+            return
+
+        # 只恢复当前仍处于「已纠正」状态的键;用户若已在界面手动改过,以
+        # 手动操作为准
+        with self.lock_config:
+            pending = [key for key in keys if not bool(self.pyas_config.get(key))]
+
+        if not pending:
+            return
+
+        self.restore_switches(pending)
+
+    def restore_switches(self, keys: list[str]) -> None:
+        """一次授权批量恢复开关到开启:提交成功后,非提权走 helper 提权重启,
+        提权环境直接拉起消费者。提交失败时调用方看到的值保持纠正态。"""
+        scope = frozenset(keys)
+        from PYAS_ETW import is_elevated
+
+        def update():
+            with self.lock_config:
+                for key in keys:
+                    self.pyas_config[key] = True
+
+            return bool(self.save_config())
+
+        result = self._policy_call(
+            scope, update, False, 'restore:' + ','.join(sorted(keys)),
+            relaunch_pid=os.getpid() if not is_elevated() else None,
+        )
+
+        if result and is_elevated():
+            self.start_etw_consumer()
 
     def log_etw_stats_once(self, delay_seconds: float = 10.0) -> None:
         """启动后探测一次消费流量:溯源是否真的在工作,一条日志可验证。"""

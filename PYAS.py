@@ -1394,6 +1394,17 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
         self.user32.MessageBoxW(0, message, title, flags)
         return True
 
+    def ask_confirmation(self, title, message):
+        """置顶的「是/否」询问框;独立线程调用安全(自泵模态循环)。
+        返回 True=用户选「是」。启动核对等后台流程用它向用户求确认。"""
+        if getattr(self, "closing", False):
+            return False
+
+        result = self.user32.MessageBoxW(
+            0, message, title, 0x00000004 | 0x00000020 | 0x00040000 | 0x00010000
+        )  # MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND
+        return result == 6  # IDYES
+
     def show_confirm(self, title, message):
         return self.user32.MessageBoxW(0, message, title, 0x00000004 | 0x00000020) == 6
 
