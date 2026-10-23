@@ -38,6 +38,7 @@ import base64
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -252,8 +253,13 @@ class VssSnapshotManager:
 
     # -- 公共接口 ----------------------------------------------------------
 
-    def create_if_due(self, drive: str, now: float | None = None) -> str | None:
-        """冷却期内直接返回现有快照;到期才真正建新的。失败返回 None。"""
+    def create_if_due(self, drive: str, now: float | None = None):
+        """冷却期内直接返回现有快照;到期才真正建新的。
+
+        返回 (状态, 设备路径):created=新建成功 / existing=冷却期复用 /
+        cooldown=上次失败还在冷却 / failed=本次失败。设备仅在前两种非 None。
+        冷却期与复用都不产生日志 —— 只有真实尝试才有资格写日志。
+        """
         stamp = _now() if now is None else now
         drive = drive[:2].upper()
 
@@ -261,7 +267,12 @@ class VssSnapshotManager:
             existing = self._snapshots.get(drive)
 
             if existing and stamp - existing.get("last_attempt", 0.0) < self._cooldown:
-                return existing.get("device")
+                device = existing.get("device")
+
+                if device:
+                    return ("existing", device)
+
+                return ("cooldown", None)
 
             self._snapshots.setdefault(drive, {})["last_attempt"] = stamp
 
@@ -271,7 +282,7 @@ class VssSnapshotManager:
             if device:
                 self._snapshots[drive]["created"] = stamp
 
-        return device
+        return (("created", device) if device else ("failed", None))
 
     def device_for(self, drive: str) -> str | None:
         with self._lock:
@@ -298,9 +309,72 @@ class VssSnapshotManager:
         rel = dos_path[2:].lstrip("\\") if len(dos_path) > 2 else dos_path.lstrip("\\")
         return device.rstrip("\\") + "\\" + rel
 
-    # -- PowerShell 执行 ----------------------------------------------------
+    # -- 快照创建:vssadmin 首选,CIM/PowerShell 后备 -------------------------
 
     def _create(self, drive: str, stamp: float) -> str | None:
+        """双路创建:vssadmin 输出为稳定 token(GUID/设备名不随语言与序列化
+        行为变化),CIM/PowerShell 作后备;两路都失败才记失败。"""
+        diagnostics = []
+
+        for method in ("vssadmin", "cim"):
+            if method == "vssadmin":
+                shadow_id, device, diagnostic = self._create_via_vssadmin(drive)
+            else:
+                shadow_id, device, diagnostic = self._create_via_cim(drive)
+
+            if shadow_id and device:
+                new_entry = {"id": shadow_id, "device": device, "last_attempt": stamp}
+                previous = None
+
+                with self._lock:
+                    previous = self._snapshots.get(drive)
+                    self._snapshots[drive] = {**previous, **new_entry} if previous else dict(new_entry)
+
+                # 旧的快照在新快照就位后删除,失败不影响新快照可用性
+                if previous and previous.get("id") and previous["id"] != shadow_id:
+                    self._delete_by_id(previous["id"])
+
+                self._save_state()
+                self.last_error = ""
+                return device
+
+            diagnostics.append(f"{method}: {diagnostic}")
+
+        self.last_error = "; ".join(diagnostics)
+        logger.warning("VSS snapshot failed: %s", self.last_error)
+        return None
+
+    def _create_via_vssadmin(self, drive: str):
+        """`vssadmin create shadow`:输出按稳定 token 解析(设备名与 GUID
+        不随系统语言变化),规避 CIM/JSON 序列化的环境差异。"""
+        try:
+            completed = subprocess.run(
+                ["vssadmin", "create", "shadow", f"/for={drive}"],
+                capture_output=True,
+                timeout=120,
+                text=True,
+                errors="replace",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except Exception as error:
+            return (None, None, f"vssadmin spawn failed: {error}")
+
+        output = ((completed.stdout or "") + "\n" + (completed.stderr or ""))[-2000:]
+        device_match = re.search(
+            r"\\\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy\d+", output, re.I
+        )
+        id_match = re.search(
+            r"\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}",
+            output,
+        )
+
+        if not (device_match and id_match):
+            return (None, None, f"exit={completed.returncode} output={output.strip()[:160]}")
+
+        return (id_match.group(0), device_match.group(0), "")
+
+    def _create_via_cim(self, drive: str):
+        """CIM/PowerShell 后备路径;返回 (id, device, 诊断)。"""
         result_file = os.path.join(
             os.path.dirname(self._state_path), f"pyas_vss_{uuid.uuid4().hex}.json"
         )
@@ -338,24 +412,10 @@ class VssSnapshotManager:
                     error_text = content[:200]
 
             if payload.get("id") and payload.get("device"):
-                new_entry = {"id": payload["id"], "device": payload["device"], "last_attempt": stamp}
-                previous = None
+                return (str(payload["id"]), str(payload["device"]), "")
 
-                with self._lock:
-                    previous = self._snapshots.get(drive)
-                    self._snapshots[drive] = {**previous, **new_entry} if previous else dict(new_entry)
-
-                # 旧的快照在新快照就位后删除,失败不影响新快照可用性
-                if previous and previous.get("id"):
-                    self._delete_by_id(previous["id"])
-
-                self._save_state()
-                self.last_error = ""
-                return payload["device"]
-
-            self.last_error = error_text or ("powershell exited nonzero" if not ok else "no id/device returned")
-            logger.warning("VSS snapshot failed: %s", self.last_error)
-            return None
+            return (None, None, error_text
+                    or ("powershell exited nonzero" if not ok else "no id/device returned"))
         finally:
             try:
                 if os.path.exists(result_file):
@@ -364,6 +424,22 @@ class VssSnapshotManager:
                 pass
 
     def _delete_by_id(self, shadow_id: str) -> bool:
+        # vssadmin 首选(/quiet 免确认);失败退回 CIM
+        try:
+            completed = subprocess.run(
+                ["vssadmin", "delete", "shadows", f"/shadow={shadow_id}", "/quiet"],
+                capture_output=True,
+                timeout=120,
+                text=True,
+                errors="replace",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+
+            if completed.returncode == 0:
+                return True
+        except Exception:
+            logger.debug("vssadmin delete failed", exc_info=True)
+
         script = (
             "try{Get-CimInstance Win32_ShadowCopy -Filter \"ID='" + shadow_id + "'\"|"
             "Remove-CimInstance;exit 0}catch{exit 1}"
@@ -467,13 +543,21 @@ class BehaviorMixin:
         threading.Thread(target=target, name=name, daemon=True).start()
 
     def _behavior_on_write(self, pid: int, path: str, now: float | None = None) -> None:
-        """写/删事件统一入口:开关关闭直接返回,内部只记文档类目标。"""
+        """写/删事件统一入口:开关关闭直接返回,内部只记文档类目标。
+
+        系统目录与白名单文件不参与:前者是系统自身高频改写(aidd 缓冲等),
+        后者是管理员明确信任的对象,计入只会制造勒索误报。"""
         if not self._behavior_switch_cached():
             return
 
         stamp = _now() if now is None else now
 
         if not BurstHeuristic.is_target(path):
+            return
+
+        system_root = str(getattr(self, "path_system", "") or "C:\\Windows")
+
+        if path.lower().startswith(system_root.lower()) or self.is_in_whitelist(path):
             return
 
         self._behavior_ledger.record(pid, path, stamp)
@@ -493,15 +577,18 @@ class BehaviorMixin:
         drive = path[:2].upper()
 
         def worker():
-            device = self._vss.create_if_due(drive)
+            state, device = self._vss.create_if_due(drive)
 
-            if device:
+            if state in ("existing", "cooldown"):
+                # 冷却期内复用/上次失败未到期:不重复记日志
+                return
+
+            if state == "created":
                 self.write_log(
                     "INFO",
                     ACTION_SNAPSHOT,
                     detail=self._loc(BEHAVIOR_LOG_TEXTS["snapshot_created"]).format(drive),
                     pid=pid,
-                    source=path,
                 )
             else:
                 self.write_log(
@@ -511,7 +598,6 @@ class BehaviorMixin:
                         getattr(self._vss, "last_error", "") or "unknown"
                     ),
                     pid=pid,
-                    source=path,
                     success=False,
                 )
 

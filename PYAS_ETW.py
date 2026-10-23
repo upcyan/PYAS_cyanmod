@@ -532,11 +532,13 @@ def nt_to_dos(path: str, mapping: dict[str, str]) -> str:
 # 勒索启发:单进程窗口内大量改写(纯逻辑,可单测)
 # ---------------------------------------------------------------------------
 
-# 文档/媒体类后缀:勒索软件的主要目标;编译器写 .obj、浏览器写缓存都不在列
+# 文档/媒体类后缀:勒索软件的主要目标;编译器写 .obj、浏览器写缓存都不在列。
+# .db/.sqlite/.mdb/.accdb 特意排除:聊天/应用数据库被 QQ、微信等高频改写,
+# 计入会把正常使用当成批量改写(实测 QQ.exe 10 秒 40 个 .db 触发误报)
 BURST_TARGET_EXTENSIONS = frozenset(
     ".doc .docx .xls .xlsx .ppt .pptx .pdf .txt .md .csv .rtf "
     ".jpg .jpeg .png .gif .bmp .tif .tiff .webp .heic .psd "
-    ".zip .rar .7z .tar .gz .sqlite .db .accdb .mdb .odt .ods".split()
+    ".zip .rar .7z .tar .gz .odt .ods".split()
 )
 BURST_WINDOW_SECONDS = 10.0
 BURST_THRESHOLD = 40
@@ -1061,6 +1063,11 @@ class EtwFileWatcher:
                 self._notify_delete(pid, path, now)
 
     def _dispatch(self, pid: int, path: str, now: float) -> None:
+        # pid 4 = System:ETW 在缓存回写时把写入算到 System 头上,并非真实
+        # 写入者 —— 记进溯源与启发只会制造伪归属(实测触发「PID 4 勒索告警」)
+        if pid <= 4:
+            return
+
         dos_path = self._to_dos(path, now)
 
         if not dos_path:
@@ -1072,6 +1079,9 @@ class EtwFileWatcher:
             logger.debug("on_write callback failed", exc_info=True)
 
     def _notify_delete(self, pid: int, path: str, now: float) -> None:
+        if pid <= 4:
+            return
+
         dos_path = self._to_dos(path, now)
 
         if not dos_path:

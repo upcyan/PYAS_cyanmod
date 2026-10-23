@@ -100,29 +100,43 @@ class SnapshotManagerTests(unittest.TestCase):
             runner = FakeVssRunner()
             manager = self.make(tmp, runner=runner, cooldown_seconds=60.0)
 
-            first = manager.create_if_due("C:", now=100.0)
+            state, first = manager.create_if_due("C:", now=100.0)
 
+            self.assertEqual(state, "created")
             self.assertTrue(first and first.endswith("ShadowCopy1"))
             self.assertEqual(manager.created_stamp("C:"), 100.0)
             self.assertEqual(manager.last_error, "")
 
-            second = manager.create_if_due("C:", now=130.0)  # 冷却期内,复用
+            state, second = manager.create_if_due("C:", now=130.0)  # 冷却期内,复用
 
-            self.assertEqual(second, first)
+            self.assertEqual((state, second), ("existing", first))
             self.assertEqual(len(runner.calls), 1)
 
-            third = manager.create_if_due("C:", now=200.0)  # 冷却结束,新建并删旧
+            state, third = manager.create_if_due("C:", now=200.0)  # 冷却结束,新建并删旧
 
+            self.assertEqual(state, "created")
             self.assertTrue(third.endswith("ShadowCopy2"))
             self.assertEqual(runner.deleted, ["shadow-id-1"])
             self.assertEqual(manager.device_for("c:"), third)
+
+    def test_failure_enters_cooldown_and_stays_silent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = FakeVssRunner(fail=True)
+            manager = self.make(tmp, runner=runner, cooldown_seconds=60.0)
+
+            self.assertEqual(manager.create_if_due("C:", now=1.0), ("failed", None))
+            # 冷却期内不重试也不重复报错
+            self.assertEqual(manager.create_if_due("C:", now=30.0), ("cooldown", None))
+            self.assertEqual(len(runner.calls), 1)
 
     def test_failure_sets_last_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             runner = FakeVssRunner(fail=True, error_text="VSS 拒绝访问")
             manager = self.make(tmp, runner=runner)
 
-            self.assertIsNone(manager.create_if_due("C:", now=1.0))
+            state, device = manager.create_if_due("C:", now=1.0)
+
+            self.assertEqual((state, device), ("failed", None))
             self.assertIn("拒绝访问", manager.last_error)
 
     def test_state_survives_restart_without_created_stamp(self):
@@ -278,7 +292,11 @@ class RollbackTests(unittest.TestCase):
             class StubVss:
                 def create_if_due(self, drive, now=None):
                     creations.append((drive, now))
-                    return SNAP_DEVICE if len(creations) == 1 else None
+
+                    if len(creations) == 1:
+                        return ("created", SNAP_DEVICE)
+
+                    return ("cooldown", None)
 
             host._vss = StubVss()
 

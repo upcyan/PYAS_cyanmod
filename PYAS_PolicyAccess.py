@@ -128,7 +128,16 @@ class PolicyAccessMixin:
                     self._loc(ETW_LOG_TEXTS["relaunch_toast_title"]),
                     self._loc(ETW_LOG_TEXTS["relaunch_toast_body"]),
                 )
+                logging.getLogger('PYAS.Policy').info(
+                    'relaunch scheduled after commit (scope=%s, pid=%s)',
+                    ','.join(sorted(scope)), relaunch_pid,
+                )
                 self.start_daemon_thread(self._restart_after_reply)
+            else:
+                logging.getLogger('PYAS.Policy').info(
+                    'relaunch skipped: relaunch_pid=%s committed=%s result=%r',
+                    bool(relaunch_pid), getattr(lease, 'committed', None), result,
+                )
             return result
         finally:
             store.local.user_only = previous_user_only
