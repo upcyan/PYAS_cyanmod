@@ -1384,6 +1384,17 @@ class _WebDecisionAPI:
         if window is None:
             return False
 
+        # 隐藏创建后的首秀:内容已按实测高度定型,此时才显示,不会看到
+        # 「先默认高度再收缩」的跳变。首显同时重新置顶
+        if not getattr(self._session, "_shown_once", False):
+            self._session._shown_once = True
+
+            try:
+                window.show()
+                self._session._assert_topmost()
+            except Exception:
+                log_exception("PYAS_Dialog._WebDecisionAPI.resize.first_show")
+
         try:
             target = int(height)
         except (TypeError, ValueError):
@@ -1569,6 +1580,13 @@ class _WebDecisionAPI:
             if not session.queue.complete('allow' if choice == 'permanent' else choice, expected=request):
                 return False
             session.queue.take_next()
+            # 最后一条告警已走:立刻隐藏,抢在下一轮 400ms 快照把「暂无拦截
+            # 事件」空态画出来之前 —— 否则用户会先看到空态再看到窗口关闭
+            if session.queue.active is None:
+                try:
+                    session.window.hide()
+                except Exception:
+                    log_exception("PYAS_Dialog._WebDecisionAPI.decide.idle_hide")
             return True
         finally:
             request.resolving = False
@@ -1603,6 +1621,12 @@ class _WebDecisionAPI:
             if not session.queue.complete('allow', expected=request):
                 return False
             session.queue.take_next()
+            # 与 decide() 同规:最后一条走完立刻隐藏,别让空态闪一下
+            if session.queue.active is None:
+                try:
+                    session.window.hide()
+                except Exception:
+                    log_exception("PYAS_Dialog._WebDecisionAPI.report_false_positive.idle_hide")
             return True
         finally:
             request.resolving = False
@@ -1787,6 +1811,8 @@ class _WebThreatDialogSession:
         self.destroying = False
         # 最后一次「有告警在处理」的时刻;队列清空后据此决定是否继续保留窗口
         self._last_active_at = time.monotonic()
+        # 隐藏创建后的首次显示由首个 resize 触发(内容实测高度定型后才可见)
+        self._shown_once = False
         self.api = _WebDecisionAPI(self)
 
     def _should_keep_alive(self, request, now=None):
@@ -1832,13 +1858,15 @@ class _WebThreatDialogSession:
             log_exception("PYAS_Dialog._WebThreatDialogSession.run.theme")
             theme = "system_switch"
         pos_x, pos_y = self._bottom_right_position(THREAT_WINDOW_WIDTH, THREAT_WINDOW_HEIGHT, scale)
+        # 隐藏创建:窗口先以默认高度出现、首帧渲染后再 resize 会肉眼可见地跳一下。
+        # 首次 resize(内容实测高度)应用后才显示,一次到位
         self.window = webview.create_window(
             "PYAS · Pending alerts", url=url, js_api=self.api,
             width=THREAT_WINDOW_WIDTH, height=THREAT_WINDOW_HEIGHT,
             min_size=THREAT_WINDOW_MIN_SIZE,
             frameless=True, easy_drag=False, on_top=True, text_select=True,
             background_color=window_background_for(theme),
-            x=pos_x, y=pos_y,
+            x=pos_x, y=pos_y, hidden=True,
         )
         self.hwnd = True  # Queue operations use post_message, not a native HWND.
         self.window.events.closing += self._on_closing
