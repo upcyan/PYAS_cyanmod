@@ -746,10 +746,9 @@ class ScannerMixin(CloudQueueMixin):
                 current_time = time.time()
 
                 if current_time - last_update >= 0.05:
-                    if self._window:
-                        self._window.evaluate_js(
-                            f"if(window.updateDeleteProgress) window.updateDeleteProgress({json.dumps(path.replace(os.sep, '/'))});"
-                        )
+                    self.evaluate_js_safe(
+                        f"if(window.updateDeleteProgress) window.updateDeleteProgress({json.dumps(path.replace(os.sep, '/'))});"
+                    )
 
                     last_update = current_time
 
@@ -824,10 +823,9 @@ class ScannerMixin(CloudQueueMixin):
             "slovenian_switch": f"Preostalih virusov: {remaining}, izbrisanih datotek: {len(deleted_paths)}.",
         }
 
-        if self._window:
-            self._window.evaluate_js(
-                f"if(window.finishScan) window.finishScan({json.dumps(messages)}, {remaining});"
-            )
+        self.evaluate_js_safe(
+            f"if(window.finishScan) window.finishScan({json.dumps(messages)}, {remaining});"
+        )
 
         return deleted_paths
 

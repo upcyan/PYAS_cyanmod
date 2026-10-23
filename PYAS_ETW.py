@@ -1476,40 +1476,17 @@ class EtwMixin:
                 "(()=>{const el=document.querySelector('[data-config-key=" + key + "]');"
                 "if(el)el.checked=false;})();"
             )
-        self.start_daemon_thread(lambda: self._offer_switch_restore(corrections))
+        # 特权运行开启:自动恢复(一次授权批量置回开启 + 提权重启),不再
+        # 弹窗询问;关闭则按用户意愿保持关闭
+        if bool(self.pyas_config.get("elevated_run_switch", True)):
+            self.start_daemon_thread(lambda: self._auto_restore_for_privilege_run(corrections))
 
-    def _offer_switch_restore(self, keys: list[str]) -> None:
-        """列出「设定值 vs 实际状态」,询问是否恢复;不响应保持实际状态。"""
-        labels = {
-            "etw_attribution_switch": "switch_label_etw",
-            "behavior_defense_switch": "switch_label_behavior",
-        }
-        lines = "\n".join(
-            self._loc(ETW_LOG_TEXTS["reconcile_item"]).format(self._loc(ETW_LOG_TEXTS[labels[key]]))
-            for key in keys
-        )
-        message = lines + "\n\n" + self._loc(ETW_LOG_TEXTS["reconcile_question"])
-
-        if not self.ask_confirmation(
-            self._loc(ETW_LOG_TEXTS["reconcile_dialog_title"]), message
-        ):
-            return
-
-        # 只恢复当前仍处于「已纠正」状态的键;用户若已在界面手动改过,以
-        # 手动操作为准
-        with self.lock_config:
-            pending = [key for key in keys if not bool(self.pyas_config.get(key))]
-
-        if not pending:
-            return
-
-        self.restore_switches(pending)
+    def _auto_restore_for_privilege_run(self, keys: list[str]) -> None:
+        self.restore_switches(keys)
+        # 提权实例已就位:顺手把快捷方式打上提权标记,日常双击不再退回普通权限
         self._flag_user_shortcuts_elevated()
 
     def _flag_user_shortcuts_elevated(self) -> None:
-        """把用户的桌面/开始菜单快捷方式打上提权标记:
-        否则每次普通权限启动都会退回非提权并再弹一次核对,循环往复。
-        随包分发的 mark_shortcut_admin.ps1 与安装器用同一份;尽力而为。"""
         script = os.path.join(getattr(self, "path_pyas", ""), "Menu", "mark_shortcut_admin.ps1")
 
         if not os.path.isfile(script):
@@ -1534,25 +1511,6 @@ class EtwMixin:
             logging.getLogger("PYAS.Policy").info(
                 "shortcut elevation flags: %s", output.replace("\n", "; ")
             )
-
-    def _flag_shortcuts_if_pending(self) -> None:
-        """提权实例启动后补打快捷方式提权标记(非提权实例的恢复流程写入的待办)。"""
-        from PYAS_DataPaths import user_data_dir
-
-        marker = os.path.join(user_data_dir(), "flag_shortcuts.pending")
-
-        if not os.path.isfile(marker):
-            return
-
-        if not is_elevated():
-            return
-
-        self._flag_user_shortcuts_elevated()
-
-        try:
-            os.remove(marker)
-        except OSError:
-            pass
 
     def restore_switches(self, keys: list[str]) -> None:
         """一次授权批量恢复开关到开启:提交成功后,非提权走 helper 提权重启,

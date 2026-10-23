@@ -201,6 +201,9 @@ class RuntimeMixin:
             # 恢复操作可能把合法批量写入打回旧版本,须显式开启
             "behavior_defense_switch": True,
             "behavior_auto_rollback": False,
+            # 特权运行:开启时启动核对发现需提权防护未运行,自动恢复(一次
+            # UAC)+提权重启,不再弹询问窗;关闭则保持纠正且不打扰
+            "elevated_run_switch": True,
             "network_switch": False,
             "extension_switch": False,
             "sensitive_switch": False,
@@ -277,8 +280,7 @@ class RuntimeMixin:
                 if getattr(self, "closing", False) or self._window is None:
                     continue
 
-                if self._window:
-                    self._window.evaluate_js("".join(batch))
+                self.evaluate_js_safe("".join(batch))
             except queue.Empty:
                 continue
             except Exception:

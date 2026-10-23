@@ -649,11 +649,10 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
 
     def _sync_maximize_icon(self):
         try:
-            if self._window:
-                self._window.evaluate_js(
-                    "window.syncMaximizeIcon && window.syncMaximizeIcon("
-                    + str(bool(getattr(self, "_maximized", False))).lower() + ")"
-                )
+            self.evaluate_js_safe(
+                "window.syncMaximizeIcon && window.syncMaximizeIcon("
+                + str(bool(getattr(self, "_maximized", False))).lower() + ")"
+            )
         except Exception:
             log_exception("PYAS._MainMixin._sync_maximize_icon")
 
@@ -928,10 +927,10 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
             # close() refused to exit (a driver could not be stopped), so the page
             # is still waiting on "Restarting…" with its only button disabled.
             try:
-                window = getattr(self, "_window", None)
-
-                if window:
-                    window.evaluate_js("window.pyasPolicyRestartFailed && window.pyasPolicyRestartFailed()")
+                if not self.evaluate_js_safe(
+                    "window.pyasPolicyRestartFailed && window.pyasPolicyRestartFailed()"
+                ):
+                    pass  # 窗口已销毁:无页面可通知,重启失败的兜底在托盘侧
             except Exception:
                 log_exception("PYAS._MainMixin._restart_after_reply.notify")
 
@@ -1405,6 +1404,22 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
         )  # MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND
         return result == 6  # IDYES
 
+    def evaluate_js_safe(self, js):
+        """关闭/销毁竞态下安全执行 JS:WebView2 已释放时 pywebview 会把
+        ObjectDisposedException 记成 ERROR 脚本错误 —— closing 或窗口已置空
+        时静默跳过;退出期间的 JS 本就无意义。返回 False 表示未执行。"""
+        if getattr(self, "closing", False) or self._window is None:
+            return False
+
+        try:
+            self._window.evaluate_js(js)
+            return True
+        except Exception:
+            if not getattr(self, "closing", False):
+                raise
+
+            return False
+
     def show_confirm(self, title, message):
         return self.user32.MessageBoxW(0, message, title, 0x00000004 | 0x00000020) == 6
 
@@ -1555,10 +1570,9 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
             return remember(False, str(error))
 
     def trigger_context_scan(self, target):
-        if self._window:
-            self._window.evaluate_js(
-                f"if(window.triggerContextScan) window.triggerContextScan({json.dumps(target.replace(os.sep, '/'))});"
-            )
+        self.evaluate_js_safe(
+            f"if(window.triggerContextScan) window.triggerContextScan({json.dumps(target.replace(os.sep, '/'))});"
+        )
 
     def on_drop(self, e):
         def _process_drop():
@@ -1566,8 +1580,8 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
                 files = e.get("dataTransfer", {}).get("files", [])
                 paths = [f.get("pywebviewFullPath") for f in files if f.get("pywebviewFullPath")]
 
-                if paths and self._window:
-                    self._window.evaluate_js(
+                if paths:
+                    self.evaluate_js_safe(
                         f"if(window.triggerContextScan) window.triggerContextScan({json.dumps(paths)});"
                     )
 

@@ -266,14 +266,13 @@ class ConfigMixin:
                             with self.lock_config:
                                 self.pyas_config[key] = bool(self.check_system_driver())
 
-                if self._window:
-                    try:
-                        self._window.evaluate_js(
-                            f"if(window.revertSwitch) window.revertSwitch({json.dumps(key)});"
-                        )
-                    except Exception:
-                        log_exception("PYAS_Config.ConfigMixin.update_config:135")
-                        pass
+                try:
+                    self.evaluate_js_safe(
+                        f"if(window.revertSwitch) window.revertSwitch({json.dumps(key)});"
+                    )
+                except Exception:
+                    log_exception("PYAS_Config.ConfigMixin.update_config:135")
+                    pass
 
                 return self.pyas_config.get(key, old_value)
 
