@@ -560,10 +560,16 @@ class BurstAlert:
 
 
 class BurstHeuristic:
-    """按 PID 滑动窗口统计「不同目标文件」的改写数,超阈值即告警一次。
+    """按 PID 滑动窗口统计「改写会话早期已存在文档」的进程,超阈值即告警。
 
-    按路径去重:加密器对同一文件反复写只算一次;编译器虽会写大量不同
-    文件,但目标后缀已把 .obj/构建缓存挡在门外,不会误伤。
+    误报的两道过滤器:
+    - 只统计「会话早期已存在」的文档(首次出现距窗口起点 ≥30 秒):
+      智能体/构建工具批量新建项目文件是高频正常行为,新落盘的文件不算;
+    - 按路径去重:同一文件反复写只算一次,加密器对既有文档的改写
+      与对新建文件的落子因此可分。
+
+    勒索软件改写的是用户既有文档(它们早已存在),其首次出现时间
+    远早于爆发窗口 —— 这个特征无法被"换个进程写"伪装。
     """
 
     def __init__(
@@ -572,14 +578,18 @@ class BurstHeuristic:
         threshold: int = BURST_THRESHOLD,
         cooldown_seconds: float = BURST_COOLDOWN_SECONDS,
         max_pids: int = BURST_MAX_TRACKED_PIDS,
+        pre_existing_seconds: float = BURST_PRE_EXISTING_SECONDS,
     ) -> None:
         self._window = window_seconds
         self._threshold = threshold
         self._cooldown = cooldown_seconds
         self._max_pids = max_pids
+        self._pre_existing = pre_existing_seconds
         self._lock = threading.Lock()
-        # pid -> (OrderedDict[路径 -> 时刻], 上次告警时刻)
+        # pid -> (OrderedDict[路径 -> (首次出现时刻, 最近写时刻)], 上次告警时刻)
         self._state: dict[int, tuple[OrderedDict, float]] = {}
+        # 会话级「首次出现」登记:路径 -> 最早写时刻(容量有界,LRU 逐出)
+        self._first_seen: OrderedDict[str, float] = OrderedDict()
 
     @staticmethod
     def is_target(path: str) -> bool:
@@ -594,6 +604,15 @@ class BurstHeuristic:
 
         with self._lock:
             paths, last_alert = self._state.get(pid, (OrderedDict(), None))
+
+            first = self._first_seen.get(path)
+            if first is None:
+                self._first_seen[path] = stamp
+                self._first_seen.move_to_end(path)
+                first = stamp
+
+                while len(self._first_seen) > 20000:
+                    self._first_seen.popitem(last=False)
 
             paths[path] = stamp
             paths.move_to_end(path)
