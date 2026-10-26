@@ -2928,6 +2928,10 @@ class DialogMixin(AlertPolicyMixin):
 
                 layer_hit = get_layer().lookup(source)
 
+                # ETW 事件返回的路径可能不带盘符(卷相对形态),两种形态都查
+                if layer_hit is None and len(source) >= 2 and source[1] == ":":
+                    layer_hit = get_layer().lookup("\\" + source[3:])
+
                 if layer_hit:
                     users = [(layer_hit[0], layer_hit[1])]
             except Exception:

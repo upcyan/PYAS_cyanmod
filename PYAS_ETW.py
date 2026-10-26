@@ -1814,6 +1814,11 @@ class EtwMixin:
 
             name, _ = self._etw_pid_info.get(pid)
             get_layer().record_etw(path, pid, name)
+
+            # 卷相对路径形态(E:\ 盘之外的卷相对写法、ETW 事件返回的路径
+            # 可能不带盘符)也记录一份,告警侧两种形态都能命中
+            if len(path) >= 2 and path[1] == ":":
+                get_layer().record_etw(path[2:], pid, name)
         except Exception:
             logger.debug("etw attribution record failed", exc_info=True)
 
