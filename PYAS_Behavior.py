@@ -443,10 +443,14 @@ class VssSnapshotManager:
                 except ValueError:
                     # PowerShell catch 分支写入的是纯文本错误
                     error_text = content[:200]
+            else:
+                error_text = "result file not written"
 
             if payload.get("id") and payload.get("device"):
                 return (str(payload["id"]), str(payload["device"]), "")
 
+            # 诊断带原始内容:id/device 缺失时(如 Win11 24H2+ 对 WMI 创建
+            # 的限制),远程日志可直接分辨是拒绝、空值还是其他形态
             return (None, None, error_text
                     or ("powershell exited nonzero" if not ok else "no id/device returned"))
         finally:
@@ -516,8 +520,10 @@ class VssSnapshotManager:
         if payload.get("id") and payload.get("device"):
             return (True, payload, "")
 
-        return (False, payload, error_text
-                or ("powershell exited nonzero" if not ok else "no id/device returned"))
+        # 诊断带实际字段:远端一次运行即可分辨是拒绝、空值还是字段缺失
+        diag = "; ".join(f"{k}={v}" for k, v in payload.items()) or error_text
+        return (False, payload, diag
+                or ("powershell exited nonzero" if not ok else "result file not written"))
 
     @staticmethod
     def _run_powershell(script: str, result_file: str | None):
