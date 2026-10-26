@@ -414,8 +414,11 @@ class VssSnapshotManager:
             if ok and payload.get("id") and payload.get("device"):
                 return (str(payload["id"]), str(payload["device"]), "")
 
-            return (None, None, error_text
-                    or ("powershell exited nonzero" if not ok else "no id/device returned"))
+            # 诊断带实际字段与原始内容:远程一次运行即可分辨失败形态
+            diag = ("; ".join(f"{k}={v}" for k, v in payload.items())
+                    or error_text
+                    or ("powershell exited nonzero" if not ok else "result file not written"))
+            return (None, None, diag)
         finally:
             try:
                 if os.path.exists(result_file):
