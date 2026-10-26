@@ -1773,6 +1773,8 @@ class EtwMixin:
         if getattr(self, "_behavior_maybe_rollback", None):
             self._behavior_maybe_rollback(burst.pid)
 
+        # 安全类通知:点击后跳转事件审计页(托盘点击钩子消费此标记)
+        self._last_notify_page = "audit_window"
         title = self._loc({
             "traditional_switch": "勒索行為警告",
             "simplified_switch": "勒索行为警告",

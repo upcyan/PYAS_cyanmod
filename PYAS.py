@@ -396,6 +396,15 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
         def _on_notify_with_click(wparam, lparam):
             if lparam == 0x0406:  # NIN_BALLOONUSERCLICK
                 self.restore_from_tray()
+                # 安全类通知(勒索检测等)点击后跳到事件审计页;普通通知仅开界面
+                target = getattr(self, "_last_notify_page", None)
+
+                if target:
+                    self._last_notify_page = None
+                    self.evaluate_js_safe(
+                        "if(window.switchPage) window.switchPage("
+                        + json.dumps(target) + ");"
+                    )
                 return
 
             original_on_notify(wparam, lparam)
