@@ -353,6 +353,7 @@ class VssSnapshotManager:
                 shadow_id, device, diagnostic = self._create_via_wmi(drive)
 
             if shadow_id and device:
+                shadow_id = shadow_id.strip("{}")
                 new_entry = {"id": shadow_id, "device": device, "last_attempt": stamp, "created_wall": time.time()}
                 previous = None
 
@@ -385,7 +386,10 @@ class VssSnapshotManager:
             "try{"
             "$r=(Get-WmiObject -List Win32_ShadowCopy).Create('" + drive + "\\', 'ClientAccessible');"
             "if($r.ReturnValue -ne 0){throw ('return='+$r.ReturnValue)}"
-            "$sc=Get-WmiObject Win32_ShadowCopy -Filter \"ID='$($r.ShadowID)'\";"
+            "$g='$($r.ShadowID)'.Replace('{','').Replace('}','');"
+            "$sc=Get-WmiObject Win32_ShadowCopy -Filter \"ID='$g'\";"
+            "if(-not $sc){$sc=Get-WmiObject Win32_ShadowCopy -Filter \"ID='{$g}'\"};"
+            "if(-not $sc){$sc=Get-WmiObject Win32_ShadowCopy | Where-Object {$_.ID.Replace('{','').Replace('}','') -eq $g}};"
             "if(-not $sc){throw 'device query failed'}"
             "@{id=$r.ShadowID;device=$sc.DeviceName}|ConvertTo-Json -Compress|Set-Content -LiteralPath $p -Encoding UTF8"
             "}catch{$_.Exception.Message|Set-Content -LiteralPath $p -Encoding UTF8;exit 1}"
@@ -419,7 +423,10 @@ class VssSnapshotManager:
             "$r=Invoke-CimMethod -ClassName Win32_ShadowCopy -MethodName Create "
             "-Arguments @{Volume='" + volume + "';Context='ClientAccessible'};"
             "if($r.ReturnValue -ne 0){throw ('return='+$r.ReturnValue)}"
-            "$sc=Get-CimInstance Win32_ShadowCopy -Filter \"ID='$($r.ShadowID)'\";"
+            "$g='$($r.ShadowID)'.Replace('{','').Replace('}','');"
+            "$sc=Get-CimInstance Win32_ShadowCopy -Filter \"ID='$g'\";"
+            "if(-not $sc){$sc=Get-CimInstance Win32_ShadowCopy -Filter \"ID='{$g}'\"};"
+            "if(-not $sc){$sc=Get-CimInstance Win32_ShadowCopy | Where-Object {$_.ID.Replace('{','').Replace('}','') -eq $g}};"
             "if(-not $sc){throw 'device query failed'}"
             "@{id=$r.ShadowID;device=$sc.DeviceName}|ConvertTo-Json -Compress|Set-Content -LiteralPath $p -Encoding UTF8"
             "}catch{$_.Exception.Message|Set-Content -LiteralPath $p -Encoding UTF8;exit 1}"
