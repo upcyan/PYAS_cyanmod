@@ -386,9 +386,11 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
             pystray.MenuItem(lambda item: self.get_tray_text("exit_app"), self.close),
         )
         self.tray_icon = pystray.Icon("PYAS", self.get_app_icon(), "PYAS Security Cyanmod", menu)
-        # 通知(气泡/toast)点击 → 打开主界面:Windows 对 WM_NOTIFY 以
+        # 通知(气泡/toast)点击 → 打开主界面:Windows 在任务栏回调消息里以
         # NIN_BALLOONUSERCLICK(0x0406) 报告通知点击,pystray 的 _on_notify
-        # 不处理该事件 —— 包一层补上,其余事件原样交回
+        # 不处理该事件 —— 替换其消息表条目补上,其余事件原样交回。
+        # 消息键用 pystray 私有模块的 WM_NOTIFY(实测 0x40B,非 Win32 标准
+        # 0x004E);若未来版本改结构,except 会回退为无通知点击但正常启动
         original_on_notify = self.tray_icon._on_notify
 
         def _on_notify_with_click(wparam, lparam):
@@ -398,7 +400,12 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
 
             original_on_notify(wparam, lparam)
 
-        self.tray_icon._message_handlers[pystray.win32.WM_NOTIFY] = _on_notify_with_click
+        try:
+            from pystray._util import win32 as pystray_win32
+
+            self.tray_icon._message_handlers[pystray_win32.WM_NOTIFY] = _on_notify_with_click
+        except (AttributeError, KeyError):
+            pass
         self.tray_icon.run_detached()
         self._start_foreground_watch()
 
