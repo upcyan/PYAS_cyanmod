@@ -239,6 +239,7 @@ document.addEventListener('DOMContentLoaded', () => {
         popup: [{key: 'mode', label: 'col_status', flex: 0.7, isI18n: true}, {key: 'exe', label: 'col_prog', flex: 1}, {key: 'class', label: 'col_class', flex: 1}, {key: 'title', label: 'col_title', flex: 2}],
         repair: [{key: 'display', label: 'col_repair', flex: 1, isI18n: true}, {key: 'path', label: 'col_path', flex: 3}],
         netmon: [{key: 'name', label: 'col_name', flex: 1.5}, {key: 'pid', label: 'col_pid', flex: 0.5}, {key: 'downStr', label: 'col_down_speed', flex: 1}, {key: 'upStr', label: 'col_up_speed', flex: 1}, {key: 'connCount', label: 'col_conn_count', flex: 0.8}],
+        shadowFiles: [{key: 'name', label: 'col_name', flex: 2, isI18n: true}, {key: 'sizeStr', label: '文件大小', flex: 1}, {key: 'mtimeStr', label: '修改时间', flex: 1.2}, {key: 'relPath', label: 'col_path', flex: 3}],
         audit: [{key: 'timeStr', label: 'col_created', flex: 1.3, isI18n: true}, {key: 'levelText', label: 'col_status', flex: 0.8, isI18n: true}, {key: 'actionText', label: 'col_type', flex: 1.2, isI18n: true}, {key: 'detail', label: 'col_detail', flex: 4.2}],
         shadow: [{key: 'drive', label: 'col_name', flex: 0.6, isI18n: true}, {key: 'device', label: 'col_path', flex: 3}, {key: 'createdStr', label: 'col_created', flex: 1.3}],
         release: [{key: 'kind', label: 'col_type', flex: 1, isI18n: true}, {key: 'action', label: 'col_func', flex: 1.2, isI18n: true}, {key: 'source', label: 'col_path', flex: 3}, {key: 'hash', label: 'col_hash', flex: 1.3}, {key: 'status', label: 'col_status', flex: 0.9}, {key: 'hits', label: 'col_hits', flex: 0.55}, {key: 'createdStr', label: 'col_created', flex: 1.15}]
@@ -963,18 +964,123 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (['whitelist_window', 'quarantine_window', 'popup_window', 'custom_protect_window'].includes(targetId)) refreshConfigLists();
 
-        document.getElementById('shadow_select')?.addEventListener('change', (event) => {
-            if (event.target.value !== 'delete') return;
-            const bridge = window.pywebview?.api;
-            if (!bridge) return;
+    // 卷影备份:快照列表 ⇄ 文件浏览双模式
+    const shadowState = { mode: 'snapshots', drive: '', rel: '\\' };
+    const fmtShadowSize = (n) => {
+        if (n >= 1073741824) return (n / 1073741824).toFixed(2) + ' GB';
+        if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+        if (n >= 1024) return (n / 1024).toFixed(1) + ' KB';
+        return String(n) + ' B';
+    };
+    const fmtShadowTime = (epoch) => {
+        const d = new Date(epoch * 1000);
+        const pad = v => String(v).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    const loadShadowSnapshots = () => {
+        shadowState.mode = 'snapshots';
+        shadowState.drive = '';
+        shadowState.rel = '\\';
+        const input = document.getElementById('shadow_path_input');
+        if (input) input.value = '';
+        window.pywebview?.api.list_shadow_snapshots().then(rows => {
+            renderDataGrid('#shadow_window', rows, cols.shadow, 'drive', true);
+        }).catch(() => {});
+    };
+    const loadShadowFiles = () => {
+        window.pywebview?.api.list_shadow_files(shadowState.drive, shadowState.rel).then(data => {
+            const rows = (data.entries || []).map(e => ({
+                id: shadowState.rel + e.name + (e.isDir ? '\\' : ''),
+                name: e.name + (e.isDir ? '\\' : ''),
+                sizeStr: e.isDir ? '-' : fmtShadowSize(e.size),
+                mtimeStr: fmtShadowTime(e.mtime),
+                relPath: shadowState.rel + e.name + (e.isDir ? '\\' : ''),
+                isDir: e.isDir,
+            }));
+            renderDataGrid('#shadow_window', rows, cols.shadowFiles, 'relPath', true);
+            const input = document.getElementById('shadow_path_input');
+            if (input) input.value = shadowState.rel;
+        }).catch(() => {});
+    };
+    const shadowEnterBrowse = () => {
+        const checked = getCheckedValues('#shadow_window');
+        if (checked.length !== 1) return false;
+        shadowState.mode = 'files';
+        shadowState.drive = String(checked[0]).slice(0, 2);
+        shadowState.rel = '\\';
+        loadShadowFiles();
+        return true;
+    };
+    const shadowRestoreChecked = () => {
+        const checked = getCheckedValues('#shadow_window');
+        Promise.all(checked.map(p => window.pywebview?.api.restore_shadow_file(shadowState.drive, p)))
+            .then(() => loadShadowFiles())
+            .catch(() => {});
+    };
+
+    document.getElementById('shadow_select')?.addEventListener('change', (event) => {
+        const val = event.target.value;
+        event.target.value = 'none';
+        const bridge = window.pywebview?.api;
+        if (!bridge) return;
+
+        if (val === 'back') { loadShadowSnapshots(); return; }
+
+        if (val === 'up') {
+            if (shadowState.mode !== 'files') return;
+            const parent = shadowState.rel.slice(0, -1).replace(/\\[^\\]*$/, '');
+            shadowState.rel = parent || '\\';
+            loadShadowFiles();
+            return;
+        }
+
+        if (val === 'view') {
+            if (shadowState.mode !== 'files') { loadShadowSnapshots(); return; }
+            const input = document.getElementById('shadow_path_input');
+            if (input && input.value.trim()) {
+                shadowState.rel = input.value.trim();
+                if (!shadowState.rel.startsWith('\\')) shadowState.rel = '\\' + shadowState.rel;
+            }
+            loadShadowFiles();
+            return;
+        }
+
+        if (val === 'restore_checked') {
+            if (shadowState.mode !== 'files') return;
             const checked = getCheckedValues('#shadow_window');
-            if (!checked.length) { event.target.value = 'none'; return; }
-            Promise.all(checked.map(v => bridge.delete_shadow_snapshot(v)))
-                .then(() => bridge.list_shadow_snapshots())
-                .then(rows => renderDataGrid('#shadow_window', rows, cols.shadow, 'drive', true))
+            if (!checked.length) return;
+            Promise.all(checked.map(p => bridge.restore_shadow_file(shadowState.drive, p)))
+                .then(() => loadShadowFiles())
                 .catch(() => {});
-            event.target.value = 'none';
-        });
+            return;
+        }
+
+        if (val !== 'delete') return;
+        if (shadowState.mode !== 'snapshots') return;
+        const checkedSnaps = getCheckedValues('#shadow_window');
+        if (!checkedSnaps.length) return;
+        Promise.all(checkedSnaps.map(v => bridge.delete_shadow_snapshot(v)))
+            .then(() => bridge.list_shadow_snapshots())
+            .then(rows => renderDataGrid('#shadow_window', rows, cols.shadow, 'drive', true))
+            .catch(() => {});
+    });
+
+    document.getElementById('shadow_up_btn')?.addEventListener('click', () => {
+        if (shadowState.mode !== 'files') return;
+        const parent = shadowState.rel.slice(0, -1).replace(/\\[^\\]*$/, '');
+        shadowState.rel = parent || '\\';
+        loadShadowFiles();
+    });
+
+    document.getElementById('shadow_path_input')?.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' || shadowState.mode !== 'files') return;
+        const input = document.getElementById('shadow_path_input');
+        if (input && input.value.trim()) {
+            shadowState.rel = input.value.trim();
+            if (!shadowState.rel.startsWith('\\')) shadowState.rel = '\\' + shadowState.rel;
+            loadShadowFiles();
+        }
+    });
 
         if (targetId === 'release_window' && window.pywebview) {
             window.pywebview.api.list_release_records().then(data => {
@@ -996,9 +1102,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (targetId === 'shadow_window' && window.pywebview) {
-            window.pywebview.api.list_shadow_snapshots().then(rows => {
-                renderDataGrid('#shadow_window', rows, cols.shadow, 'drive', true);
-            }).catch(() => {});
+            loadShadowSnapshots();
         }
 
         if (targetId === 'about_window') loadChangelogs();
@@ -2373,6 +2477,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return duration;
     };
     window.playWindowAnimation = playWindowAnimation;
+    window.switchPage = switchPage;
 
     // 兜底:最小化会立刻把页面置为 hidden,定时器可能被节流,万一没跑到,
     // 残留的 win-anim-shrink 会把内容按 fill-mode:both 钉在 opacity:0 ——

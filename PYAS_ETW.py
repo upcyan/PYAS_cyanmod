@@ -46,6 +46,7 @@ import ctypes
 import ctypes.wintypes as wt
 import logging
 import os
+import shutil
 import sys
 import threading
 import time
@@ -1548,6 +1549,89 @@ class EtwMixin:
             rows.append({"drive": drive, "device": _device or "-",
                          "createdStr": created_str or "-"})
         return rows
+
+    @staticmethod
+    def _shadow_rel_norm(rel: str) -> str:
+        """快照内相对路径规范化:统一反斜杠、拒绝 .. 逃逸。"""
+        clean = (rel or "\\").replace("/", "\\")
+
+        while clean.startswith("\\\\"):
+            clean = clean[1:]
+
+        parts = [p for p in clean.split("\\") if p and p not in (".", "..")]
+
+        return "\\" + "\\".join(parts) if parts else "\\"
+
+    def list_shadow_files(self, drive: str, rel: str = "\\") -> dict:
+        """浏览快照内目录:返回 {ok, current, entries:[{name,isDir,size,mtime}]}。"""
+        if not hasattr(self, "_snapshot_drives"):
+            return {"ok": False, "error": "unavailable", "entries": [], "current": rel}
+
+        self._ensure_vss_manager()
+        device = self._vss.device_for(drive)
+
+        if not device:
+            return {"ok": False, "error": "no_snapshot", "entries": [], "current": rel}
+
+        rel_norm = self._shadow_rel_norm(rel)
+        full = device.rstrip("\\") + rel_norm
+        entries = []
+
+        try:
+            with os.scandir(full) as it:
+                for entry in it:
+                    try:
+                        info = entry.stat()
+                        entries.append({
+                            "name": entry.name,
+                            "isDir": entry.is_dir(follow_symlinks=False),
+                            "size": info.st_size,
+                            "mtime": int(info.st_mtime),
+                        })
+                    except OSError:
+                        continue
+        except OSError as error:
+            return {"ok": False, "error": str(error), "entries": [], "current": rel_norm}
+
+        entries.sort(key=lambda e: (not e["isDir"], e["name"].lower()))
+        return {"ok": True, "current": rel_norm, "entries": entries}
+
+    def restore_shadow_file(self, drive: str, rel: str) -> dict:
+        """把快照中的单个文件恢复到原位(覆盖)。"""
+        if not hasattr(self, "_snapshot_drives"):
+            return {"ok": False, "error": "unavailable"}
+
+        self._ensure_vss_manager()
+        device = self._vss.device_for(drive)
+
+        if not device:
+            return {"ok": False, "error": "no_snapshot"}
+
+        rel_norm = self._shadow_rel_norm(rel)
+
+        if ".." in rel_norm.split("\\"):
+            return {"ok": False, "error": "bad_path"}
+
+        source = device.rstrip("\\") + rel_norm
+        target = drive[:2] + rel_norm
+
+        try:
+            if not os.path.isfile(source):
+                return {"ok": False, "error": "not_in_snapshot"}
+
+            os.makedirs(os.path.dirname(target) or drive, exist_ok=True)
+            shutil.copy2(source, target)
+        except OSError as error:
+            return {"ok": False, "error": str(error)}
+
+        from PYAS_Behavior import BEHAVIOR_LOG_TEXTS
+
+        self.write_log(
+            "INFO",
+            ACTION_SNAPSHOT,
+            detail=self._loc(BEHAVIOR_LOG_TEXTS["file_restored"]).format(target),
+        )
+        return {"ok": True}
 
     def delete_shadow_snapshot(self, drive: str) -> bool:
         if not hasattr(self, "_snapshot_drives"):
