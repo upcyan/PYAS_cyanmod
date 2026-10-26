@@ -239,6 +239,8 @@ document.addEventListener('DOMContentLoaded', () => {
         popup: [{key: 'mode', label: 'col_status', flex: 0.7, isI18n: true}, {key: 'exe', label: 'col_prog', flex: 1}, {key: 'class', label: 'col_class', flex: 1}, {key: 'title', label: 'col_title', flex: 2}],
         repair: [{key: 'display', label: 'col_repair', flex: 1, isI18n: true}, {key: 'path', label: 'col_path', flex: 3}],
         netmon: [{key: 'name', label: 'col_name', flex: 1.5}, {key: 'pid', label: 'col_pid', flex: 0.5}, {key: 'downStr', label: 'col_down_speed', flex: 1}, {key: 'upStr', label: 'col_up_speed', flex: 1}, {key: 'connCount', label: 'col_conn_count', flex: 0.8}],
+        audit: [{key: 'timeStr', label: 'col_created', flex: 1.3, isI18n: true}, {key: 'levelText', label: 'col_status', flex: 0.8, isI18n: true}, {key: 'actionText', label: 'col_type', flex: 1.2, isI18n: true}, {key: 'detail', label: 'col_detail', flex: 4.2}],
+        shadow: [{key: 'drive', label: 'col_name', flex: 0.6, isI18n: true}, {key: 'device', label: 'col_path', flex: 3}, {key: 'createdStr', label: 'col_created', flex: 1.3}],
         release: [{key: 'kind', label: 'col_type', flex: 1, isI18n: true}, {key: 'action', label: 'col_func', flex: 1.2, isI18n: true}, {key: 'source', label: 'col_path', flex: 3}, {key: 'hash', label: 'col_hash', flex: 1.3}, {key: 'status', label: 'col_status', flex: 0.9}, {key: 'hits', label: 'col_hits', flex: 0.55}, {key: 'createdStr', label: 'col_created', flex: 1.15}]
     };
 
@@ -961,9 +963,41 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (['whitelist_window', 'quarantine_window', 'popup_window', 'custom_protect_window'].includes(targetId)) refreshConfigLists();
 
+        document.getElementById('shadow_select')?.addEventListener('change', (event) => {
+            if (event.target.value !== 'delete') return;
+            const bridge = window.pywebview?.api;
+            if (!bridge) return;
+            const checked = getCheckedValues('#shadow_window');
+            if (!checked.length) { event.target.value = 'none'; return; }
+            Promise.all(checked.map(v => bridge.delete_shadow_snapshot(v)))
+                .then(() => bridge.list_shadow_snapshots())
+                .then(rows => renderDataGrid('#shadow_window', rows, cols.shadow, 'drive', true))
+                .catch(() => {});
+            event.target.value = 'none';
+        });
+
         if (targetId === 'release_window' && window.pywebview) {
             window.pywebview.api.list_release_records().then(data => {
                 renderDataGrid('#release_window', buildReleaseRows(data), cols.release, 'value', false);
+            }).catch(() => {});
+        }
+
+        if (targetId === 'audit_window' && window.pywebview) {
+            const auditActions = ['Ransomware Heuristic', 'Behavior Snapshot', 'Behavior Rollback', 'Agent Elevated'];
+            window.pywebview.api.get_logs(1000).then(logs => {
+                const rows = logs.filter(l => auditActions.includes(String(l.action || ''))).map(l => ({
+                    id: l.id, timeStr: l.time_str || '',
+                    levelText: l.level || '-',
+                    actionText: l.action || '-',
+                    detail: String(l.detail || '').replace(/\n/g, ' '),
+                }));
+                renderDataGrid('#audit_window', rows, cols.audit, 'id', true);
+            }).catch(() => {});
+        }
+
+        if (targetId === 'shadow_window' && window.pywebview) {
+            window.pywebview.api.list_shadow_snapshots().then(rows => {
+                renderDataGrid('#shadow_window', rows, cols.shadow, 'drive', true);
             }).catch(() => {});
         }
 

@@ -1532,6 +1532,38 @@ class EtwMixin:
         except OSError:
             pass
 
+    def list_shadow_snapshots(self) -> list:
+        """卷影备份页数据源:本应用创建的紧急快照列表。"""
+        if not hasattr(self, "_snapshot_drives"):
+            return []
+
+        rows = []
+
+        for drive, _device, _created, created_wall in self._snapshot_drives():
+            created_str = "-"
+
+            if created_wall:
+                created_str = time.strftime("%Y-%m-%d %H:%M", time.localtime(created_wall))
+
+            rows.append({"drive": drive, "device": _device or "-",
+                         "createdStr": created_str or "-"})
+        return rows
+
+    def delete_shadow_snapshot(self, drive: str) -> bool:
+        if not hasattr(self, "_snapshot_drives"):
+            return False
+
+        self._ensure_vss_manager()
+
+        if not self._vss.delete_snapshot(drive):
+            return False
+
+        from PYAS_Behavior import BEHAVIOR_LOG_TEXTS
+
+        self.write_log("INFO", ACTION_SNAPSHOT,
+                       detail=self._loc(BEHAVIOR_LOG_TEXTS["snapshot_deleted"]).format(drive))
+        return True
+
     def restore_switches(self, keys: list[str]) -> None:
         """一次授权批量恢复开关到开启:提交成功后,非提权走 helper 提权重启,
         提权环境直接拉起消费者。提交失败时调用方看到的值保持纠正态。"""

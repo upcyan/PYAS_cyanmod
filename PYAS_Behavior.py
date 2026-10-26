@@ -69,6 +69,19 @@ ACTION_SNAPSHOT = "Behavior Snapshot"
 ACTION_ROLLBACK = "Behavior Rollback"
 
 BEHAVIOR_LOG_TEXTS = {
+    "snapshot_deleted": {
+        "traditional_switch": "已刪除卷影副本（{0}）",
+        "simplified_switch": "已删除卷影副本（{0}）",
+        "english_switch": "Shadow copy deleted ({0})",
+        "japanese_switch": "シャドウコピーを削除しました（{0}）",
+        "korean_switch": "섀도 복사본을 삭제했습니다({0})",
+        "french_switch": "Copie instantanée supprimée ({0})",
+        "spanish_switch": "Copia instantánea eliminada ({0})",
+        "hindi_switch": "शैडो कॉपी हटाई गई ({0})",
+        "arabic_switch": "تم حذف النسخة الظلية ({0})",
+        "russian_switch": "Теневая копия удалена ({0})",
+        "slovenian_switch": "Senčna kopija izbrisana ({0})",
+    },
     "snapshot_created": {
         "traditional_switch": "已建立緊急卷影副本（{0}），該進程改寫異常升級時可回滾",
         "simplified_switch": "已建立紧急卷影副本（{0}），该进程改写异常升级时可回滚",
@@ -294,14 +307,30 @@ class VssSnapshotManager:
             entry = self._snapshots.get(drive[:2].upper())
             return entry.get("created") if entry else None
 
-    def drives(self) -> list[tuple[str, str | None, float | None]]:
-        """[(drive, device, created), ...] — created 为 None 表示重启前的旧快照。"""
+    def drives(self) -> list[tuple[str, str | None, float | None, float]]:
+        """[(drive, device, created, created_wall), ...] — created 为 None 表示
+        重启前的旧快照(不可用于回滚)。"""
         with self._lock:
             return [
-                (drive, entry.get("device"), entry.get("created"))
+                (drive, entry.get("device"), entry.get("created"), entry.get("created_wall", 0))
                 for drive, entry in self._snapshots.items()
                 if entry.get("device")
             ]
+
+    def delete_snapshot(self, drive: str) -> bool:
+        """删除指定卷的紧急快照(用户主动清理入口)。"""
+        with self._lock:
+            entry = self._snapshots.get(drive[:2].upper())
+            shadow_id = entry.get("id") if entry else None
+
+        if not shadow_id or not self._delete_by_id(shadow_id):
+            return False
+
+        with self._lock:
+            self._snapshots.pop(drive[:2].upper(), None)
+
+        self._save_state()
+        return True
 
     @staticmethod
     def snapshot_path(device: str, dos_path: str) -> str:
@@ -324,7 +353,7 @@ class VssSnapshotManager:
                 shadow_id, device, diagnostic = self._create_via_wmi(drive)
 
             if shadow_id and device:
-                new_entry = {"id": shadow_id, "device": device, "last_attempt": stamp}
+                new_entry = {"id": shadow_id, "device": device, "last_attempt": stamp, "created_wall": time.time()}
                 previous = None
 
                 with self._lock:
