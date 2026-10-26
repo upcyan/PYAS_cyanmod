@@ -1019,9 +1019,16 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
                 error = ctypes.get_last_error()
 
                 if error == 1223:  # ERROR_CANCELLED:用户在 UAC 里点了「否」
+                    logging.getLogger("PYAS.Policy").warning(
+                        "elevated restart: UAC declined by user (pid=%s)", os.getpid())
                     return False
 
                 raise ctypes.WinError(error)
+
+            logging.getLogger("PYAS.Policy").info(
+                "elevated restart: launcher spawned (old_pid=%s, target=%s)",
+                os.getpid(), launcher,
+            )
         except Exception:
             log_exception("PYAS._MainMixin.restart_application_elevated")
             return False
