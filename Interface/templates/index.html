@@ -490,55 +490,11 @@
                     </div>
                     <div class="list-widget">
                         <div class="list-item">
-                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-zap"/></svg>
-                            <div class="item-info">
-                                <h2 data-i18n>增強模式</h2><p data-i18n>此選項可以增強靜態掃描引擎</p>
-                            </div>
-                            <label class="toggle-switch"><input type="checkbox" data-config-key="sensitive_switch"><span class="slider"></span></label>
-                        </div>
-                        <div class="list-item">
-                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-plus-square"/></svg>
-                            <div class="item-info">
-                                <h2 data-i18n>擴展引擎</h2><p data-i18n>此選項可以使用擴展規則引擎</p>
-                            </div>
-                            <label class="toggle-switch"><input type="checkbox" data-config-key="extension_switch"><span class="slider"></span></label>
-                        </div>
-                        <div class="list-item">
-                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-cloud-upload"/></svg>
-                            <div class="item-info">
-                                <h2 data-i18n>雲端服務</h2><p data-i18n>此選項可以自動上報可疑檔案</p>
-                            </div>
-                            <label class="toggle-switch"><input type="checkbox" data-config-key="cloud_switch"><span class="slider"></span></label>
-                        </div>
-                        <div class="list-item">
-                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-funnel"/></svg>
-                            <div class="item-info">
-                                <h2 data-i18n>副檔名過濾</h2><p data-i18n>此選項僅掃描指定檔案副檔名</p>
-                            </div>
-                            <label class="toggle-switch"><input type="checkbox" checked data-config-key="suffix_switch"><span class="slider"></span></label>
-                        </div>
-                        <div class="list-item">
-                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-bell"/></svg>
-                            <div class="item-info">
-                                <h2 data-i18n>免打擾模式</h2><p data-i18n="dnd_desc">系統忙碌、全螢幕或演示時,攔截彈窗靜默排隊不彈出</p>
-                            </div>
-                            <label class="toggle-switch"><input type="checkbox" data-config-key="dnd_switch"><span class="slider"></span></label>
-                        </div>
-                        <div class="settings-group">
-                        <div class="list-item">
                             <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-shield-check"/></svg>
                             <div class="item-info">
-                                <h2 data-i18n="driver_alert_exempt">忽略驅動防護狀態</h2><p data-i18n="driver_alert_exempt_desc">開啟後驅動防護未開啟不影響首頁防護狀態</p>
+                                <h2 data-i18n="elevated_run">特權運行</h2><p data-i18n="elevated_run_desc">此選項開啟時，PYAS 將以管理員身份運行以啟用完整防護（可能彈出一次授權）</p>
                             </div>
-                            <label class="toggle-switch"><input type="checkbox" checked data-config-key="driver_alert_exempt"><span class="slider"></span></label>
-                        </div>
-                        <div class="list-item settings-child hidden" data-setting-parent="driver_alert_exempt">
-                            <div class="item-info">
-                                <h2 data-i18n="driver_home_hidden">首頁隱藏驅動防護狀態</h2>
-                                <p data-i18n="driver_home_hidden_desc">開啟後首頁不顯示驅動防護指示燈</p>
-                            </div>
-                            <label class="toggle-switch"><input type="checkbox" data-config-key="driver_home_hidden"><span class="slider"></span></label>
-                        </div>
+                            <label class="toggle-switch"><input type="checkbox" checked data-config-key="elevated_run_switch"><span class="slider"></span></label>
                         </div>
                         <div class="list-item">
                             <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-monitor-power"/></svg>
@@ -546,23 +502,6 @@
                                 <h2 data-i18n>開機啟動</h2><p data-i18n="opt_autostart_desc">此選項可以設定開機自動執行</p>
                             </div>
                             <label class="toggle-switch"><input type="checkbox" checked data-config-key="autostart_switch"><span class="slider"></span></label>
-                        </div>
-                        <div class="settings-group">
-                        <div class="list-item">
-                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-search-window"/></svg>
-                            <div class="item-info">
-                                <h2 data-i18n>選單掃描</h2><p data-i18n>此選項可以啟用右鍵掃描功能</p>
-                                <p id="context_menu_status" class="setting-status" aria-live="polite"></p>
-                            </div>
-                            <label class="toggle-switch"><input type="checkbox" data-config-key="context_switch"><span class="slider"></span></label>
-                        </div>
-                        <div class="list-item settings-child hidden" id="classic_menu_options" data-setting-parent="context_switch">
-                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-copy-list"/></svg>
-                            <div class="item-info">
-                                <h2 data-i18n="opt_classic_menu">經典右鍵選單</h2><p data-i18n="opt_classic_menu_desc">恢復 Win10 樣式右鍵選單以顯示掃描入口</p>
-                            </div>
-                            <label class="toggle-switch"><input type="checkbox" data-config-key="classic_menu_switch"><span class="slider"></span></label>
-                        </div>
                         </div>
                         <div class="settings-group">
                         <div class="list-item">
@@ -589,6 +528,67 @@
                         <div class="list-item settings-child hidden" data-setting-parent="interactive_switch">
                             <div class="item-info"><h2 id="clear_alert_rules_title">清除已记住的告警决定</h2><p id="clear_alert_rules_desc">撤销永久允许及短期重复决定规则（重复窗口随确认次数延长，最长 1 小时）；保留普通白名单</p></div>
                             <button id="clear_alert_rules" class="action-btn modern-btn" type="button" data-i18n="btn_execute">执行</button>
+                        </div>
+                        </div>
+                        <div class="list-item">
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-bell"/></svg>
+                            <div class="item-info">
+                                <h2 data-i18n>免打擾模式</h2><p data-i18n="dnd_desc">系統忙碌、全螢幕或演示時,攔截彈窗靜默排隊不彈出</p>
+                            </div>
+                            <label class="toggle-switch"><input type="checkbox" data-config-key="dnd_switch"><span class="slider"></span></label>
+                        </div>
+                        <div class="list-item">
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-zap"/></svg>
+                            <div class="item-info">
+                                <h2 data-i18n>增強模式</h2><p data-i18n>此選項可以增強靜態掃描引擎</p>
+                            </div>
+                            <label class="toggle-switch"><input type="checkbox" data-config-key="sensitive_switch"><span class="slider"></span></label>
+                        </div>
+                        <div class="list-item">
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-plus-square"/></svg>
+                            <div class="item-info">
+                                <h2 data-i18n>擴展引擎</h2><p data-i18n>此選項可以使用擴展規則引擎</p>
+                            </div>
+                            <label class="toggle-switch"><input type="checkbox" data-config-key="extension_switch"><span class="slider"></span></label>
+                        </div>
+                        <div class="list-item">
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-funnel"/></svg>
+                            <div class="item-info">
+                                <h2 data-i18n>副檔名過濾</h2><p data-i18n>此選項僅掃描指定檔案副檔名</p>
+                            </div>
+                            <label class="toggle-switch"><input type="checkbox" checked data-config-key="suffix_switch"><span class="slider"></span></label>
+                        </div>
+                        <div class="settings-group">
+                        <div class="list-item">
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-search-window"/></svg>
+                            <div class="item-info">
+                                <h2 data-i18n>選單掃描</h2><p data-i18n>此選項可以啟用右鍵掃描功能</p>
+                                <p id="context_menu_status" class="setting-status" aria-live="polite"></p>
+                            </div>
+                            <label class="toggle-switch"><input type="checkbox" data-config-key="context_switch"><span class="slider"></span></label>
+                        </div>
+                        <div class="list-item settings-child hidden" id="classic_menu_options" data-setting-parent="context_switch">
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-copy-list"/></svg>
+                            <div class="item-info">
+                                <h2 data-i18n="opt_classic_menu">經典右鍵選單</h2><p data-i18n="opt_classic_menu_desc">恢復 Win10 樣式右鍵選單以顯示掃描入口</p>
+                            </div>
+                            <label class="toggle-switch"><input type="checkbox" data-config-key="classic_menu_switch"><span class="slider"></span></label>
+                        </div>
+                        </div>
+                        <div class="settings-group">
+                        <div class="list-item">
+                            <svg class="item-icon" aria-hidden="true" focusable="false"><use href="#i-shield-check"/></svg>
+                            <div class="item-info">
+                                <h2 data-i18n="driver_alert_exempt">忽略驅動防護狀態</h2><p data-i18n="driver_alert_exempt_desc">開啟後驅動防護未開啟不影響首頁防護狀態</p>
+                            </div>
+                            <label class="toggle-switch"><input type="checkbox" checked data-config-key="driver_alert_exempt"><span class="slider"></span></label>
+                        </div>
+                        <div class="list-item settings-child hidden" data-setting-parent="driver_alert_exempt">
+                            <div class="item-info">
+                                <h2 data-i18n="driver_home_hidden">首頁隱藏驅動防護狀態</h2>
+                                <p data-i18n="driver_home_hidden_desc">開啟後首頁不顯示驅動防護指示燈</p>
+                            </div>
+                            <label class="toggle-switch"><input type="checkbox" data-config-key="driver_home_hidden"><span class="slider"></span></label>
                         </div>
                         </div>
                         <div class="list-item">
