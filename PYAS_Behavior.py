@@ -646,8 +646,9 @@ class BehaviorMixin:
     def _behavior_on_write(self, pid: int, path: str, now: float | None = None) -> None:
         """写/删事件统一入口:开关关闭直接返回,内部只记文档类目标。
 
-        系统目录与白名单文件不参与:前者是系统自身高频改写(aidd 缓冲等),
-        后者是管理员明确信任的对象,计入只会制造勒索误报。"""
+        系统目录、回收站与白名单文件不参与:前者是系统自身高频改写
+        (aidd 缓冲等),清空回收站是正常用户操作,白名单是管理员
+        明确信任的对象——计入只会制造勒索误报。"""
         if not self._behavior_switch_cached():
             return
 
@@ -657,16 +658,13 @@ class BehaviorMixin:
             return
 
         system_root = str(getattr(self, "path_system", "") or "C:\\Windows")
+        path_lower = path.lower()
 
-        if path.lower().startswith(system_root.lower()) or self.is_in_whitelist(path):
+        if path_lower.startswith(system_root.lower()) or self.is_in_whitelist(path):
             return
 
-        self._behavior_ledger.record(pid, path, stamp)
-
-        escalation = self._behavior_l2.record(pid, path, stamp)
-
-        if escalation:
-            self._behavior_escalate(pid, path, stamp)
+        if "$recycle.bin" in path_lower:
+            return
 
     def _behavior_escalate(self, pid: int, path: str, stamp: float) -> None:
         """L2:抢在加密蔓延前留存快照;失败只记日志,不影响告警链路。
