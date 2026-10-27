@@ -57,6 +57,8 @@ from PYAS_ETW import BurstHeuristic
 L2_THRESHOLD = 8
 L2_WINDOW_SECONDS = 10.0
 L2_SNAPSHOT_COOLDOWN_SECONDS = 600.0
+# 创建超时(PowerShell 120s)+ 设备解析重试(约 10s)之上留裕量
+INFLIGHT_WINDOW_SECONDS = 180.0
 
 ROLLBACK_TTL_SECONDS = 1800.0
 LEDGER_MAX_PER_PID = 512
@@ -260,22 +262,99 @@ class TouchedFilesLedger:
 # VSS 卷影副本管理
 # ---------------------------------------------------------------------------
 
+# vssadmin 输出按系统语言本地化,字段名不可依赖;唯一稳定的是三个 token:
+# 裸 GUID(卷影/集合 ID)、\\?\Volume{guid}(卷 GUID,须排除)、GLOBALROOT 设备路径。
+# 注意前缀是两个反斜杠:少写一个 search 仍会命中,但捕获组会缺首个反斜杠。
+_SHADOW_GUID_RE = re.compile(r"\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-"
+                             r"[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}")
+_SHADOW_VOLUME_RE = re.compile(r"\\\\\?\\Volume\{[0-9A-Fa-f-]{36}\}", re.IGNORECASE)
+_SHADOW_DEVICE_RE = re.compile(r"\\\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy\d+")
+
+
+def parse_vssadmin_shadows(text: str) -> dict[str, str]:
+    """解析 `vssadmin list shadows` 输出 → {去括号小写卷影 ID: 设备路径}。
+
+    逐行配对:裸 GUID 行记为当前候选(卷 GUID 行跳过),GLOBALROOT 行与
+    最近一个候选配对 —— 官方布局中设备路径总在卷影 ID 之后、卷 GUID 之间
+    不隔着设备行,集合头 GUID 会被随后的卷影 ID 行覆盖,配对不受影响。
+    """
+    devices: dict[str, str] = {}
+    current: str | None = None
+
+    for line in text.splitlines():
+        if _SHADOW_VOLUME_RE.search(line):
+            continue
+
+        if _SHADOW_DEVICE_RE.search(line) and current:
+            devices[current] = _SHADOW_DEVICE_RE.search(line).group(0)
+            current = None
+            continue
+
+        match = _SHADOW_GUID_RE.search(line)
+
+        if match:
+            current = match.group(0).strip("{}").lower()
+
+    return devices
+
+
+def list_shadow_devices() -> dict[str, str]:
+    """枚举系统全部卷影副本的 ID→设备映射(需提权;客户端 SKU 可用)。"""
+    completed = subprocess.run(
+        ["vssadmin", "list", "shadows"],
+        capture_output=True,
+        timeout=90,
+        text=True,
+        errors="replace",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    return parse_vssadmin_shadows(completed.stdout or "")
+
+
+def _read_result_file(result_file: str):
+    """读取 PowerShell 结果文件 → (payload, error_text)。
+
+    正常路径写 JSON 字典;catch 分支写纯文本错误(原样回传做诊断)。
+    """
+    if not os.path.exists(result_file):
+        return ({}, "result file not written")
+
+    with open(result_file, "r", encoding="utf-8-sig") as stream:
+        content = stream.read().strip()
+
+    try:
+        loaded = json.loads(content)
+
+        if isinstance(loaded, dict):
+            return (loaded, "")
+
+        return ({}, str(loaded)[:200])
+    except ValueError:
+        return ({}, content[:200])
+
 
 class VssSnapshotManager:
     """每块卷最多保留一份「紧急快照」,新快照成功后再替换旧的。
 
-    runner/now 可注入:测试时给假 runner(返回固定 JSON),不碰 PowerShell。
+    runner/device_lister 可注入:测试给假件,不碰 PowerShell 与 vssadmin。
     """
 
-    def __init__(self, state_path: str, runner=None, cooldown_seconds: float = L2_SNAPSHOT_COOLDOWN_SECONDS) -> None:
+    def __init__(self, state_path: str, runner=None, cooldown_seconds: float = L2_SNAPSHOT_COOLDOWN_SECONDS,
+                 device_lister=None, resolve_retries: int = 3, resolve_delay: float = 3.0) -> None:
         self._state_path = state_path
         self._runner = runner or self._run_powershell
+        self._device_lister = device_lister or list_shadow_devices
+        self._resolve_retries = max(1, resolve_retries)
+        self._resolve_delay = resolve_delay
         self._cooldown = cooldown_seconds
         self._lock = threading.Lock()
         self.last_error = ""
         # drive("C:") -> {"id","device","created"(monotonic),"last_attempt"}
         self._snapshots: dict[str, dict] = {}
+        # 创建中的卷 -> 开始时刻(monotonic):并发护栏,VSS 不接受并行创建
+        self._inflight: dict[str, float] = {}
         self._load_state()
+        self._purge_stale_results()
 
     # -- 公共接口 ----------------------------------------------------------
 
@@ -283,8 +362,8 @@ class VssSnapshotManager:
         """冷却期内直接返回现有快照;到期才真正建新的。
 
         返回 (状态, 设备路径):created=新建成功 / existing=冷却期复用 /
-        cooldown=上次失败还在冷却 / failed=本次失败。设备仅在前两种非 None。
-        冷却期与复用都不产生日志 —— 只有真实尝试才有资格写日志。
+        cooldown=上次失败还在冷却或创建仍在进行 / failed=本次失败。设备仅在
+        前两种非 None。冷却期与复用都不产生日志 —— 只有真实尝试才有资格写日志。
         """
         stamp = _now() if now is None else now
         drive = drive[:2].upper()
@@ -300,9 +379,21 @@ class VssSnapshotManager:
 
                 return ("cooldown", None)
 
+            # 另一次创建还在跑(或其宿主线程已死未超时):VSS 会以
+            # return=9 拒绝并行创建,直接按冷却处理,不打日志
+            started = self._inflight.get(drive)
+
+            if started is not None and stamp - started < INFLIGHT_WINDOW_SECONDS:
+                return ("cooldown", None)
+
+            self._inflight[drive] = stamp
             self._snapshots.setdefault(drive, {})["last_attempt"] = stamp
 
-        device = self._create(drive, stamp)
+        try:
+            device = self._create(drive, stamp)
+        finally:
+            with self._lock:
+                self._inflight.pop(drive, None)
 
         with self._lock:
             if device:
@@ -355,70 +446,87 @@ class VssSnapshotManager:
     # 客户端 SKU 的 vssadmin 没有 create 命令(Server 专属,已实测「无效命令」)
 
     def _create(self, drive: str, stamp: float) -> str | None:
-        """双路创建:CIM(Invoke-CimMethod)与 WMI v1(Get-WmiObject .Create)
-        走不同的服务代码路径,一条失败时另一条仍可能成功。"""
+        """先创建拿 ID,再独立解析设备名。
+
+        实测(Win11 26300,提权):两条路径的 Create 都成功返回 ShadowID,
+        失败的从来是脚本内紧接着的「按 ID 查 Win32_ShadowCopy」(枚举滞后,
+        三连过滤全空)—— 且失败时 catch 会把结果文件覆盖成错误文本,连已
+        创建成功的 ID 一起丢掉,快照成了无人纳管的孤儿。因此脚本只负责创建
+        并落盘 ID,设备名由 vssadmin 解析(带重试),两层互不拖累。
+        """
         diagnostics = []
+        shadow_id = None
 
         for method in ("cim", "wmi"):
-            if method == "cim":
-                shadow_id, device, diagnostic = self._create_via_cim(drive)
-            else:
-                shadow_id, device, diagnostic = self._create_via_wmi(drive)
+            shadow_id, diagnostic = self._create_only(method, drive)
 
-            if shadow_id and device:
-                shadow_id = shadow_id.strip("{}")
-                new_entry = {"id": shadow_id, "device": device, "last_attempt": stamp, "created_wall": time.time()}
-                previous = None
-
-                with self._lock:
-                    previous = self._snapshots.get(drive)
-                    self._snapshots[drive] = {**previous, **new_entry} if previous else dict(new_entry)
-
-                # 旧的快照在新快照就位后删除,失败不影响新快照可用性
-                if previous and previous.get("id") and previous["id"] != shadow_id:
-                    self._delete_by_id(previous["id"])
-
-                self._save_state()
-                self.last_error = ""
-                return device
+            if shadow_id:
+                break
 
             diagnostics.append(f"{method}: {diagnostic}")
 
-        self.last_error = "; ".join(diagnostics)
-        logger.warning("VSS snapshot failed: %s", self.last_error)
-        return None
+        if not shadow_id:
+            self.last_error = "; ".join(diagnostics)
+            logger.warning("VSS snapshot failed: %s", self.last_error)
+            return None
 
-    def _create_via_wmi(self, drive: str):
-        """WMI v1 路径(Get-WmiObject .Create);返回 (id, device, 诊断)。"""
+        device = self._resolve_device(shadow_id)
+
+        if not device:
+            bare = shadow_id.strip("{}")
+            self.last_error = (f"created shadow {bare} but device name unresolved"
+                               f" after {self._resolve_retries} listing attempts")
+
+        new_entry = {"id": shadow_id.strip("{}"), "device": device,
+                     "last_attempt": stamp, "created_wall": time.time()}
+        previous = None
+
+        with self._lock:
+            previous = self._snapshots.get(drive)
+            self._snapshots[drive] = {**previous, **new_entry} if previous else dict(new_entry)
+
+        # 旧的快照在新快照就位后删除,失败不影响新快照可用性
+        if previous and previous.get("id") and previous["id"] != new_entry["id"]:
+            self._delete_by_id(previous["id"])
+
+        self._save_state()
+
+        if device:
+            self.last_error = ""
+
+        return device
+
+    def _create_only(self, method: str, drive: str):
+        """只执行创建并回传 ShadowID;返回 (id, 诊断)。"""
         result_file = os.path.join(
             os.path.dirname(self._state_path), f"pyas_vss_{uuid.uuid4().hex}.json"
         )
+
+        if method == "cim":
+            body = ("$r=Invoke-CimMethod -ClassName Win32_ShadowCopy -MethodName Create "
+                    "-Arguments @{Volume='" + drive + "\\';Context='ClientAccessible'};")
+        else:
+            body = ("$r=(Get-WmiObject -List Win32_ShadowCopy).Create('" + drive + "\\', 'ClientAccessible');")
+
         script = (
             "$ErrorActionPreference='Stop';"
             "$p='" + result_file.replace("'", "''") + "';"
-            "try{"
-            "$r=(Get-WmiObject -List Win32_ShadowCopy).Create('" + drive + "\\', 'ClientAccessible');"
+            "try{" + body +
             "if($r.ReturnValue -ne 0){throw ('return='+$r.ReturnValue)}"
-            "$g='$($r.ShadowID)'.Replace('{','').Replace('}','');"
-            "$sc=Get-WmiObject Win32_ShadowCopy -Filter \"ID='$g'\";"
-            "if(-not $sc){$sc=Get-WmiObject Win32_ShadowCopy -Filter \"ID='{$g}'\"};"
-            "if(-not $sc){$sc=Get-WmiObject Win32_ShadowCopy | Where-Object {$_.ID.Replace('{','').Replace('}','') -eq $g}};"
-            "if(-not $sc){throw 'device query failed'}"
-            "@{id=$r.ShadowID;device=$sc.DeviceName}|ConvertTo-Json -Compress|Set-Content -LiteralPath $p -Encoding UTF8"
+            "@{id=$r.ShadowID}|ConvertTo-Json -Compress|Set-Content -LiteralPath $p -Encoding UTF8"
             "}catch{$_.Exception.Message|Set-Content -LiteralPath $p -Encoding UTF8;exit 1}"
         )
 
         try:
-            ok, payload, error_text = self._run_result_script(script, result_file)
+            ok, _ = self._runner(script, result_file)
+            payload, error_text = _read_result_file(result_file)
+            sid = payload.get("id")
 
-            if ok and payload.get("id") and payload.get("device"):
-                return (str(payload["id"]), str(payload["device"]), "")
+            if sid:
+                return (str(sid), "")
 
-            # 诊断带实际字段与原始内容:远程一次运行即可分辨失败形态
-            diag = ("; ".join(f"{k}={v}" for k, v in payload.items())
-                    or error_text
-                    or ("powershell exited nonzero" if not ok else "result file not written"))
-            return (None, None, diag)
+            return (None, error_text
+                    or ("powershell exited nonzero" if not ok else "no id returned"))
         finally:
             try:
                 if os.path.exists(result_file):
@@ -426,60 +534,36 @@ class VssSnapshotManager:
             except OSError:
                 pass
 
-    def _create_via_cim(self, drive: str):
-        """CIM/PowerShell 后备路径;返回 (id, device, 诊断)。"""
-        result_file = os.path.join(
-            os.path.dirname(self._state_path), f"pyas_vss_{uuid.uuid4().hex}.json"
-        )
-        volume = drive + "\\"
-        script = (
-            "$ErrorActionPreference='Stop';"
-            "$p='" + result_file.replace("'", "''") + "';"
-            "try{"
-            "$r=Invoke-CimMethod -ClassName Win32_ShadowCopy -MethodName Create "
-            "-Arguments @{Volume='" + volume + "';Context='ClientAccessible'};"
-            "if($r.ReturnValue -ne 0){throw ('return='+$r.ReturnValue)}"
-            "$g='$($r.ShadowID)'.Replace('{','').Replace('}','');"
-            "$sc=Get-CimInstance Win32_ShadowCopy -Filter \"ID='$g'\";"
-            "if(-not $sc){$sc=Get-CimInstance Win32_ShadowCopy -Filter \"ID='{$g}'\"};"
-            "if(-not $sc){$sc=Get-CimInstance Win32_ShadowCopy | Where-Object {$_.ID.Replace('{','').Replace('}','') -eq $g}};"
-            "if(-not $sc){throw 'device query failed'}"
-            "@{id=$r.ShadowID;device=$sc.DeviceName}|ConvertTo-Json -Compress|Set-Content -LiteralPath $p -Encoding UTF8"
-            "}catch{$_.Exception.Message|Set-Content -LiteralPath $p -Encoding UTF8;exit 1}"
-        )
+    def _resolve_device(self, shadow_id: str) -> str | None:
+        """按 ID 找设备路径;枚举有滞后,失败间隔重试。"""
+        bare = shadow_id.strip("{}").lower()
 
-        try:
-            ok, _output = self._runner(script, result_file)
-            payload, error_text = {}, ""
-
-            if os.path.exists(result_file):
-                with open(result_file, "r", encoding="utf-8-sig") as f:
-                    content = f.read().strip()
-
-                try:
-                    loaded = json.loads(content)
-
-                    if isinstance(loaded, dict):
-                        payload = loaded
-                    else:
-                        error_text = str(loaded)[:200]
-                except ValueError:
-                    # PowerShell catch 分支写入的是纯文本错误
-                    error_text = content[:200]
-            else:
-                error_text = "result file not written"
-
-            if payload.get("id") and payload.get("device"):
-                return (str(payload["id"]), str(payload["device"]), "")
-
-            # 诊断带原始内容:id/device 缺失时(如 Win11 24H2+ 对 WMI 创建
-            # 的限制),远程日志可直接分辨是拒绝、空值还是其他形态
-            return (None, None, error_text
-                    or ("powershell exited nonzero" if not ok else "no id/device returned"))
-        finally:
+        for attempt in range(self._resolve_retries):
             try:
-                if os.path.exists(result_file):
-                    os.remove(result_file)
+                devices = self._device_lister() or {}
+            except Exception:
+                logger.debug("shadow device listing failed", exc_info=True)
+                devices = {}
+
+            if bare in devices:
+                return devices[bare]
+
+            if attempt + 1 < self._resolve_retries:
+                time.sleep(self._resolve_delay)
+
+        return None
+
+    def _purge_stale_results(self) -> None:
+        """进程在创建中途退出(relaunch/崩溃)会留下无人认领的结果文件。"""
+        import glob as _glob
+
+        folder = os.path.dirname(self._state_path) or "."
+        cutoff = time.time() - 3600.0
+
+        for stale in _glob.glob(os.path.join(folder, "pyas_vss_*.json")):
+            try:
+                if os.path.getmtime(stale) < cutoff:
+                    os.remove(stale)
             except OSError:
                 pass
 
@@ -506,47 +590,6 @@ class VssSnapshotManager:
         )
         ok, _ = self._runner(script, None)
         return ok
-
-    def _run_result_script(self, script: str, result_file: str):
-        """编码运行 PowerShell 脚本并解析其写出的 JSON 结果文件。
-        返回 (ok, payload, error_text)。"""
-        try:
-            completed = subprocess.run(
-                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-                 "-EncodedCommand",
-                 base64.b64encode(script.encode("utf-16-le")).decode("ascii")],
-                capture_output=True,
-                timeout=120,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except Exception as error:
-            return (False, {}, f"spawn failed: {error}")
-
-        ok = completed.returncode == 0
-        payload, error_text = {}, ""
-
-        if os.path.exists(result_file):
-            with open(result_file, "r", encoding="utf-8-sig") as stream:
-                content = stream.read().strip()
-
-            try:
-                loaded = json.loads(content)
-
-                if isinstance(loaded, dict):
-                    payload = loaded
-                else:
-                    error_text = str(loaded)[:200]
-            except ValueError:
-                # catch 分支写入的是纯文本错误
-                error_text = content[:200]
-
-        if payload.get("id") and payload.get("device"):
-            return (True, payload, "")
-
-        # 诊断带实际字段:远端一次运行即可分辨是拒绝、空值还是字段缺失
-        diag = "; ".join(f"{k}={v}" for k, v in payload.items()) or error_text
-        return (False, payload, diag
-                or ("powershell exited nonzero" if not ok else "result file not written"))
 
     @staticmethod
     def _run_powershell(script: str, result_file: str | None):

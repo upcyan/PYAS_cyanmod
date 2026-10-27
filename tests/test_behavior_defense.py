@@ -4,13 +4,14 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 
 from PYAS_ETW import BurstHeuristic
 from PYAS_Behavior import (
     ACTION_ROLLBACK, ROLLBACK_STAGING_DIRNAME, BehaviorMixin,
-    TouchedFilesLedger, VssSnapshotManager,
+    TouchedFilesLedger, VssSnapshotManager, parse_vssadmin_shadows,
 )
 
 SNAP_DEVICE = "\\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy9"
@@ -74,13 +75,7 @@ class FakeVssRunner:
         if self.fail:
             content = self.error_text
         else:
-            content = (
-                '{"id": "shadow-id-'
-                + str(self.sequence)
-                + '", "device": "\\\\\\\\?\\\\GLOBALROOT\\\\Device\\\\HarddiskVolumeShadowCopy'
-                + str(self.sequence)
-                + '"}'
-            )
+            content = __import__("json").dumps({"id": f"shadow-id-{self.sequence}"})
 
         if result_file:
             with open(result_file, "w", encoding="utf-8") as f:
@@ -89,8 +84,27 @@ class FakeVssRunner:
         return (not self.fail, "")
 
 
+class FakeDeviceLister:
+    """假 vssadmin 枚举:runner 发的每个序号 ID 都有对应设备路径。"""
+
+    def __init__(self, mapping=None):
+        self.mapping = mapping if mapping is not None else {
+            f"shadow-id-{index}":
+                "\\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy" + str(index)
+            for index in range(1, 32)
+        }
+        self.calls = 0
+
+    def __call__(self):
+        self.calls += 1
+        return dict(self.mapping)
+
+
 class SnapshotManagerTests(unittest.TestCase):
     def make(self, tmp, **kwargs):
+        kwargs.setdefault("device_lister", FakeDeviceLister())
+        kwargs.setdefault("resolve_retries", 1)
+        kwargs.setdefault("resolve_delay", 0.0)
         return VssSnapshotManager(
             state_path=str(Path(tmp) / "vss_snapshots.json"), **kwargs
         )
@@ -125,9 +139,9 @@ class SnapshotManagerTests(unittest.TestCase):
             manager = self.make(tmp, runner=runner, cooldown_seconds=60.0)
 
             self.assertEqual(manager.create_if_due("C:", now=1.0), ("failed", None))
-            # 冷却期内不重试也不重复报错
+            # 冷却期内不重试也不重复报错;cim 与 wmi 两条路各跑一次
             self.assertEqual(manager.create_if_due("C:", now=30.0), ("cooldown", None))
-            self.assertEqual(len(runner.calls), 1)
+            self.assertEqual(len(runner.calls), 2)
 
     def test_failure_sets_last_error(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -158,6 +172,103 @@ class SnapshotManagerTests(unittest.TestCase):
         self.assertEqual(
             VssSnapshotManager.snapshot_path(SNAP_DEVICE, "C:\\a.doc"),
             SNAP_DEVICE + "\\a.doc",
+        )
+
+    def test_unresolved_device_records_id_for_later_cleanup(self):
+        """创建成功但设备名解析失败:ID 必须落盘 —— 否则快照成了
+        无人纳管的孤儿(用户机器上已积累过 6 个),也无法在下次成功时删旧。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = FakeVssRunner()
+            manager = self.make(tmp, runner=runner, device_lister=FakeDeviceLister(mapping={}))
+
+            self.assertEqual(manager.create_if_due("C:", now=1.0), ("failed", None))
+            self.assertIn("unresolved", manager.last_error)
+            self.assertEqual(manager.drives(), [], "无设备路径的条目不可用于回滚")
+
+            # 下一次创建成功时,孤儿 ID 被删除
+            manager._device_lister = FakeDeviceLister()
+            manager.create_if_due("C:", now=10000.0)
+            self.assertEqual(runner.deleted, ["shadow-id-1"])
+
+    def test_resolve_retries_until_listing_catches_up(self):
+        """枚举滞后:第一次列表没有、重试后出现 —— 设备应解析成功。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            lister = FakeDeviceLister()
+            seen = {"n": 0}
+            original = lister.__call__
+
+            def flaky():
+                seen["n"] += 1
+                return {} if seen["n"] == 1 else original()
+
+            manager = VssSnapshotManager(
+                state_path=str(Path(tmp) / "vss_snapshots.json"),
+                runner=FakeVssRunner(),
+                device_lister=flaky,
+                resolve_retries=3,
+                resolve_delay=0.0,
+            )
+
+            state, device = manager.create_if_due("C:", now=1.0)
+
+            self.assertEqual((state, device), ("created", lister.mapping["shadow-id-1"]))
+
+    def test_inflight_create_collapses_second_caller(self):
+        """并发护栏:创建进行中时,第二个调用按冷却处理,不触发 VSS 并行
+        创建拒绝(实测 return=9)。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = FakeVssRunner()
+            manager = self.make(tmp, runner=runner)
+
+            manager._inflight["C:"] = 50.0
+
+            self.assertEqual(manager.create_if_due("C:", now=100.0), ("cooldown", None))
+            self.assertEqual(runner.calls, [], "护栏期内不得再发起创建")
+
+    def test_stale_result_files_purged_on_init(self):
+        """进程在创建中途退出会留下结果文件;超时的残留在下次初始化清掉。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            stale = Path(tmp) / "pyas_vss_deadbeef.json"
+            stale.write_text("{}", encoding="utf-8")
+            two_hours_ago = time.time() - 7200.0
+            os.utime(stale, (two_hours_ago, two_hours_ago))
+            fresh = Path(tmp) / "pyas_vss_livestock.json"
+            fresh.write_text("{}", encoding="utf-8")
+
+            self.make(tmp)
+
+            self.assertFalse(stale.exists())
+            self.assertTrue(fresh.exists(), "进行中的创建结果不能被误删")
+
+    def test_parse_vssadmin_shadows_locale_blind_pairing(self):
+        """vssadmin 输出按系统语言本地化:只能信 GUID/设备 token。
+        布局含集合 GUID 头与 \\?\Volume 行,配对必须只认卷影 ID。"""
+        text = (
+            "vssadmin 1.1 - 卷影复制服务管理命令行工具\n"
+            "(C) 版权所有 2001-2013 Microsoft Corp.\n"
+            "\n"
+            "包含卷影副本集 ID: {11111111-2222-3333-4444-555555555555}\n"
+            "   包含 1 个卷影副本\n"
+            "   卷影副本 ID: {aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}\n"
+            "     卷: (C:)\\\\?\\Volume{99999999-8888-7777-6666-555555555555}\\\n"
+            "     卷影副本卷: \\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy7\n"
+            "     原始计算机名: DESKTOP\n"
+            "\n"
+            "   卷影副本 ID: {ABCDEFAB-CDEF-ABCD-EFAB-CDEFABCDEFAB}\n"
+            "     卷: (D:)\\\\?\\Volume{12345678-1234-1234-1234-123456789012}\\\n"
+            "     卷影副本卷: \\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy12\n"
+        )
+
+        devices = parse_vssadmin_shadows(text)
+
+        self.assertEqual(
+            devices,
+            {
+                "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee":
+                    "\\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy7",
+                "abcdefab-cdef-abcd-efab-cdefabcdefab":
+                    "\\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy12",
+            },
         )
 
 
