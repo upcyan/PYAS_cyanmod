@@ -296,16 +296,21 @@ class WatcherEventFlowTests(unittest.TestCase):
         return watcher, writes, deletes
 
     def test_name_create_then_write_resolves_path(self):
+        from unittest.mock import patch
+
         watcher, writes, _ = self.make_watcher()
         now = 10.0
 
-        watcher._apply_event(etw.EVT_NAME_CREATE, 500, "\\Device\\HarddiskVolume3\\u\\a.dll", 0x1A, 0, 0, now)
-        watcher._apply_event(etw.EVT_WRITE, 500, "", 0x1A, 0x2A, 4096, now + 0.1)
+        # 设备映射必须固定为空:CI runner 的 C: 可能恰是 HarddiskVolume3,
+        # 真实 QueryDosDevice 会把 NT 路径转换掉,透传断言就变成掷硬币
+        with patch.object(etw, "query_device_map", lambda: {}):
+            watcher._apply_event(etw.EVT_NAME_CREATE, 500, "\\Device\\HarddiskVolume3\\u\\a.dll", 0x1A, 0, 0, now)
+            watcher._apply_event(etw.EVT_WRITE, 500, "", 0x1A, 0x2A, 4096, now + 0.1)
 
         self.assertEqual(len(writes), 1)
         self.assertEqual(writes[0][0], 500)
-        # DOS 路径转换需要设备映射;测试环境不给映射时 NT 路径原样透传
-        self.assertIn(writes[0][1], ("\\Device\\HarddiskVolume3\\u\\a.dll",))
+        # 空映射下未知设备原样透传
+        self.assertEqual(writes[0][1], "\\Device\\HarddiskVolume3\\u\\a.dll")
 
     def test_create_event_populates_object_map(self):
         watcher, writes, _ = self.make_watcher()
