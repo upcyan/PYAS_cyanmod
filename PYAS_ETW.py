@@ -1824,8 +1824,14 @@ class EtwMixin:
         _, ext = os.path.splitext(path)
         return ext.lower() in self._etw_suffixes
 
+    @staticmethod
+    def _etw_path_noise(path: str) -> bool:
+        """回收站是用户主动清空的操作,既非勒索也不该进溯源 —— 其风暴
+        (一次清空上万删除)会冲掉溯源缓存的既有条目并刷勒索误报。"""
+        return "$recycle.bin" in path.lower()
+
     def _on_etw_write(self, pid: int, path: str) -> None:
-        if not self._etw_should_track(path):
+        if self._etw_path_noise(path) or not self._etw_should_track(path):
             return
 
         # 层 B:写入时刻记录发起方;名字此刻解析,进程退出后仍可归因
@@ -1853,7 +1859,7 @@ class EtwMixin:
 
     def _on_etw_delete(self, pid: int, path: str) -> None:
         # 删除不进溯源缓存(文件已不在),但计入勒索启发:加密常伴随删除原文件
-        if not self._etw_should_track(path):
+        if self._etw_path_noise(path) or not self._etw_should_track(path):
             return
 
         # 行为防护:删除同样进台账,回滚时才能从快照找回被删文件(先于告警)

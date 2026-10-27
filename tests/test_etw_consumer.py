@@ -198,6 +198,55 @@ class PidInfoCacheTests(unittest.TestCase):
         self.assertEqual(etw.PidInfoCache(None).get(9), ("", ""))
 
 
+class RecycleBinExclusionTests(unittest.TestCase):
+    """回收站是用户主动清空的操作:写/删事件不得进溯源缓存、行为台账与
+    勒索启发(实测一次清空即 explorer.exe 连续 6 次勒索误报)。"""
+
+    def make_host(self):
+        import threading
+
+        class _Host(etw.EtwMixin):
+            def __init__(self):
+                self.lock_config = threading.RLock()
+                self.pyas_config = {"suffix": [".docx"]}
+                self._etw_suffix_stamp = 0.0
+                self._etw_suffixes = frozenset()
+                self._etw_pid_info = etw.PidInfoCache(None)
+                self._etw_heuristic = etw.BurstHeuristic(
+                    threshold=2, window_seconds=10.0, cooldown_seconds=60.0
+                )
+                self.reached = []
+
+            def _behavior_on_write(self, pid, path):
+                self.reached.append(path)
+
+            def _behavior_maybe_rollback(self, pid):
+                self.reached.append(f"rollback:{pid}")
+
+            def write_log(self, *args, **kwargs):
+                self.reached.append(("log", args))
+
+            def _loc(self, texts):
+                return texts.get("simplified_switch") or ""
+
+        return _Host()
+
+    def test_recycle_bin_write_and_delete_fully_ignored(self):
+        host = self.make_host()
+
+        host._on_etw_write(700, "C:\\$Recycle.Bin\\S-1-5-21\\$R7.docx")
+        host._on_etw_delete(700, "C:\\$RECYCLE.BIN\\S-1-5-21\\$R8.docx")
+
+        self.assertEqual(host.reached, [], "回收站路径不得触达台账/告警/回滚")
+
+    def test_normal_path_still_dispatched(self):
+        host = self.make_host()
+
+        host._on_etw_write(700, "C:\\Users\\u\\a.docx")
+
+        self.assertEqual(host.reached, ["C:\\Users\\u\\a.docx"])
+
+
 class WatcherEventFlowTests(unittest.TestCase):
     """句柄关联的核心流程:NameCreate/Create 建表 → Write 反查 → 回调 DOS 路径。"""
 
