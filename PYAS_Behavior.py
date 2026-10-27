@@ -666,6 +666,13 @@ class BehaviorMixin:
         if "$recycle.bin" in path_lower:
             return
 
+        self._behavior_ledger.record(pid, path, stamp)
+
+        escalation = self._behavior_l2.record(pid, path, stamp)
+
+        if escalation:
+            self._behavior_escalate(pid, path, stamp)
+
     def _behavior_escalate(self, pid: int, path: str, stamp: float) -> None:
         """L2:抢在加密蔓延前留存快照;失败只记日志,不影响告警链路。
 
