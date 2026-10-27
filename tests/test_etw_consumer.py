@@ -280,6 +280,28 @@ class RecycleBinExclusionTests(unittest.TestCase):
 
         self.assertEqual(host.reached, [], "IM 缓存目录默认即噪音,不触达台账/告警")
 
+    def test_programdata_never_fires_burst_but_keeps_ledger(self):
+        """ProgramData 是全部安装软件的机器级数据目录:安全软件诱饵(实测
+        腾讯 iOA DecoyFiles 触发勒索启发)、同步盘数据库都在此高频改写。
+        突发计数必须豁免;台账保留,回滚能力不受影响。"""
+        host = self.make_host()
+
+        host._on_etw_write(700, "C:\\ProgramData\\ZtsmEnt\\EPSecDoc\\DecoyFiles\\IndexPhyFiles_000.txt")
+        host._on_etw_write(700, "C:\\ProgramData\\ZtsmEnt\\EPSecDoc\\DecoyFiles\\IndexPhyFiles_001.txt")
+
+        self.assertEqual(
+            [r for r in host.reached if isinstance(r, tuple) and r[0] == "log"],
+            [], "ProgramData 不得触发勒索告警",
+        )
+        self.assertEqual(
+            host.reached,
+            [
+                "C:\\ProgramData\\ZtsmEnt\\EPSecDoc\\DecoyFiles\\IndexPhyFiles_000.txt",
+                "C:\\ProgramData\\ZtsmEnt\\EPSecDoc\\DecoyFiles\\IndexPhyFiles_001.txt",
+            ],
+            "台账必须照常记录,回滚不受豁免影响",
+        )
+
     def test_burst_alert_detail_carries_sample_paths(self):
         """告警明细必须带样本路径:否则 svchost/QQ 类误报只能看到进程名,
         定位写入目标要靠全盘扫描。"""

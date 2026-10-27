@@ -1871,6 +1871,9 @@ class EtwMixin:
         if self.is_in_whitelist(path):
             return
 
+        if self._etw_burst_noise(path):
+            return
+
         burst = self._etw_heuristic.record(pid, path)
 
         if burst:
@@ -1887,10 +1890,26 @@ class EtwMixin:
         if self.is_in_whitelist(path):
             return
 
+        if self._etw_burst_noise(path):
+            return
+
         burst = self._etw_heuristic.record(pid, path)
 
         if burst:
             self._etw_burst_alert(burst)
+
+    @staticmethod
+    def _etw_burst_noise(path: str) -> bool:
+        """不参与勒索突发计数、但保留台账与溯源的路径:ProgramData。
+
+        它是全部安装软件共用的机器级数据目录,安全软件的诱饵文件(实测
+        腾讯 iOA 的 DecoyFiles 触发本产品勒索启发)、同步盘数据库、服务
+        配置都在此高频改写,按厂商逐个豁免是无底洞。用户文档不在
+        ProgramData:这里的爆发计数移除后,真实勒索仍由签名扫描与用户
+        目录的启发覆盖。
+        """
+        programdata = os.environ.get("ALLUSERSPROFILE", "C:\\ProgramData")
+        return path.lower().startswith(os.path.join(programdata, "").lower())
 
     def _etw_burst_alert(self, burst: BurstAlert) -> None:
         name, _ = self._etw_pid_info.get(burst.pid)
