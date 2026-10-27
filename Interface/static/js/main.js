@@ -723,23 +723,14 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const changeScanSelectMode = (mode) => {
-        const select = document.getElementById('scan_method_select');
-        if (!select) return;
-        select.innerHTML = `<option value="none" selected disabled data-i18n="btn_select">${getMsg('btn_select')}</option>`;
-        if (mode === 'scan') {
-            select.innerHTML += `
-                <option value="smart" data-i18n="scan_smart">${getMsg('scan_smart')}</option>
-                <option value="file" data-i18n="scan_file">${getMsg('scan_file')}</option>
-                <option value="path" data-i18n="scan_path">${getMsg('scan_path')}</option>
-                <option value="full" data-i18n="scan_full">${getMsg('scan_full')}</option>`;
-        } else if (mode === 'action') {
-            select.innerHTML += `
-                <option value="delete" data-i18n="act_del">${getMsg('act_del')}</option>
-                <option value="ignore" data-i18n="act_ignore">${getMsg('act_ignore')}</option>
-                <option value="quarantine" data-i18n="act_quarantine">${getMsg('act_quarantine')}</option>
-                <option value="whitelist" data-i18n="act_white">${getMsg('act_white')}</option>`;
-        }
-        rebuildCustomSelect('scan_method_select');
+        const actionMode = mode === 'action';
+        document.getElementById('scan_mode_group')?.classList.toggle('hidden', actionMode);
+        document.getElementById('scan_action_group')?.classList.toggle('hidden', !actionMode);
+    };
+    // 扫描进行中两组都藏起来,只留停止按钮
+    const setScanGroupsVisible = (visible) => {
+        document.getElementById('scan_mode_group')?.classList.toggle('hidden', !visible);
+        document.getElementById('scan_action_group')?.classList.toggle('hidden', !visible);
     };
 
     // 扫描结果为空时盖一层占位(图标 + 说明 + 直接开扫),有结果就收起来。
@@ -757,7 +748,6 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const checkVirusListEmpty = () => {
-        updateCustomSelectUI('scan_method_select', 'none');
         syncScanEmpty();
         if (appState.virusResults.length === 0) {
             appState.virusMap.clear();
@@ -783,8 +773,7 @@ document.addEventListener('DOMContentLoaded', () => {
         appState.virusResults = [];
         syncScanEmpty();
         renderDataGrid('#scan_window', appState.virusResults, cols.virus, 'path', true);
-        changeScanSelectMode('scan');
-        document.getElementById('scan_method_select')?.classList.add('hidden');
+        setScanGroupsVisible(false);
         const stopBtn = document.getElementById('stop_btn');
         if (stopBtn) {
             stopBtn.classList.remove('hidden');
@@ -805,13 +794,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const handleVirusActions = (action) => {
         if (!window.pywebview) return;
         const paths = Array.from(appState.virusMap.entries()).filter(([_, checked]) => checked).map(([p]) => p);
-        if (paths.length === 0) return updateCustomSelectUI('scan_method_select', 'none');
+        if (paths.length === 0) return;
 
-        const wrapper = document.getElementById('scan_method_select').nextElementSibling;
-        if (wrapper) wrapper.style.pointerEvents = 'none';
+        const actionGroup = document.getElementById('scan_action_group');
+        actionGroup?.querySelectorAll('button').forEach(b => { b.disabled = true; });
 
         const finalize = () => {
-            if (wrapper) wrapper.style.pointerEvents = '';
+            actionGroup?.querySelectorAll('button').forEach(b => { b.disabled = false; });
             checkVirusListEmpty();
         };
 
@@ -1168,9 +1157,8 @@ document.addEventListener('DOMContentLoaded', () => {
             stopBtn.disabled = false;
             delete stopBtn.dataset.stopping;
         }
-        document.getElementById('scan_method_select')?.classList.remove('hidden');
+        setScanGroupsVisible(true);
         changeScanSelectMode(count > 0 ? 'action' : 'scan');
-        updateCustomSelectUI('scan_method_select', 'none');
     };
 
     const homeLogs = [];
@@ -1356,7 +1344,7 @@ document.addEventListener('DOMContentLoaded', () => {
             appState.virusMap.clear();
             appState.virusResults = [];
             renderDataGrid('#scan_window', appState.virusResults, cols.virus, 'path', true);
-            document.getElementById('scan_method_select')?.classList.add('hidden');
+            setScanGroupsVisible(false);
             const stopBtn = document.getElementById('stop_btn');
             if (stopBtn) { stopBtn.classList.remove('hidden'); stopBtn.disabled = false; delete stopBtn.dataset.stopping; }
             changeScanSelectMode('scan');
@@ -2161,11 +2149,14 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     scheduleAiTokenRefresh();
     
-    document.getElementById('scan_method_select')?.addEventListener('change', (e) => {
-        const val = e.target.value;
-        if (val === 'none' || appState.scanning) return;
-        if (['smart', 'file', 'path', 'full'].includes(val)) triggerScan(val);
-        else if (['delete', 'ignore', 'quarantine', 'whitelist'].includes(val)) handleVirusActions(val);
+    document.querySelectorAll('#scan_mode_group [data-scan]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            if (!appState.scanning) triggerScan(btn.dataset.scan);
+        });
+    });
+
+    document.querySelectorAll('#scan_action_group [data-virus-action]').forEach((btn) => {
+        btn.addEventListener('click', () => handleVirusActions(btn.dataset.virusAction));
     });
 
     const applyToggle = async (key, checked, toggle) => {
