@@ -2,7 +2,7 @@
 # 连字符前与上游 87owo/PYAS 版本保持一致，连字符后为本项目的修订序号：
 # 跟进上游新版本时连字符前随之升级(3.7.0-24 -> 3.7.1-1)，同一上游基础上的
 # 每轮 Cyanmod 修改递增连字符后的数字(3.7.1-1 -> 3.7.1-2)。
-VERSION = "3.7.1-19"
+VERSION = "3.7.1-20"
 # 数值形态（- 替换为 .）：Inno Setup / PE 版本资源只接受纯数字段
 NUMERIC_VERSION = VERSION.replace("-", ".")
 FILE_VERSION = NUMERIC_VERSION
