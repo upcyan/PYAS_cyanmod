@@ -56,13 +56,15 @@ def run_powershell(script, timeout=60):
     result = subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-OutputFormat', 'Text', '-EncodedCommand', encoded],
         capture_output=True, timeout=timeout, env=environment)
 
-    # The redirected console host appends its own progress records to stderr as
+    # The redirected console host appends module-autoload progress to stderr as
     # an ACP-encoded CLIXML block after the script's UTF-8 output; the mixed
     # encodings are uninterpretable as one stream and a hard text decode loses
-    # it entirely, so cut the framed block and decode only what we ran.
+    # it entirely. Genuine terminating errors are CLIXML blocks too, so only
+    # drop the trailing block when it is a pure progress record.
     stderr = result.stderr
     cut = stderr.rfind(b'\n<Objs ')
-    if cut != -1:
+    trailing = stderr[cut:] if cut != -1 else b''
+    if b'S="progress"' in trailing and b'S="Error"' not in trailing:
         stderr = stderr[:cut + 1]
     if stderr.startswith(b'#< CLIXML\r\n'):
         stderr = stderr[len(b'#< CLIXML\r\n'):]
