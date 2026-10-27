@@ -550,6 +550,14 @@ BURST_MAX_TRACKED_PIDS = 8
 BURST_SAMPLE_COUNT = 3
 BURST_PRE_EXISTING_SECONDS = 30.0
 
+# 即时通讯应用的数据目录:QQ/微信自身高频改写缓存(缩略图/表情/
+# 聊天图片预览瓦片),群聊刷一次图就能撞满勒索突发阈值 —— 这是应用
+# 内部数据 churn,不是勒索形态(实测 QQ.exe/svchost 经缩略图 COM
+# 反复误报)。只豁免溯源与启发计数,不豁免引擎扫描;加密这些目录之外
+# 的文档仍会照常告警,且突发启发只统计「改写会话早期已存在的文件」,
+# 误放新落盘附件的风险本身就被这层过滤挡住。
+IM_CACHE_MARKERS = ("\\nt_qq\\", "\\xwechat_files\\", "\\wechat files\\")
+
 
 class BurstAlert:
     __slots__ = ("pid", "count", "samples")
@@ -1826,9 +1834,14 @@ class EtwMixin:
 
     @staticmethod
     def _etw_path_noise(path: str) -> bool:
-        """回收站是用户主动清空的操作,既非勒索也不该进溯源 —— 其风暴
-        (一次清空上万删除)会冲掉溯源缓存的既有条目并刷勒索误报。"""
-        return "$recycle.bin" in path.lower()
+        """不参与溯源与勒索启发的路径:回收站(用户主动清空,风暴会冲掉
+        溯源缓存并刷误报)与 IM 聊天数据目录(应用自身缓存改写)。"""
+        path_lower = path.lower()
+
+        if "$recycle.bin" in path_lower:
+            return True
+
+        return any(marker in path_lower for marker in IM_CACHE_MARKERS)
 
     def _on_etw_write(self, pid: int, path: str) -> None:
         if self._etw_path_noise(path) or not self._etw_should_track(path):

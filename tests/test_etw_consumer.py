@@ -263,10 +263,22 @@ class RecycleBinExclusionTests(unittest.TestCase):
         host._on_etw_write(700, "D:\\Tencent\\nt_qq\\Pic\\Thumb\\2.jpg")
 
         self.assertEqual(
-            [r for r in host.reached if isinstance(r, tuple)],
+            [r for r in host.reached if isinstance(r, tuple) and r[0] == "log"],
             [],
             "白名单路径不得触发勒索告警/回滚",
         )
+
+    def test_im_cache_dirs_are_noise_by_default(self):
+        """IM 聊天数据目录(QQ NT/微信)的缓存改写不进启发:用户没加白名单
+        也不得误报(实测 QQ nt_qq Pic/Ori 与 nt_temp tile_files 撞满阈值)。"""
+        host = self.make_host()
+
+        host._on_etw_write(700, "D:\\Personal\\Documents\\Tencent Files\\354723161\\nt_qq\\nt_data\\Pic\\2026-10\\Ori\\0b1c67572f3afcffe2529cf4cf75ee1c.png")
+        host._on_etw_write(700, "D:\\Personal\\Documents\\Tencent Files\\354723161\\nt_qq\\nt_temp\\7701236535243825943_7701236535243825942\\tile_files\\12\\7_0.jpeg")
+        host._on_etw_write(700, "C:\\Users\\u\\xwechat_files\\abc\\msg\\attach\\thumb.jpg")
+        host._on_etw_write(700, "D:\\Legacy\\WeChat Files\\wx\\FileStorage\\a.jpg")
+
+        self.assertEqual(host.reached, [], "IM 缓存目录默认即噪音,不触达台账/告警")
 
     def test_burst_alert_detail_carries_sample_paths(self):
         """告警明细必须带样本路径:否则 svchost/QQ 类误报只能看到进程名,
