@@ -47,6 +47,7 @@ import ctypes.wintypes as wt
 import logging
 import os
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -1577,6 +1578,16 @@ class EtwMixin:
             rows.append({"drive": drive, "device": _device or "-",
                          "createdStr": created_str or "-"})
         return rows
+
+    def get_shadow_storage(self) -> list:
+        """卷影存储占用数据源:每卷已使用/已分配/上限(vssadmin,非提权返回空)。"""
+        from PYAS_Behavior import list_shadow_storage
+
+        try:
+            return list_shadow_storage()
+        except Exception:
+            logger.debug("shadow storage query failed", exc_info=True)
+            return []
 
     @staticmethod
     def _shadow_rel_norm(rel: str) -> str:

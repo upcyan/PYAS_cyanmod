@@ -311,6 +311,79 @@ def list_shadow_devices() -> dict[str, str]:
     return parse_vssadmin_shadows(completed.stdout or "")
 
 
+_STORAGE_PAIR_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(%|[KMGTP]?B)\b", re.IGNORECASE)
+_STORAGE_DRIVE_RE = re.compile(r"\(([A-Za-z]:)\)")
+
+
+def parse_vssadmin_shadowstorage(text: str) -> list[dict]:
+    """解析 `vssadmin list shadowstorage` → [{drive, used, allocated, max}]。
+
+    字段名随系统语言本地化,不可依赖;块内三行的相对顺序(已使用→已分配→
+    上限)与括号数值格式稳定。上限行形如 "10% (18.4 GB)",百分比在前、
+    字节在后,合并展示。
+    """
+    rows: list[dict] = []
+    drive: str | None = None
+    lines: list[list[tuple[str, str]]] = []
+
+    def flush():
+        nonlocal drive, lines
+
+        if drive and lines:
+
+            def pair_text(pair):
+                return f"{pair[0]} {pair[1]}"
+
+            row = {"drive": drive, "used": "-", "allocated": "-", "max": "-"}
+            row["used"] = pair_text(lines[0][0]) if lines[0] else "-"
+
+            if len(lines) > 1 and lines[1]:
+                row["allocated"] = pair_text(lines[1][0])
+
+            if len(lines) > 2 and lines[2]:
+                # 上限行含百分比与字节两对;百分比在前,字节在后
+                pairs = lines[2]
+                percent = next((pair_text(p) for p in pairs if p[1] == "%"), None)
+                size = next((pair_text(p) for p in pairs if p[1] != "%"), None)
+                row["max"] = size or percent or "-"
+                if size and percent:
+                    row["max"] = f"{size} ({percent})"
+
+            rows.append(row)
+
+        drive = None
+        lines = []
+
+    for line in (text or "").splitlines():
+        if _STORAGE_DRIVE_RE.search(line) and ("Volume{" in line or "卷" in line or ":" in line):
+            flush()
+            match = _STORAGE_DRIVE_RE.search(line)
+            drive = match.group(1).upper()
+            continue
+
+        if drive is not None:
+            pairs = _STORAGE_PAIR_RE.findall(line)
+
+            if pairs:
+                lines.append(pairs)
+
+    flush()
+    return rows
+
+
+def list_shadow_storage() -> list[dict]:
+    """各卷卷影存储占用(vssadmin,需管理员;失败返回空)。"""
+    completed = subprocess.run(
+        ["vssadmin", "list", "shadowstorage"],
+        capture_output=True,
+        timeout=90,
+        text=True,
+        errors="replace",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    return parse_vssadmin_shadowstorage(completed.stdout or "")
+
+
 def _read_result_file(result_file: str):
     """读取 PowerShell 结果文件 → (payload, error_text)。
 
