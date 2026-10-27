@@ -18,6 +18,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from PYAS_Encoding import decode_process_output
+
 # 同 build.py:放宽控制台编码错误,避免英文代码页下中文日志直接崩溃。
 for _stream in (sys.stdout, sys.stderr):
     try:
@@ -40,6 +42,7 @@ CERT_CER = OUT / "menu_cert.cer"
 CERT_PWD = "PYAS-Menu-Local"
 POWERSHELL_UTF8 = '''[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $OutputEncoding = [Console]::OutputEncoding
+$ProgressPreference = 'SilentlyContinue'
 '''
 
 
@@ -50,8 +53,22 @@ def run_powershell(script, timeout=60):
     environment = os.environ.copy()
     environment['PSModulePath'] = os.path.join(os.environ.get('SYSTEMROOT', r'C:\Windows'),
         'System32', 'WindowsPowerShell', 'v1.0', 'Modules')
-    return subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-OutputFormat', 'Text', '-EncodedCommand', encoded],
-        capture_output=True, text=True, encoding='utf-8-sig', timeout=timeout, env=environment)
+    result = subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-OutputFormat', 'Text', '-EncodedCommand', encoded],
+        capture_output=True, timeout=timeout, env=environment)
+
+    # The redirected console host appends its own progress records to stderr as
+    # an ACP-encoded CLIXML block after the script's UTF-8 output; the mixed
+    # encodings are uninterpretable as one stream and a hard text decode loses
+    # it entirely, so cut the framed block and decode only what we ran.
+    stderr = result.stderr
+    cut = stderr.rfind(b'\n<Objs ')
+    if cut != -1:
+        stderr = stderr[:cut + 1]
+    if stderr.startswith(b'#< CLIXML\r\n'):
+        stderr = stderr[len(b'#< CLIXML\r\n'):]
+
+    return subprocess.CompletedProcess(result.args, result.returncode,
+        decode_process_output(result.stdout), decode_process_output(stderr))
 
 
 def die(msg, hint=None):

@@ -136,7 +136,10 @@ class StarterTests(unittest.TestCase):
             threads.append(second)
             second.start()
             with queue.condition:
-                self.assertTrue(queue.condition.wait_for(lambda: queue.count == 2, timeout=2))
+                # 合并语义(3acfbf6)下 follower 并入 active 而非单独入队,
+                # count 有意不重复计数;等到的是「已合并」这个状态本身。
+                self.assertTrue(queue.condition.wait_for(
+                    lambda: bool(queue.active and queue.active.followers), timeout=2))
             self.assertEqual(starter.call_count, 1)
         finally:
             queue.close()
