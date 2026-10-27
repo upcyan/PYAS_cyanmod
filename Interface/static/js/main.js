@@ -977,15 +977,43 @@ document.addEventListener('DOMContentLoaded', () => {
         const pad = v => String(v).padStart(2, '0');
         return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
     };
+    const shadowEl = (id) => document.getElementById(id);
+    const applyShadowMode = () => {
+        const files = shadowState.mode === 'files';
+        shadowEl('shadow_path_bar')?.classList.toggle('hidden', !files);
+        shadowEl('shadow_back_btn')?.classList.toggle('hidden', !files);
+        shadowEl('shadow_up_dir_btn')?.classList.toggle('hidden', !files);
+        shadowEl('shadow_restore_btn')?.classList.toggle('hidden', !files);
+        shadowEl('shadow_browse_btn')?.classList.toggle('hidden', files);
+        shadowEl('shadow_delete_btn')?.classList.toggle('hidden', files);
+        shadowEl('shadow_storage')?.classList.toggle('hidden', files);
+    };
+    const loadShadowStorage = () => {
+        const box = shadowEl('shadow_storage');
+        if (!box) return;
+        window.pywebview?.api.get_shadow_storage?.().then(rows => {
+            const list = Array.isArray(rows) ? rows : [];
+            box.innerHTML = list.map(r => {
+                const used = String(r.used || '-'), max = String(r.max || '-');
+                return `<div class="shadow-storage-row"><span class="shadow-storage-drive">${r.drive || ''}</span>`
+                    + `<span>${getMsg('shadow_used')} ${used}</span>`
+                    + `<span>${getMsg('shadow_limit')} ${max}</span></div>`;
+            }).join('');
+            box.classList.toggle('hidden', files_mode() || !list.length);
+        }).catch(() => {});
+    };
+    const files_mode = () => shadowState.mode === 'files';
     const loadShadowSnapshots = () => {
         shadowState.mode = 'snapshots';
         shadowState.drive = '';
         shadowState.rel = '\\';
-        const input = document.getElementById('shadow_path_input');
+        const input = shadowEl('shadow_path_input');
         if (input) input.value = '';
+        applyShadowMode();
         window.pywebview?.api.list_shadow_snapshots().then(rows => {
             renderDataGrid('#shadow_window', rows, cols.shadow, 'drive', true);
         }).catch(() => {});
+        loadShadowStorage();
     };
     const loadShadowFiles = () => {
         window.pywebview?.api.list_shadow_files(shadowState.drive, shadowState.rel).then(data => {
@@ -998,7 +1026,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 isDir: e.isDir,
             }));
             renderDataGrid('#shadow_window', rows, cols.shadowFiles, 'relPath', true);
-            const input = document.getElementById('shadow_path_input');
+            const input = shadowEl('shadow_path_input');
             if (input) input.value = shadowState.rel;
         }).catch(() => {});
     };
@@ -1008,78 +1036,49 @@ document.addEventListener('DOMContentLoaded', () => {
         shadowState.mode = 'files';
         shadowState.drive = String(checked[0]).slice(0, 2);
         shadowState.rel = '\\';
+        applyShadowMode();
         loadShadowFiles();
         return true;
     };
-    const shadowRestoreChecked = () => {
-        const checked = getCheckedValues('#shadow_window');
-        Promise.all(checked.map(p => window.pywebview?.api.restore_shadow_file(shadowState.drive, p)))
-            .then(() => loadShadowFiles())
-            .catch(() => {});
-    };
-
-    document.getElementById('shadow_select')?.addEventListener('change', (event) => {
-        const val = event.target.value;
-        event.target.value = 'none';
-        const bridge = window.pywebview?.api;
-        if (!bridge) return;
-
-        if (val === 'back') { loadShadowSnapshots(); return; }
-
-        if (val === 'up') {
-            if (shadowState.mode !== 'files') return;
-            const parent = shadowState.rel.slice(0, -1).replace(/\\[^\\]*$/, '');
-            shadowState.rel = parent || '\\';
-            loadShadowFiles();
-            return;
-        }
-
-        if (val === 'view') {
-            if (shadowState.mode !== 'files') { loadShadowSnapshots(); return; }
-            const input = document.getElementById('shadow_path_input');
-            if (input && input.value.trim()) {
-                shadowState.rel = input.value.trim();
-                if (!shadowState.rel.startsWith('\\')) shadowState.rel = '\\' + shadowState.rel;
-            }
-            loadShadowFiles();
-            return;
-        }
-
-        if (val === 'restore_checked') {
-            if (shadowState.mode !== 'files') return;
-            const checked = getCheckedValues('#shadow_window');
-            if (!checked.length) return;
-            Promise.all(checked.map(p => bridge.restore_shadow_file(shadowState.drive, p)))
-                .then(() => loadShadowFiles())
-                .catch(() => {});
-            return;
-        }
-
-        if (val !== 'delete') return;
-        if (shadowState.mode !== 'snapshots') return;
-        const checkedSnaps = getCheckedValues('#shadow_window');
-        if (!checkedSnaps.length) return;
-        Promise.all(checkedSnaps.map(v => bridge.delete_shadow_snapshot(v)))
-            .then(() => bridge.list_shadow_snapshots())
-            .then(rows => renderDataGrid('#shadow_window', rows, cols.shadow, 'drive', true))
-            .catch(() => {});
-    });
-
-    document.getElementById('shadow_up_btn')?.addEventListener('click', () => {
-        if (shadowState.mode !== 'files') return;
-        const parent = shadowState.rel.slice(0, -1).replace(/\\[^\\]*$/, '');
-        shadowState.rel = parent || '\\';
-        loadShadowFiles();
-    });
-
-    document.getElementById('shadow_path_input')?.addEventListener('keydown', (event) => {
-        if (event.key !== 'Enter' || shadowState.mode !== 'files') return;
-        const input = document.getElementById('shadow_path_input');
+    const shadowGoPath = () => {
+        if (!files_mode()) return;
+        const input = shadowEl('shadow_path_input');
         if (input && input.value.trim()) {
             shadowState.rel = input.value.trim();
             if (!shadowState.rel.startsWith('\\')) shadowState.rel = '\\' + shadowState.rel;
-            loadShadowFiles();
         }
+        loadShadowFiles();
+    };
+    const shadowGoUp = () => {
+        if (!files_mode()) return;
+        const parent = shadowState.rel.slice(0, -1).replace(/\\[^\\]*$/, '');
+        shadowState.rel = parent || '\\';
+        loadShadowFiles();
+    };
+
+    shadowEl('shadow_browse_btn')?.addEventListener('click', () => shadowEnterBrowse());
+    shadowEl('shadow_back_btn')?.addEventListener('click', () => loadShadowSnapshots());
+    shadowEl('shadow_go_btn')?.addEventListener('click', shadowGoPath);
+    shadowEl('shadow_up_btn')?.addEventListener('click', shadowGoUp);
+    shadowEl('shadow_up_dir_btn')?.addEventListener('click', shadowGoUp);
+    shadowEl('shadow_restore_btn')?.addEventListener('click', () => {
+        const checked = getCheckedValues('#shadow_window');
+        if (!checked.length) return;
+        Promise.all(checked.map(p => window.pywebview?.api.restore_shadow_file(shadowState.drive, p)))
+            .then(() => loadShadowFiles())
+            .catch(() => {});
+    });
+    shadowEl('shadow_delete_btn')?.addEventListener('click', () => {
+        if (files_mode()) return;
+        const checked = getCheckedValues('#shadow_window');
+        if (!checked.length) return;
+        Promise.all(checked.map(v => window.pywebview?.api.delete_shadow_snapshot(v)))
+            .then(() => loadShadowSnapshots())
+            .catch(() => {});
+    });
+
+    shadowEl('shadow_path_input')?.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') shadowGoPath();
     });
 
         if (targetId === 'release_window' && window.pywebview) {

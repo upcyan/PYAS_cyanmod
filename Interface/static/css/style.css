@@ -2717,3 +2717,64 @@ body.resizing-active * {
     font-family: Consolas, "Cascadia Mono", monospace;
     font-size: var(--text-xs);
 }
+
+/* 卷影备份子页 */
+.shadow-hint {
+    margin: 0 0 var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-control);
+    background-color: var(--bg-secondary, transparent);
+    color: var(--text-secondary, var(--text-primary));
+    font-size: var(--text-sm);
+    line-height: 1.6;
+}
+
+.shadow-storage {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+}
+
+.shadow-storage-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-5);
+    padding: var(--space-2) var(--space-4);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-control);
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+}
+
+.shadow-storage-drive {
+    font-weight: 600;
+    min-width: 2.5em;
+}
+
+.shadow-path-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+}
+
+.shadow-path-bar input[type="text"] {
+    flex: 1;
+    min-height: var(--control-height);
+    padding: 0 var(--space-3);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-control);
+    background-color: transparent;
+    color: var(--text-primary);
+    font-family: Consolas, "Cascadia Mono", monospace;
+    font-size: var(--text-sm);
+}
+
+.shadow-footer-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+}

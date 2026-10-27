@@ -911,22 +911,28 @@
                         <button class="icon-btn" data-target="tool_window"><svg><use href="#i-chevron-left"/></svg></button>
                         <h2 data-i18n="shadow_records">卷影备份</h2>
                         <div class="spacer"></div>
-                        <div class="action-group modern-action-group">
-                            <select id="shadow_select" class="modern-select">
-                                <option value="none" selected disabled data-i18n="btn_select">選擇</option>
-                                <option value="view" data-i18n="shadow_act_view">瀏覽當前目錄</option>
-                                <option value="up" data-i18n="shadow_act_up">上一級</option>
-                                <option value="restore_checked" data-i18n="shadow_act_restore">恢復勾選檔案</option>
-                                <option value="back" data-i18n="shadow_act_back">返回快照列表</option>
-                                <option value="delete" data-i18n="btn_delete_item">刪除項目</option>
-                            </select>
-                        </div>
+                        <button class="action-btn modern-btn hidden" id="shadow_back_btn" data-i18n="shadow_act_back">返回快照列表</button>
                     </div>
-                    <div class="shadow-path-bar">
+
+                    <p class="shadow-hint" data-i18n="shadow_hint">卷影快照在檢測到批量改寫行為時自動建立,每個卷保留一份;儲存空間到達上限時,系統會自動刪除最舊的快照。</p>
+
+                    <div id="shadow_storage" class="shadow-storage"></div>
+
+                    <div class="shadow-path-bar hidden" id="shadow_path_bar">
                         <input type="text" id="shadow_path_input" spellcheck="false" placeholder="\">
                         <button class="icon-btn" id="shadow_up_btn" title="上一級"><svg><use href="#i-chevron-left"/></svg></button>
+                        <button class="action-btn modern-btn" id="shadow_go_btn" data-i18n="shadow_act_view">瀏覽</button>
                     </div>
+
                     <div class="manage-widget flex-grow"><ul class="manage-list"></ul></div>
+
+                    <div class="shadow-footer-bar">
+                        <button class="action-btn modern-btn hidden" id="shadow_up_dir_btn" data-i18n="shadow_act_up">上一級</button>
+                        <div class="spacer"></div>
+                        <button class="action-btn modern-btn" id="shadow_browse_btn" data-i18n="shadow_act_open">瀏覽所選</button>
+                        <button class="action-btn modern-btn danger-btn hidden" id="shadow_delete_btn" data-i18n="shadow_act_delete">刪除所選快照</button>
+                        <button class="action-btn modern-btn hidden" id="shadow_restore_btn" data-i18n="shadow_act_restore">恢復勾選檔案</button>
+                    </div>
                 </section>
 
                 <section id="quarantine_window" class="page sub-page">
