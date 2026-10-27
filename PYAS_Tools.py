@@ -319,6 +319,9 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
                     winreg.DeleteValue(reg, value_name)
 
             return True
+        except FileNotFoundError:
+            # 目标本来就不存在 = 清理操作的期望终态,静默成功
+            return True
         except Exception:
             log_exception("PYAS_Tools.ToolsMixin._reg_delete:205")
             return False

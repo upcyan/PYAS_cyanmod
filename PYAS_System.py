@@ -494,20 +494,26 @@ class SystemMixin:
                 while True:
                     try:
                         subkey = winreg.EnumKey(reg, i)
+                    except OSError as error:
+                        # 枚举到末尾抛 259(ERROR_NO_MORE_ITEMS),属正常结束,不记异常
+                        if getattr(error, "winerror", None) != 259:
+                            log_exception("PYAS_System.SystemMixin.repair_system_image:292")
+                        break
 
+                    i += 1
+
+                    try:
                         with winreg.OpenKey(reg, subkey, 0, winreg.KEY_ALL_ACCESS) as sub_reg:
                             for val in ["Debugger", "UseFilter", "GlobalFlag", "MitigationOptions"]:
                                 try:
                                     winreg.DeleteValue(sub_reg, val)
                                 except FileNotFoundError:
                                     pass
-
-                        i += 1
-                    except OSError as error:
-                        # 枚举到末尾抛 259(ERROR_NO_MORE_ITEMS),属正常结束,不记异常
-                        if getattr(error, "winerror", None) != 259:
-                            log_exception("PYAS_System.SystemMixin.repair_system_image:292")
-                        break
+                    except OSError:
+                        # TrustedInstaller 拥有的子键即使管理员也无权打开:
+                        # 跳过该键继续。旧逻辑在此中止整个枚举,每个周期都在
+                        # 同一位置失败,同一条异常在日志里刷了两万多条
+                        continue
 
         except Exception as e:
             log_exception("PYAS_System.SystemMixin.repair_system_image:295")
