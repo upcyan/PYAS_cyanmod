@@ -216,6 +216,7 @@ class RecycleBinExclusionTests(unittest.TestCase):
                     threshold=2, window_seconds=10.0, cooldown_seconds=60.0
                 )
                 self.reached = []
+                self.whitelisted = set()
 
             def _behavior_on_write(self, pid, path):
                 self.reached.append(path)
@@ -224,10 +225,16 @@ class RecycleBinExclusionTests(unittest.TestCase):
                 self.reached.append(f"rollback:{pid}")
 
             def write_log(self, *args, **kwargs):
-                self.reached.append(("log", args))
+                self.reached.append(("log", args, kwargs))
+
+            def dispatch_notification(self, *args, **kwargs):
+                pass
 
             def _loc(self, texts):
                 return texts.get("simplified_switch") or ""
+
+            def is_in_whitelist(self, path):
+                return path in self.whitelisted
 
         return _Host()
 
@@ -245,6 +252,36 @@ class RecycleBinExclusionTests(unittest.TestCase):
         host._on_etw_write(700, "C:\\Users\\u\\a.docx")
 
         self.assertEqual(host.reached, ["C:\\Users\\u\\a.docx"])
+
+    def test_whitelisted_path_never_fires_burst_alert(self):
+        """白名单必须同时管住 L3:QQ/微信数据目录加白后不再弹勒索告警,
+        也不再因告警触发紧急快照(此前行为层跳过、告警层照弹)。"""
+        host = self.make_host()
+        host.whitelisted = {"D:\\Tencent\\nt_qq\\Pic\\Thumb\\1.jpg"}
+
+        host._on_etw_write(700, "D:\\Tencent\\nt_qq\\Pic\\Thumb\\1.jpg")
+        host._on_etw_write(700, "D:\\Tencent\\nt_qq\\Pic\\Thumb\\2.jpg")
+
+        self.assertEqual(
+            [r for r in host.reached if isinstance(r, tuple)],
+            [],
+            "白名单路径不得触发勒索告警/回滚",
+        )
+
+    def test_burst_alert_detail_carries_sample_paths(self):
+        """告警明细必须带样本路径:否则 svchost/QQ 类误报只能看到进程名,
+        定位写入目标要靠全盘扫描。"""
+        host = self.make_host()
+
+        host._on_etw_write(700, "C:\\Users\\u\\a.docx")
+        host._on_etw_write(700, "C:\\Users\\u\\b.docx")
+
+        logs = [r for r in host.reached if isinstance(r, tuple) and r[0] == "log"]
+
+        self.assertEqual(len(logs), 1, "阈值 2:两条不同文档应告警一次")
+        detail = logs[0][2].get("detail") or ""
+        self.assertIn("C:\\Users\\u\\a.docx", detail)
+        self.assertIn("C:\\Users\\u\\b.docx", detail)
 
 
 class WatcherEventFlowTests(unittest.TestCase):

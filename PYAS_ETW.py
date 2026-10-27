@@ -1852,6 +1852,12 @@ class EtwMixin:
         # 必须在勒索告警之前:告警若触发自动回滚,台账要已包含当前这条写入
         self._behavior_on_write(pid, path)
 
+        # 白名单=用户明确信任的目录(QQ/微信数据目录一类高频缓存写入地):
+        # 行为层内部本就跳过,勒索启发同样不参与 —— 否则白名单了还照样
+        # 弹告警、建紧急快照,信任表达被三层中的两层无视
+        if self.is_in_whitelist(path):
+            return
+
         burst = self._etw_heuristic.record(pid, path)
 
         if burst:
@@ -1865,6 +1871,9 @@ class EtwMixin:
         # 行为防护:删除同样进台账,回滚时才能从快照找回被删文件(先于告警)
         self._behavior_on_write(pid, path)
 
+        if self.is_in_whitelist(path):
+            return
+
         burst = self._etw_heuristic.record(pid, path)
 
         if burst:
@@ -1873,12 +1882,19 @@ class EtwMixin:
     def _etw_burst_alert(self, burst: BurstAlert) -> None:
         name, _ = self._etw_pid_info.get(burst.pid)
         suspect = name or f"PID {burst.pid}"
+        detail = self._etw_log_text(
+            "burst_detail", suspect, int(BURST_WINDOW_SECONDS), burst.count
+        )
+
+        # 样本路径是技术串(豁免写时本地化):没有它,svchost/QQ 这类
+        # 误报永远只能看到进程名,定位写入目标要靠全盘扫描
+        if burst.samples:
+            detail += "\n" + "\n".join(burst.samples[:BURST_SAMPLE_COUNT])
+
         self.write_log(
             "WARN",
             "Ransomware Heuristic",
-            detail=self._etw_log_text(
-                "burst_detail", suspect, int(BURST_WINDOW_SECONDS), burst.count
-            ),
+            detail=detail,
             pid=burst.pid,
             source=suspect,
             success=False,
