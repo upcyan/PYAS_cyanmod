@@ -953,7 +953,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (['whitelist_window', 'quarantine_window', 'popup_window', 'custom_protect_window'].includes(targetId)) refreshConfigLists();
 
-    // 卷影备份:快照列表 ⇄ 文件浏览双模式
+    // 卷影备份:卷条目列表 ⇄ 文件浏览双模式
     const shadowState = { mode: 'snapshots', drive: '', rel: '\\' };
     const fmtShadowSize = (n) => {
         if (n >= 1073741824) return (n / 1073741824).toFixed(2) + ' GB';
@@ -966,32 +966,65 @@ document.addEventListener('DOMContentLoaded', () => {
         const pad = v => String(v).padStart(2, '0');
         return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
     };
+    // vssadmin 的 "20.4 GB"/"339 MB" → 字节数(占空比计算用)
+    const parseShadowSize = (text) => {
+        const m = String(text || '').match(/([\d.,]+)\s*([KMGTP]?B)/i);
+        if (!m) return NaN;
+        const unit = { B: 1, KB: 1024, MB: 1048576, GB: 1073741824, TB: 1099511627776, PB: 1125899906842624 };
+        return parseFloat(m[1].replace(',', '.')) * (unit[m[2].toUpperCase()] || 1);
+    };
     const shadowEl = (id) => document.getElementById(id);
     const applyShadowMode = () => {
         const files = shadowState.mode === 'files';
         shadowEl('shadow_path_bar')?.classList.toggle('hidden', !files);
         shadowEl('shadow_back_btn')?.classList.toggle('hidden', !files);
-        shadowEl('shadow_up_dir_btn')?.classList.toggle('hidden', !files);
-        shadowEl('shadow_restore_btn')?.classList.toggle('hidden', !files);
-        shadowEl('shadow_browse_btn')?.classList.toggle('hidden', files);
-        shadowEl('shadow_delete_btn')?.classList.toggle('hidden', files);
+        shadowEl('shadow_files_footer')?.classList.toggle('hidden', !files);
+        shadowEl('shadow_files_widget')?.classList.toggle('hidden', !files);
         shadowEl('shadow_storage')?.classList.toggle('hidden', files);
+        shadowEl('shadow_hint')?.classList.toggle('hidden', files);
     };
-    const loadShadowStorage = () => {
+    const renderShadowVolumes = (snaps, storage) => {
         const box = shadowEl('shadow_storage');
         if (!box) return;
-        window.pywebview?.api.get_shadow_storage?.().then(rows => {
-            const list = Array.isArray(rows) ? rows : [];
-            box.innerHTML = list.map(r => {
-                const used = String(r.used || '-'), max = String(r.max || '-');
-                return `<div class="shadow-storage-row"><span class="shadow-storage-drive">${r.drive || ''}</span>`
-                    + `<span>${getMsg('shadow_used')} ${used}</span>`
-                    + `<span>${getMsg('shadow_limit')} ${max}</span></div>`;
-            }).join('');
-            box.classList.toggle('hidden', files_mode() || !list.length);
-        }).catch(() => {});
+        const byDrive = {};
+        (snaps || []).forEach(s => { byDrive[String(s.drive).toUpperCase()] = s; });
+        (storage || []).forEach(r => {
+            const key = String(r.drive).toUpperCase();
+            byDrive[key] = { ...(byDrive[key] || {}), used: r.used, max: r.max };
+        });
+        const drives = Object.keys(byDrive).sort();
+        box.innerHTML = drives.map((drive) => {
+            const info = byDrive[drive] || {};
+            const used = info.used || '-';
+            const max = info.max || '-';
+            const usedB = parseShadowSize(used);
+            const maxB = parseShadowSize(max);
+            const percent = (isFinite(usedB) && isFinite(maxB) && maxB > 0)
+                ? Math.min(100, (usedB / maxB) * 100) : null;
+            const created = info.createdStr && info.createdStr !== '-' ? info.createdStr : '';
+            const device = info.device && info.device !== '-' ? String(info.device) : '';
+            return `<div class="shadow-volume-row" data-drive="${drive}">`
+                + `<div class="shadow-volume-head">`
+                + `<span class="shadow-storage-drive">${drive}</span>`
+                + (created ? `<span class="shadow-volume-created" title="${getMsg('col_created')}">${created}</span>` : '')
+                + `<span class="shadow-volume-size">${getMsg('shadow_used')} ${used} / ${getMsg('shadow_limit')} ${max}</span>`
+                + `<span class="spacer"></span>`
+                + `<button type="button" class="action-btn modern-btn" data-act="browse" data-i18n="shadow_act_open">${getMsg('shadow_act_open')}</button>`
+                + `<button type="button" class="action-btn modern-btn danger-btn" data-act="delete" data-i18n="shadow_act_delete">${getMsg('shadow_act_delete')}</button>`
+                + `</div>`
+                + `<div class="shadow-volume-bar${percent === null ? ' unknown' : ''}">`
+                + (percent === null ? '' : `<div class="shadow-volume-bar-fill" style="width:${percent.toFixed(1)}%"></div>`)
+                + `</div>`
+                + (device ? `<div class="shadow-volume-device">${device}</div>` : '')
+                + `</div>`;
+        }).join('') || `<div class="shadow-volume-empty">${getMsg('list_empty')}</div>`;
     };
-    const files_mode = () => shadowState.mode === 'files';
+    const loadShadowStorage = () => {
+        Promise.all([
+            window.pywebview?.api.list_shadow_snapshots() || Promise.resolve([]),
+            window.pywebview?.api.get_shadow_storage?.() || Promise.resolve([]),
+        ]).then(([snaps, storage]) => renderShadowVolumes(snaps, storage)).catch(() => {});
+    };
     const loadShadowSnapshots = () => {
         shadowState.mode = 'snapshots';
         shadowState.drive = '';
@@ -999,9 +1032,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const input = shadowEl('shadow_path_input');
         if (input) input.value = '';
         applyShadowMode();
-        window.pywebview?.api.list_shadow_snapshots().then(rows => {
-            renderDataGrid('#shadow_window', rows, cols.shadow, 'drive', true);
-        }).catch(() => {});
         loadShadowStorage();
     };
     const loadShadowFiles = () => {
@@ -1019,18 +1049,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (input) input.value = shadowState.rel;
         }).catch(() => {});
     };
-    const shadowEnterBrowse = () => {
-        const checked = getCheckedValues('#shadow_window');
-        if (checked.length !== 1) return false;
+    const shadowEnterBrowse = (drive) => {
         shadowState.mode = 'files';
-        shadowState.drive = String(checked[0]).slice(0, 2);
+        shadowState.drive = drive;
         shadowState.rel = '\\';
         applyShadowMode();
         loadShadowFiles();
-        return true;
     };
     const shadowGoPath = () => {
-        if (!files_mode()) return;
+        if (shadowState.mode !== 'files') return;
         const input = shadowEl('shadow_path_input');
         if (input && input.value.trim()) {
             shadowState.rel = input.value.trim();
@@ -1039,13 +1066,23 @@ document.addEventListener('DOMContentLoaded', () => {
         loadShadowFiles();
     };
     const shadowGoUp = () => {
-        if (!files_mode()) return;
+        if (shadowState.mode !== 'files') return;
         const parent = shadowState.rel.slice(0, -1).replace(/\\[^\\]*$/, '');
         shadowState.rel = parent || '\\';
         loadShadowFiles();
     };
 
-    shadowEl('shadow_browse_btn')?.addEventListener('click', () => shadowEnterBrowse());
+    shadowEl('shadow_storage')?.addEventListener('click', (event) => {
+        const btn = event.target.closest?.('button[data-act]');
+        if (!btn) return;
+        const row = btn.closest('.shadow-volume-row');
+        if (!row) return;
+        const drive = row.dataset.drive;
+        if (btn.dataset.act === 'browse') shadowEnterBrowse(drive);
+        else if (btn.dataset.act === 'delete') {
+            window.pywebview?.api.delete_shadow_snapshot(drive).then(() => loadShadowSnapshots());
+        }
+    });
     shadowEl('shadow_back_btn')?.addEventListener('click', () => loadShadowSnapshots());
     shadowEl('shadow_go_btn')?.addEventListener('click', shadowGoPath);
     shadowEl('shadow_up_btn')?.addEventListener('click', shadowGoUp);
@@ -1055,14 +1092,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!checked.length) return;
         Promise.all(checked.map(p => window.pywebview?.api.restore_shadow_file(shadowState.drive, p)))
             .then(() => loadShadowFiles())
-            .catch(() => {});
-    });
-    shadowEl('shadow_delete_btn')?.addEventListener('click', () => {
-        if (files_mode()) return;
-        const checked = getCheckedValues('#shadow_window');
-        if (!checked.length) return;
-        Promise.all(checked.map(v => window.pywebview?.api.delete_shadow_snapshot(v)))
-            .then(() => loadShadowSnapshots())
             .catch(() => {});
     });
 
