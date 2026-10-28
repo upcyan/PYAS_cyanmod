@@ -72,6 +72,22 @@ class AttributionLayerTests(unittest.TestCase):
         self.assertEqual(status["hits"]["driver"], 1)
         self.assertEqual(status["hits"]["miss"], 1)
 
+    def test_etw_layer_survives_alert_path_delay(self):
+        """溯源必须撑过「写入→防抖→扫描排队→弹窗等用户」的真实时延:
+        实测弹窗间隔约 90 秒,20 秒 TTL 让溯源形同虚设;容量同理,
+        繁忙机器 512 条数秒即被冲光。"""
+        from PYAS_Attribution import ETW_TTL_SECONDS, ETW_MAX_ENTRIES
+
+        self.assertGreaterEqual(ETW_TTL_SECONDS, 120.0, "TTL 必须覆盖告警处理链路")
+        self.assertGreaterEqual(ETW_MAX_ENTRIES, 4096, "容量必须抗高写入率机器")
+
+        layer = AttributionLayer()
+        layer.record_etw(r"C:\Temp\plugin.js", 321, "codex.exe")
+
+        hit = layer.lookup(r"C:\Temp\plugin.js")
+
+        self.assertIsNotNone(hit, "写入后立即查询(默认 now)必须命中")
+
 
 if __name__ == "__main__":
     unittest.main()

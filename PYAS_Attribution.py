@@ -26,13 +26,18 @@ import time
 from collections import OrderedDict
 from typing import Optional, Tuple
 
-# 缓存时长:事件发生后 20 秒内的扫描都能命中。
-# 目录监听有 0.35s 防抖,扫描本身可能再等 0.35s,5~10 秒足够;给 20 秒留余量。
+# 缓存时长:目录监听防抖 → 引擎排队扫描 → 拦截弹窗排队等用户处理,
+# 告警真正发起「谁写的」查询时距写入动辄一两分钟(实测弹窗间隔 ~90s)。
+# 20 秒的 TTL 在这条链路上必然过期,溯源因此形同虚设 —— 对齐关联表
+# 的 300 秒。
 DRIVER_TTL_SECONDS = 20.0
-ETW_TTL_SECONDS = 20.0
+ETW_TTL_SECONDS = 300.0
 
-# 上限:避免长时间运行后无限增长(每条只是一个路径字符串 + 小元组)
+# 上限:避免长时间运行后无限增长(每条只是一个路径字符串 + 小元组)。
+# ETW 层用大容量:繁忙机器(智能体工具链 30 秒 4 万+文件事件)下 512 条
+# LRU 数秒即被冲光,弹窗查询时条目已被逐出 —— 对齐关联表容量级。
 MAX_ENTRIES = 512
+ETW_MAX_ENTRIES = 16384
 
 
 class AttributionCache:
@@ -99,7 +104,7 @@ class AttributionLayer:
 
     def __init__(self) -> None:
         self.driver = AttributionCache(DRIVER_TTL_SECONDS)
-        self.etw = AttributionCache(ETW_TTL_SECONDS)
+        self.etw = AttributionCache(ETW_TTL_SECONDS, ETW_MAX_ENTRIES)
         self._stats = {"driver": 0, "etw": 0, "miss": 0}
         self._stats_lock = threading.Lock()
 
