@@ -2178,6 +2178,30 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     scheduleAiTokenRefresh();
     
+    // 提权说明弹窗:文案由后端按界面语言成形后注入,点击经桥回传
+    window.showElevationPrompt = (p) => {
+        if (!p || document.getElementById('elevation_modal')) return;
+        const wrap = document.createElement('div');
+        wrap.id = 'elevation_modal';
+        wrap.className = 'modal-overlay';
+        wrap.innerHTML = `<div class="modal-box elevation-box">`
+            + `<h2>${p.title || ''}</h2>`
+            + `<p class="elevation-body">${p.body || ''}</p>`
+            + `<label class="elevation-remember"><input type="checkbox" id="elevation_remember" ${p.checked ? 'checked' : ''}><span>${p.remember || ''}</span></label>`
+            + `<div class="elevation-actions">`
+            + `<button type="button" class="action-btn modern-btn" id="elevation_later">${p.cancel || ''}</button>`
+            + `<button type="button" class="action-btn modern-btn" id="elevation_continue">${p.ok || ''}</button>`
+            + `</div></div>`;
+        document.body.appendChild(wrap);
+        const respond = (ok) => {
+            const checked = wrap.querySelector('#elevation_remember')?.checked ?? true;
+            wrap.remove();
+            window.pywebview?.api.elevation_prompt_response(ok, checked);
+        };
+        wrap.querySelector('#elevation_continue').addEventListener('click', () => respond(true));
+        wrap.querySelector('#elevation_later').addEventListener('click', () => respond(false));
+    };
+
     document.querySelectorAll('#scan_mode_group [data-scan]').forEach((btn) => {
         btn.addEventListener('click', () => {
             if (!appState.scanning) triggerScan(btn.dataset.scan);

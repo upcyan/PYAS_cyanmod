@@ -2843,3 +2843,26 @@ body.resizing-active * {
     gap: var(--space-2);
     margin-top: var(--space-3);
 }
+
+/* 提权说明弹窗(主窗内模态,复用 .modal-overlay/.modal-box) */
+.elevation-box .elevation-body {
+    margin: 0;
+    line-height: 1.7;
+    color: var(--text-primary);
+    user-select: text;
+}
+
+.elevation-box .elevation-remember {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--text-secondary, var(--text-primary));
+    cursor: pointer;
+}
+
+.elevation-box .elevation-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+}

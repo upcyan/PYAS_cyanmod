@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.wintypes as wt
+import json
 import logging
 import os
 import shutil
@@ -1638,21 +1639,50 @@ class EtwMixin:
         return not (seen and auto)
 
     def _ask_elevation_prompt(self):
-        """原生说明弹窗(带「以后自动申请,不再显示」勾选,默认勾选)。
+        """主窗内说明弹窗(带「以后自动申请,不再显示」勾选,默认勾选)。
 
-        返回 (confirmed, checked);对话框自泵模态循环,独立线程调用安全。
+        返回 (confirmed, checked)。文案按界面语言在后端成形,经 ui_queue
+        注入前端渲染,用户点击经 elevation_prompt_response 桥回传;
+        UI 60 秒未就绪视为暂不(保持普通权限,下次启动再问)。
         """
-        from PYAS_WinAPI import task_dialog_confirm
+        ready = getattr(self, "ui_ready_event", None)
 
-        return task_dialog_confirm(
-            title="PYAS Security Cyanmod",
-            instruction=self._loc(ELEVATION_PROMPT_TEXTS["title"]),
-            content=self._loc(ELEVATION_PROMPT_TEXTS["body"]),
-            ok_text=self._loc(ELEVATION_PROMPT_TEXTS["ok"]),
-            cancel_text=self._loc(ELEVATION_PROMPT_TEXTS["cancel"]),
-            verify_text=self._loc(ELEVATION_PROMPT_TEXTS["remember"]),
-            verify_default=True,
+        if ready is None or not ready.wait(60.0):
+            return (False, True)
+
+        pending = {
+            "event": threading.Event(),
+            "confirmed": False,
+            "checked": True,
+        }
+        self._elevation_prompt_wait = pending
+
+        payload = json.dumps({
+            "title": self._loc(ELEVATION_PROMPT_TEXTS["title"]),
+            "body": self._loc(ELEVATION_PROMPT_TEXTS["body"]),
+            "ok": self._loc(ELEVATION_PROMPT_TEXTS["ok"]),
+            "cancel": self._loc(ELEVATION_PROMPT_TEXTS["cancel"]),
+            "remember": self._loc(ELEVATION_PROMPT_TEXTS["remember"]),
+            "checked": True,
+        }, ensure_ascii=False)
+        self.ui_queue.put(
+            "window.showElevationPrompt && window.showElevationPrompt(" + payload + ");"
         )
+
+        pending["event"].wait()
+        return (pending["confirmed"], pending["checked"])
+
+    def elevation_prompt_response(self, confirmed, checked):
+        """前端说明弹窗回传:confirmed=继续提权;checked=以后自动申请。"""
+        pending = getattr(self, "_elevation_prompt_wait", None)
+
+        if pending is None or pending["event"].is_set():
+            return True
+
+        pending["confirmed"] = bool(confirmed)
+        pending["checked"] = bool(checked)
+        pending["event"].set()
+        return True
 
     def _flag_user_shortcuts_elevated(self) -> None:
         script = os.path.join(getattr(self, "path_pyas", ""), "Menu", "mark_shortcut_admin.ps1")
