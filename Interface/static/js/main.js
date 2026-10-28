@@ -974,10 +974,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return parseFloat(m[1].replace(',', '.')) * (unit[m[2].toUpperCase()] || 1);
     };
     const shadowEl = (id) => document.getElementById(id);
+    // 容量数据缓存:返回卷列表时先渲染缓存再后台刷新,失败保留旧值 ——
+    // vssadmin 偶发失败不再把已用/上限闪成 "-"
+    const shadowStorageCache = { snaps: null, storage: null, stamp: 0 };
     const applyShadowMode = () => {
         const files = shadowState.mode === 'files';
         shadowEl('shadow_path_bar')?.classList.toggle('hidden', !files);
-        shadowEl('shadow_back_btn')?.classList.toggle('hidden', !files);
         shadowEl('shadow_files_footer')?.classList.toggle('hidden', !files);
         shadowEl('shadow_files_widget')?.classList.toggle('hidden', !files);
         shadowEl('shadow_storage')?.classList.toggle('hidden', files);
@@ -1020,10 +1022,26 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('') || `<div class="shadow-volume-empty">${getMsg('list_empty')}</div>`;
     };
     const loadShadowStorage = () => {
+        if (shadowStorageCache.snaps) {
+            renderShadowVolumes(shadowStorageCache.snaps, shadowStorageCache.storage);
+        }
+
         Promise.all([
             window.pywebview?.api.list_shadow_snapshots() || Promise.resolve([]),
             window.pywebview?.api.get_shadow_storage?.() || Promise.resolve([]),
-        ]).then(([snaps, storage]) => renderShadowVolumes(snaps, storage)).catch(() => {});
+        ]).then(([snaps, storage]) => {
+            const storageFresh = Array.isArray(storage) && storage.length > 0;
+
+            if (!storageFresh && shadowStorageCache.storage && shadowStorageCache.storage.length) {
+                // 本次 vssadmin 失败:沿用上次容量,只更新快照清单
+                renderShadowVolumes(snaps, shadowStorageCache.storage);
+            } else {
+                renderShadowVolumes(snaps, storage || []);
+            }
+
+            shadowStorageCache.snaps = snaps;
+            if (storageFresh) shadowStorageCache.storage = storage;
+        }).catch(() => {});
     };
     const loadShadowSnapshots = () => {
         shadowState.mode = 'snapshots';
@@ -1035,16 +1053,23 @@ document.addEventListener('DOMContentLoaded', () => {
         loadShadowStorage();
     };
     const loadShadowFiles = () => {
+        const box = shadowEl('shadow_files_widget');
+        if (!box) return;
         window.pywebview?.api.list_shadow_files(shadowState.drive, shadowState.rel).then(data => {
-            const rows = (data.entries || []).map(e => ({
-                id: shadowState.rel + e.name + (e.isDir ? '\\' : ''),
-                name: e.name + (e.isDir ? '\\' : ''),
-                sizeStr: e.isDir ? '-' : fmtShadowSize(e.size),
-                mtimeStr: fmtShadowTime(e.mtime),
-                relPath: shadowState.rel + e.name + (e.isDir ? '\\' : ''),
-                isDir: e.isDir,
-            }));
-            renderDataGrid('#shadow_window', rows, cols.shadowFiles, 'relPath', true);
+            const entries = (data.entries || []).slice()
+                .sort((a, b) => (b.isDir - a.isDir) || a.name.localeCompare(b.name));
+            box.innerHTML = entries.map(e => {
+                const relPath = shadowState.rel + e.name + (e.isDir ? '\\' : '');
+                const name = e.name + (e.isDir ? '\\' : '');
+                return `<div class="shadow-file-row${e.isDir ? ' is-dir' : ''}"${e.isDir ? ` data-path="${relPath}"` : ''}>`
+                    + (e.isDir
+                        ? `<svg class="shadow-file-chevron"><use href="#i-chevron-left"/></svg>`
+                        : `<input type="checkbox" value="${relPath}">`)
+                    + `<span class="shadow-file-name">${name}</span>`
+                    + `<span class="shadow-file-size">${e.isDir ? '' : fmtShadowSize(e.size)}</span>`
+                    + `<span class="shadow-file-mtime">${fmtShadowTime(e.mtime)}</span>`
+                    + `</div>`;
+            }).join('') || `<div class="shadow-volume-empty">${getMsg('list_empty')}</div>`;
             const input = shadowEl('shadow_path_input');
             if (input) input.value = shadowState.rel;
         }).catch(() => {});
@@ -1068,7 +1093,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const shadowGoUp = () => {
         if (shadowState.mode !== 'files') return;
         const parent = shadowState.rel.slice(0, -1).replace(/\\[^\\]*$/, '');
-        shadowState.rel = parent || '\\';
+
+        if (!parent) {
+            // 根目录再往上一级 = 回卷列表(上一级按钮不再无声失效)
+            loadShadowSnapshots();
+            return;
+        }
+
+        shadowState.rel = parent;
         loadShadowFiles();
     };
 
@@ -1083,12 +1115,23 @@ document.addEventListener('DOMContentLoaded', () => {
             window.pywebview?.api.delete_shadow_snapshot(drive).then(() => loadShadowSnapshots());
         }
     });
-    shadowEl('shadow_back_btn')?.addEventListener('click', () => loadShadowSnapshots());
     shadowEl('shadow_go_btn')?.addEventListener('click', shadowGoPath);
     shadowEl('shadow_up_btn')?.addEventListener('click', shadowGoUp);
-    shadowEl('shadow_up_dir_btn')?.addEventListener('click', shadowGoUp);
+
+    // 文件列表:点目录行进入;恢复只认勾选的文件
+    shadowEl('shadow_files_widget')?.addEventListener('click', (event) => {
+        if (event.target.closest?.('input[type="checkbox"]')) return;
+        const row = event.target.closest?.('.shadow-file-row.is-dir');
+
+        if (!row) return;
+
+        shadowState.rel = row.dataset.path || '\\';
+        loadShadowFiles();
+    });
     shadowEl('shadow_restore_btn')?.addEventListener('click', () => {
-        const checked = getCheckedValues('#shadow_window');
+        const checked = [...document.querySelectorAll('#shadow_files_widget input[type="checkbox"]:checked')]
+            .map(cb => cb.value);
+
         if (!checked.length) return;
         Promise.all(checked.map(p => window.pywebview?.api.restore_shadow_file(shadowState.drive, p)))
             .then(() => loadShadowFiles())

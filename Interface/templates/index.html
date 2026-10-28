@@ -915,8 +915,6 @@
                     <div class="sub-header-toolbar">
                         <button class="icon-btn" data-target="tool_window"><svg><use href="#i-chevron-left"/></svg></button>
                         <h2 data-i18n="shadow_records">卷影备份</h2>
-                        <div class="spacer"></div>
-                        <button class="action-btn modern-btn hidden" id="shadow_back_btn" data-i18n="shadow_act_back">返回快照列表</button>
                     </div>
 
                     <p class="shadow-hint" data-i18n="shadow_hint">卷影快照在檢測到批量改寫行為時自動建立,每個卷保留一份;儲存空間到達上限時,系統會自動刪除最舊的快照。</p>
@@ -929,11 +927,9 @@
                         <button class="action-btn modern-btn" id="shadow_go_btn" data-i18n="shadow_act_view">瀏覽</button>
                     </div>
 
-                    <div class="manage-widget flex-grow" id="shadow_files_widget"><ul class="manage-list"></ul></div>
+                    <div class="shadow-file-list flex-grow hidden" id="shadow_files_widget"></div>
 
                     <div class="shadow-footer-bar hidden" id="shadow_files_footer">
-                        <button class="action-btn modern-btn" id="shadow_up_dir_btn" data-i18n="shadow_act_up">上一級</button>
-                        <div class="spacer"></div>
                         <button class="action-btn modern-btn" id="shadow_restore_btn" data-i18n="shadow_act_restore">恢復勾選檔案</button>
                     </div>
                 </section>
