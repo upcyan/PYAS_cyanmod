@@ -70,7 +70,10 @@ class NtPathTests(unittest.TestCase):
 
 class BurstHeuristicTests(unittest.TestCase):
     def make(self, **kwargs):
-        defaults = dict(threshold=3, window_seconds=10.0, cooldown_seconds=60.0)
+        # pre_existing 默认关闭:本组测试滑窗/冷却/容量语义,pre-existing
+        # 单独在 PreExistingTests 里覆盖
+        defaults = dict(threshold=3, window_seconds=10.0, cooldown_seconds=60.0,
+                        pre_existing_seconds=0.0)
         defaults.update(kwargs)
         return etw.BurstHeuristic(**defaults)
 
@@ -151,6 +154,59 @@ class BurstHeuristicTests(unittest.TestCase):
         self.assertEqual(watcher.stats["delete"], 1)
 
 
+class PreExistingTests(unittest.TestCase):
+    """pre-existing 过滤:只有会话早期已存在的文档才计入突发。
+
+    实测根因:该参数曾只有声明没有实现,OneDriveSetup 解包资源、
+    Edge 落扩展图标这类全新文件风暴直接撞满阈值。
+    """
+
+    def make(self, **kwargs):
+        defaults = dict(threshold=3, window_seconds=10.0, cooldown_seconds=60.0,
+                        pre_existing_seconds=30.0)
+        defaults.update(kwargs)
+        return etw.BurstHeuristic(**defaults)
+
+    def test_fresh_files_never_count(self):
+        h = self.make()
+
+        for index in range(10):
+            self.assertIsNone(h.record(100, f"C:\\pkg\\res{index}.png", now=100.0 + index),
+                              "首次出现的文件不得计入突发")
+
+    def test_existing_file_counts_after_delay(self):
+        h = self.make()
+
+        # 首次出现只登记:不计数
+        self.assertIsNone(h.record(100, "C:\\u\\a.docx", now=1.0))
+        self.assertIsNone(h.record(100, "C:\\u\\b.docx", now=2.0))
+        self.assertIsNone(h.record(100, "C:\\u\\c.docx", now=3.0))
+
+        # 距首次出现 ≥30 秒的改写才计入突发
+        self.assertIsNone(h.record(100, "C:\\u\\a.docx", now=31.0))
+        self.assertIsNone(h.record(100, "C:\\u\\b.docx", now=32.0))
+        alert = h.record(100, "C:\\u\\c.docx", now=33.0)
+
+        self.assertIsNotNone(alert)
+        self.assertEqual(alert.count, 3)
+
+    def test_write_within_preexisting_window_delays_counting(self):
+        h = self.make()
+
+        # 20 秒首见(不计数);45 秒改写距首次仅 25s,仍不计
+        self.assertIsNone(h.record(100, "C:\\u\\a.docx", now=20.0))
+        self.assertIsNone(h.record(100, "C:\\u\\a.docx", now=45.0))
+
+        # 另两个文件先预热,55 秒后同一窗口内改写即计入
+        self.assertIsNone(h.record(100, "C:\\u\\b.docx", now=21.0))
+        self.assertIsNone(h.record(100, "C:\\u\\c.docx", now=22.0))
+        self.assertIsNone(h.record(100, "C:\\u\\a.docx", now=55.0))
+        self.assertIsNone(h.record(100, "C:\\u\\b.docx", now=56.0))
+        alert = h.record(100, "C:\\u\\c.docx", now=57.0)
+
+        self.assertIsNotNone(alert, "距首次出现 35 秒的改写应计入并触发")
+
+
 class PointerMapTests(unittest.TestCase):
     def test_set_get_roundtrip_and_ttl(self):
         m = etw.PointerMap(ttl_seconds=10.0, max_entries=4)
@@ -213,7 +269,8 @@ class RecycleBinExclusionTests(unittest.TestCase):
                 self._etw_suffixes = frozenset()
                 self._etw_pid_info = etw.PidInfoCache(None)
                 self._etw_heuristic = etw.BurstHeuristic(
-                    threshold=2, window_seconds=10.0, cooldown_seconds=60.0
+                    threshold=2, window_seconds=10.0, cooldown_seconds=60.0,
+                    pre_existing_seconds=0.0
                 )
                 self.reached = []
                 self.whitelisted = set()

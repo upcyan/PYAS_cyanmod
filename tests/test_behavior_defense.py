@@ -280,7 +280,8 @@ class RollbackHost(BehaviorMixin):
         self.pyas_config = {"behavior_defense_switch": True, "behavior_auto_rollback": True}
         self.path_config = tmp
         self._behavior_ledger = TouchedFilesLedger()
-        self._behavior_l2 = BurstHeuristic(threshold=2, window_seconds=10.0, cooldown_seconds=60.0)
+        self._behavior_l2 = BurstHeuristic(threshold=2, window_seconds=10.0, cooldown_seconds=60.0,
+                                           pre_existing_seconds=0.0)
         self._vss = None
         self._behavior_switch_value = True
         self._behavior_switch_stamp = float("inf")

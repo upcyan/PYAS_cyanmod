@@ -616,6 +616,7 @@ class BurstHeuristic:
             paths, last_alert = self._state.get(pid, (OrderedDict(), None))
 
             first = self._first_seen.get(path)
+
             if first is None:
                 self._first_seen[path] = stamp
                 self._first_seen.move_to_end(path)
@@ -623,6 +624,15 @@ class BurstHeuristic:
 
                 while len(self._first_seen) > 20000:
                     self._first_seen.popitem(last=False)
+
+            # 只统计「会话早期已存在」的文档:安装器解包资源、浏览器落
+            # 扩展图标这类新建文件风暴,首次出现就在本次写入时刻,不计入
+            # (此前该参数只有声明没有实现,OneDriveSetup/Edge 全新 PNG
+            # 直接撞满阈值)。勒索加密改的是既有文档,首次出现远早于爆发。
+            if stamp - first < self._pre_existing:
+                self._state[pid] = (paths, last_alert)
+                self._trim_locked()
+                return None
 
             paths[path] = stamp
             paths.move_to_end(path)
@@ -1911,16 +1921,22 @@ class EtwMixin:
 
     @staticmethod
     def _etw_burst_noise(path: str) -> bool:
-        """不参与勒索突发计数、但保留台账与溯源的路径:ProgramData。
+        """不参与勒索突发计数、但保留台账与溯源的路径。
 
-        它是全部安装软件共用的机器级数据目录,安全软件的诱饵文件(实测
-        腾讯 iOA 的 DecoyFiles 触发本产品勒索启发)、同步盘数据库、服务
-        配置都在此高频改写,按厂商逐个豁免是无底洞。用户文档不在
-        ProgramData:这里的爆发计数移除后,真实勒索仍由签名扫描与用户
-        目录的启发覆盖。
+        ProgramData 与 Program Files 是机器级程序/数据目录:安全软件诱饵
+        (实测腾讯 iOA 的 DecoyFiles 触发本产品勒索启发)、安装器解包资源
+        (实测 OneDriveSetup)、服务配置都在此高频改写,按厂商逐个豁免是
+        无底洞。AppData 是应用数据目录:浏览器落扩展图标(实测 Edge)、
+        应用缓存同理。用户文档不在这三处:这里的爆发计数移除后,真实勒索
+        仍由签名扫描与用户目录的启发覆盖。
         """
+        path_lower = path.lower()
         programdata = os.environ.get("ALLUSERSPROFILE", "C:\\ProgramData")
-        return path.lower().startswith(os.path.join(programdata, "").lower())
+        markers = (os.path.join(programdata, ""),
+                   os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), ""),
+                   os.path.join(os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"), ""),
+                   "\\appdata\\")
+        return any(path_lower.startswith(m.lower()) or m in path_lower for m in markers)
 
     def _etw_burst_alert(self, burst: BurstAlert) -> None:
         name, _ = self._etw_pid_info.get(burst.pid)
