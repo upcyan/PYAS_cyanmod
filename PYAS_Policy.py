@@ -14,7 +14,8 @@ import time
 USER_KEYS = frozenset({'language', 'theme', 'first_launch', 'driver_alert_exempt',
     'driver_home_hidden',
     'notify_channel', 'dnd_switch', 'ai_token_usage', 'ai_rule_drafts', 'ai_guide_seen',
-    'quarantine'})
+    'quarantine',
+    'elevation_prompt_seen', 'elevation_prompt_auto'})
 BOOL_KEYS = frozenset({'process_switch', 'suspend_switch', 'load_switch', 'document_switch',
     'system_switch', 'driver_switch', 'network_switch', 'extension_switch', 'sensitive_switch',
     'cloud_switch', 'suffix_switch', 'autostart_switch', 'context_switch', 'interactive_switch',

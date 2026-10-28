@@ -202,8 +202,12 @@ class RuntimeMixin:
             "behavior_defense_switch": True,
             "behavior_auto_rollback": False,
             # 特权运行:开启时启动核对发现需提权防护未运行,自动恢复(一次
-            # UAC)+提权重启,不再弹询问窗;关闭则保持纠正且不打扰
+            # UAC)+提权重启;关闭则保持纠正且不打扰
             "elevated_run_switch": True,
+            # 提权说明弹窗:提权前先说明,确认时默认勾选「以后自动申请」;
+            # seen 记录是否确认过,auto=不再显示说明
+            "elevation_prompt_seen": False,
+            "elevation_prompt_auto": True,
             "network_switch": False,
             "extension_switch": False,
             "sensitive_switch": False,

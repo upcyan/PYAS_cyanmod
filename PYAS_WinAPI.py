@@ -656,3 +656,136 @@ def iter_file_notifications(buffer, size):
             break
 
         offset += next_offset
+
+
+# ---------------------------------------------------------------------------
+# TaskDialog(带勾选框的原生确认框;普通 MessageBox 无勾选能力)
+# ---------------------------------------------------------------------------
+
+
+class TASKDIALOG_BUTTON(ctypes.Structure):
+    _fields_ = [
+        ("nButtonID", ctypes.c_int),
+        ("pszButtonText", ctypes.c_wchar_p),
+    ]
+
+
+class TASKDIALOGCONFIG(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", ctypes.wintypes.UINT),
+        ("hwndParent", ctypes.wintypes.HWND),
+        ("hwndInstance", ctypes.wintypes.HWND),
+        ("dwFlags", ctypes.wintypes.DWORD),
+        ("dwCommonButtons", ctypes.wintypes.DWORD),
+        ("pszWindowTitle", ctypes.c_wchar_p),
+        ("pszMainIcon", ctypes.c_void_p),
+        ("pszMainInstruction", ctypes.c_wchar_p),
+        ("pszContent", ctypes.c_wchar_p),
+        ("cButtons", ctypes.wintypes.UINT),
+        ("pButtons", ctypes.POINTER(TASKDIALOG_BUTTON)),
+        ("nDefaultButton", ctypes.c_int),
+        ("cRadioButtons", ctypes.wintypes.UINT),
+        ("pRadioButtons", ctypes.POINTER(TASKDIALOG_BUTTON)),
+        ("nDefaultRadioButton", ctypes.c_int),
+        ("pszVerificationText", ctypes.c_wchar_p),
+        ("hFooterIcon", ctypes.c_void_p),
+        ("pszFooter", ctypes.c_wchar_p),
+        ("pfCallback", ctypes.c_void_p),
+        ("cxWidth", ctypes.c_int),
+        ("pszExpandedInformation", ctypes.c_wchar_p),
+        ("pszExpandedControlText", ctypes.c_wchar_p),
+        ("pszCollapsedControlText", ctypes.c_wchar_p),
+    ]
+
+
+_TDF_ALLOW_DIALOG_CANCELLATION = 0x0008
+_TDF_VERIFICATION_FLAG_CHECKBOX = 0x0100
+_TDN_CREATED = 0
+_TDM_CLICK_VERIFICATION = 0x400 + 150  # WM_USER + 150
+_TD_WARNING_ICON = 0xFFFFFFFFFFFFFFFF  # MAKEINTRESOURCEW(-1)
+
+# HRESULT CALLBACK TaskDialogCallback(HWND, UINT, WPARAM, LPARAM, LONG_PTR)
+_CALLBACK_TYPE = ctypes.WINFUNCTYPE(
+    ctypes.HRESULT, ctypes.wintypes.HWND, ctypes.wintypes.UINT,
+    ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM, ctypes.c_longlong,
+)
+
+
+def task_dialog_confirm(title, instruction, content, ok_text, cancel_text,
+                        verify_text=None, verify_default=False):
+    """原生任务对话框;返回 (confirmed, checked)。
+
+    comctl32 6.x 的 TaskDialogIndirect:支持勾选框,观感与系统对话框一致。
+    老系统缺少导出时回退 MessageBoxW(勾选不可用,按 default 返回)。
+    阻塞调用,须在后台线程发起 —— 对话框自泵模态循环。
+    """
+    import threading as _threading
+
+    result = {"event": _threading.Event(), "confirmed": False, "checked": verify_default}
+    callback_ref = None
+
+    if verify_text and verify_default:
+        # SDK 没有勾选框「默认勾上」的 flag:TDN_CREATED 时模拟一次点击
+        def _on_created(hwnd, msg, wparam, lparam, ref):
+            if msg == _TDN_CREATED:
+                ctypes.windll.user32.SendMessageW(hwnd, _TDM_CLICK_VERIFICATION, 1, 0)
+            return 0
+
+        callback_ref = _CALLBACK_TYPE(_on_created)
+
+    def _run():
+        try:
+            comctl = ctypes.windll.comctl32
+            proc = getattr(comctl, "TaskDialogIndirect", None)
+
+            if proc is None:
+                # 老系统:无勾选能力,确认即按 default 记忆
+                buttons = 0x00000001 | 0x00000040  # MB_OKCANCEL | MB_ICONWARNING
+                confirmed = ctypes.windll.user32.MessageBoxW(
+                    0, content or instruction, title, buttons | 0x00010000
+                ) == 1
+                result.update(confirmed=confirmed, checked=verify_default)
+                result["event"].set()
+                return
+
+            proc.argtypes = [
+                ctypes.POINTER(TASKDIALOGCONFIG),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.wintypes.BOOL),
+            ]
+            proc.restype = ctypes.HRESULT
+
+            buttons = (TASKDIALOG_BUTTON * 2)(
+                TASKDIALOG_BUTTON(1, ok_text),
+                TASKDIALOG_BUTTON(2, cancel_text),
+            )
+            config = TASKDIALOGCONFIG()
+            config.cbSize = ctypes.sizeof(TASKDIALOGCONFIG)
+            config.dwFlags = _TDF_ALLOW_DIALOG_CANCELLATION | (
+                _TDF_VERIFICATION_FLAG_CHECKBOX if verify_text else 0
+            )
+            config.pszWindowTitle = title
+            config.pszMainIcon = _TD_WARNING_ICON
+            config.pszMainInstruction = instruction
+            config.pszContent = content
+            config.cButtons = 2
+            config.pButtons = buttons
+            config.nDefaultButton = 1
+            config.pszVerificationText = verify_text or None
+            config.pfCallback = ctypes.cast(callback_ref, ctypes.c_void_p) if callback_ref else None
+
+            pressed = ctypes.c_int(0)
+            checked = ctypes.wintypes.BOOL(0)
+            hr = proc(ctypes.byref(config), ctypes.byref(pressed), None, ctypes.byref(checked))
+
+            if hr == 0:  # S_OK
+                result.update(confirmed=pressed.value == 1, checked=bool(checked.value))
+        except Exception:
+            log_exception("WinAPI.task_dialog_confirm")
+        finally:
+            result["event"].set()
+
+    _threading.Thread(target=_run, name="PYAS.TaskDialog", daemon=True).start()
+    result["event"].wait()
+    return result["confirmed"], result["checked"]

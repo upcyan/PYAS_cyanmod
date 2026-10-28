@@ -1438,6 +1438,89 @@ ETW_LOG_TEXTS = {
         "russian_switch": "Настройки сохранены. PYAS перезапускается с правами администратора; новые переключатели вступят в силу, окно появится автоматически.",
         "slovenian_switch": "Nastavitve so shranjene. PYAS se znova zagne s skrbniškimi pravicami; nova stikala takoj veljajo in se okno samodejno znova prikaže.",
     },
+    "elevation_prompt_declined": {
+        "traditional_switch": "用戶未確認提權說明,本次保持普通權限運行",
+        "simplified_switch": "用户未确认提权说明,本次保持普通权限运行",
+        "english_switch": "Elevation notice not confirmed; continuing without administrator rights this session",
+        "japanese_switch": "昇格の確認がされなかったため、今セッションは通常権限のまま動作します",
+        "korean_switch": "승격 안내가 확인되지 않아 이번 세션은 일반 권한으로 유지됩니다",
+        "french_switch": "Avis d'élévation non confirmé ; exécution sans droits administrateur pour cette session",
+        "spanish_switch": "Aviso de elevación no confirmado; continúa sin derechos de administrador en esta sesión",
+        "hindi_switch": "एलिवेशन सूचना की पुष्टि नहीं हुई; यह सत्र बिना व्यवस्थापक अधिकार के जारी रहेगा",
+        "arabic_switch": "لم يتم تأكيد إشعار رفع الصلاحيات؛ سيستمر التشغيل بدون صلاحيات المسؤول في هذه الجلسة",
+        "russian_switch": "Уведомление о повышении прав не подтверждено; сеанс продолжается без прав администратора",
+        "slovenian_switch": "Obvestilo o povišanju pravic ni potrjeno; ta seja se nadaljuje brez skrbniških pravic",
+    },
+}
+
+
+# 提权说明弹窗(原生 TaskDialog)文案;键:title/body/ok/cancel/remember
+ELEVATION_PROMPT_TEXTS = {
+    "title": {
+        "traditional_switch": "以管理員身份運行",
+        "simplified_switch": "以管理员身份运行",
+        "english_switch": "Run as administrator",
+        "japanese_switch": "管理者として実行",
+        "korean_switch": "관리자 권한으로 실행",
+        "french_switch": "Exécuter en tant qu'administrateur",
+        "spanish_switch": "Ejecutar como administrador",
+        "hindi_switch": "व्यवस्थापक के रूप में चलाएँ",
+        "arabic_switch": "التشغيل كمسؤول",
+        "russian_switch": "Запуск от имени администратора",
+        "slovenian_switch": "Zaženi kot skrbnik",
+    },
+    "body": {
+        "traditional_switch": "PYAS 需要以管理員身份運行,才能啟用進程溯源、行為防護等完整防護。點擊「繼續」後,系統將彈出授權確認(UAC),PYAS 會自動重啟並完成恢復。",
+        "simplified_switch": "PYAS 需要以管理员身份运行,才能启用进程溯源、行为防护等完整防护。点击「继续」后,系统将弹出授权确认(UAC),PYAS 会自动重启并完成恢复。",
+        "english_switch": "PYAS needs administrator rights to enable full protection features such as process attribution and behavior defense. After you click Continue, Windows will show the UAC confirmation and PYAS will restart automatically to finish.",
+        "japanese_switch": "PYAS は完全な保護機能(プロセス追跡、振る舞い防御など)に管理者権限が必要です。「続行」をクリックすると UAC の確認が表示され、PYAS は自動的に再起動して完了します。",
+        "korean_switch": "PYAS는 프로세스 추적, 행위 방어 등 전체 보호 기능을 위해 관리자 권한이 필요합니다. 계속을 누르면 UAC 확인이 표시되고 PYAS가 자동으로 다시 시작하여 완료합니다.",
+        "french_switch": "PYAS a besoin des droits administrateur pour activer la protection complète (attribution des processus, défense comportementale). Après « Continuer », Windows affichera la confirmation UAC et PYAS redémarrera automatiquement.",
+        "spanish_switch": "PYAS necesita derechos de administrador para activar la protección completa (atribución de procesos, defensa conductual). Tras «Continuar», Windows mostrará la confirmación UAC y PYAS se reiniciará automáticamente.",
+        "hindi_switch": "प्रोसेस एट्रिब्यूशन और व्यवहार रक्षा जैसी पूर्ण सुरक्षा के लिए PYAS को व्यवस्थापक अधिकार चाहिए। «जारी रखें» के बाद Windows UAC पुष्टि दिखाएगा और PYAS स्वतः पुनरारंभ होकर पूरा करेगा।",
+        "arabic_switch": "يحتاج PYAS إلى صلاحيات المسؤول لتمكين الحماية الكاملة (إسناد العمليات، الدفاع السلوكي). بعد «متابعة»، سيعرض Windows تأكيد UAC ويعاد تشغيل PYAS تلقائيًا.",
+        "russian_switch": "PYAS требуются права администратора для полной защиты (атрибуция процессов, поведенческая защита). После «Продолжить» Windows покажет подтверждение UAC, и PYAS автоматически перезапустится.",
+        "slovenian_switch": "PYAS potrebuje skrbniške pravice za popolno zaščito (sledenje procesom, vedenjska obramba). Po »Nadaljuj« bo Windows pokazal potrditev UAC in PYAS se bo samodejno znova zagnal.",
+    },
+    "ok": {
+        "traditional_switch": "繼續",
+        "simplified_switch": "继续",
+        "english_switch": "Continue",
+        "japanese_switch": "続行",
+        "korean_switch": "계속",
+        "french_switch": "Continuer",
+        "spanish_switch": "Continuar",
+        "hindi_switch": "जारी रखें",
+        "arabic_switch": "متابعة",
+        "russian_switch": "Продолжить",
+        "slovenian_switch": "Nadaljuj",
+    },
+    "cancel": {
+        "traditional_switch": "暫不",
+        "simplified_switch": "暂不",
+        "english_switch": "Not now",
+        "japanese_switch": "後で",
+        "korean_switch": "나중에",
+        "french_switch": "Plus tard",
+        "spanish_switch": "Ahora no",
+        "hindi_switch": "अभी नहीं",
+        "arabic_switch": "ليس الآن",
+        "russian_switch": "Не сейчас",
+        "slovenian_switch": "Ne zdaj",
+    },
+    "remember": {
+        "traditional_switch": "以後自動申請授權,不再顯示此說明",
+        "simplified_switch": "以后自动申请授权,不再显示此说明",
+        "english_switch": "Request authorization automatically next time; do not show this again",
+        "japanese_switch": "次回から自動的に承認を要求し、この説明を表示しない",
+        "korean_switch": "다음부터 자동으로 권한을 요청하고 이 안내를 표시하지 않음",
+        "french_switch": "Demander l'autorisation automatiquement la prochaine fois ; ne plus afficher",
+        "spanish_switch": "Solicitar autorización automáticamente la próxima vez; no mostrar de nuevo",
+        "hindi_switch": "अगली बार स्वतः अनुमति मांगें; यह सूचना फिर न दिखाएँ",
+        "arabic_switch": "طلب التفويض تلقائيًا في المرة القادمة؛ عدم إظهار هذا مرة أخرى",
+        "russian_switch": "В следующий раз запрашивать разрешение автоматически; больше не показывать",
+        "slovenian_switch": "Naslednjič samodejno zahtevaj dovoljenje; tega ne prikaži več",
+    },
 }
 
 
@@ -1522,9 +1605,54 @@ class EtwMixin:
             self.start_daemon_thread(lambda: self._auto_restore_for_privilege_run(corrections))
 
     def _auto_restore_for_privilege_run(self, keys: list[str]) -> None:
+        # 首次或用户要求每次询问时,先弹说明弹窗(带「不再显示」勾选),
+        # 确认后才发起提权 —— UAC 不再无说明地直接弹出
+        if self._should_prompt_elevation():
+            confirmed, remember = self._ask_elevation_prompt()
+
+            if not confirmed:
+                # 本次跳过:恢复流程不发起,下次启动再按同一规则判断
+                self.write_log(
+                    "INFO",
+                    "ETW Attribution",
+                    detail=self._loc(ETW_LOG_TEXTS["elevation_prompt_declined"]),
+                )
+                return
+
+            with self.lock_config:
+                self.pyas_config["elevation_prompt_seen"] = True
+                self.pyas_config["elevation_prompt_auto"] = bool(remember)
+
+            self.save_config()
+
         self.restore_switches(keys)
         # 提权实例已就位:顺手把快捷方式打上提权标记,日常双击不再退回普通权限
         self._flag_user_shortcuts_elevated()
+
+    def _should_prompt_elevation(self) -> bool:
+        """未确认过说明,或用户明确要求每次询问 → 先说明再提权。"""
+        with self.lock_config:
+            seen = bool(self.pyas_config.get("elevation_prompt_seen", False))
+            auto = bool(self.pyas_config.get("elevation_prompt_auto", True))
+
+        return not (seen and auto)
+
+    def _ask_elevation_prompt(self):
+        """原生说明弹窗(带「以后自动申请,不再显示」勾选,默认勾选)。
+
+        返回 (confirmed, checked);对话框自泵模态循环,独立线程调用安全。
+        """
+        from PYAS_WinAPI import task_dialog_confirm
+
+        return task_dialog_confirm(
+            title="PYAS Security Cyanmod",
+            instruction=self._loc(ELEVATION_PROMPT_TEXTS["title"]),
+            content=self._loc(ELEVATION_PROMPT_TEXTS["body"]),
+            ok_text=self._loc(ELEVATION_PROMPT_TEXTS["ok"]),
+            cancel_text=self._loc(ELEVATION_PROMPT_TEXTS["cancel"]),
+            verify_text=self._loc(ELEVATION_PROMPT_TEXTS["remember"]),
+            verify_default=True,
+        )
 
     def _flag_user_shortcuts_elevated(self) -> None:
         script = os.path.join(getattr(self, "path_pyas", ""), "Menu", "mark_shortcut_admin.ps1")
