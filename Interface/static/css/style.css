@@ -2914,3 +2914,11 @@ body.resizing-active * {
     color: var(--text-secondary, inherit);
     white-space: nowrap;
 }
+
+.shadow-storage-error {
+    padding: var(--space-2) var(--space-4);
+    border: 1px solid var(--color-danger, var(--border-color));
+    border-radius: var(--radius-control);
+    color: var(--color-danger-strong, var(--text-primary));
+    font-size: var(--text-sm);
+}

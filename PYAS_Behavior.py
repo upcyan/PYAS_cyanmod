@@ -311,7 +311,7 @@ def list_shadow_devices() -> dict[str, str]:
     return parse_vssadmin_shadows(completed.stdout or "")
 
 
-_STORAGE_PAIR_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(%|[KMGTP]?B)\b", re.IGNORECASE)
+_STORAGE_PAIR_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(%|[KMGTP]?B)(?![\w.])", re.IGNORECASE)
 _STORAGE_DRIVE_RE = re.compile(r"\(([A-Za-z]:)\)")
 
 
@@ -343,7 +343,7 @@ def parse_vssadmin_shadowstorage(text: str) -> list[dict]:
             if len(lines) > 2 and lines[2]:
                 # 上限行含百分比与字节两对;百分比在前,字节在后
                 pairs = lines[2]
-                percent = next((pair_text(p) for p in pairs if p[1] == "%"), None)
+                percent = next((p[0] + p[1] for p in pairs if p[1] == "%"), None)
                 size = next((pair_text(p) for p in pairs if p[1] != "%"), None)
                 row["max"] = size or percent or "-"
                 if size and percent:
@@ -371,17 +371,41 @@ def parse_vssadmin_shadowstorage(text: str) -> list[dict]:
     return rows
 
 
-def list_shadow_storage() -> list[dict]:
-    """各卷卷影存储占用(vssadmin,需管理员;失败返回空)。"""
-    completed = subprocess.run(
-        ["vssadmin", "list", "shadowstorage"],
-        capture_output=True,
-        timeout=90,
-        text=True,
-        errors="replace",
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
-    return parse_vssadmin_shadowstorage(completed.stdout or "")
+def list_shadow_storage():
+    """各卷卷影存储占用(vssadmin,需管理员)。
+
+    返回 (rows, error):error 为 None=成功 / "elevated_required"=当前进程
+    非管理员(vssadmin 全部子命令都需要管理员,直接判定,不白跑子进程)/
+    "query_failed"=vssadmin 异常退出(带退出码与 stderr 摘要进日志,失败
+    必须可见 —— 此前静默吞成空列表,前端只见一排「-」,无从排查)。
+    """
+    from PYAS_ETW import is_elevated
+
+    if not is_elevated():
+        return ([], "elevated_required")
+
+    try:
+        completed = subprocess.run(
+            ["vssadmin", "list", "shadowstorage"],
+            capture_output=True,
+            timeout=90,
+            text=True,
+            errors="replace",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except Exception:
+        logger.warning("shadow storage query crashed", exc_info=True)
+        return ([], "query_failed")
+
+    if completed.returncode != 0:
+        logger.warning(
+            "shadow storage query failed: exit=%s stderr=%s",
+            completed.returncode,
+            (completed.stderr or "")[-200:].strip(),
+        )
+        return ([], "query_failed")
+
+    return (parse_vssadmin_shadowstorage(completed.stdout or ""), None)
 
 
 def _read_result_file(result_file: str):

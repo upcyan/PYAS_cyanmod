@@ -12,6 +12,7 @@ from PYAS_ETW import BurstHeuristic
 from PYAS_Behavior import (
     ACTION_ROLLBACK, ROLLBACK_STAGING_DIRNAME, BehaviorMixin,
     TouchedFilesLedger, VssSnapshotManager, parse_vssadmin_shadows,
+    parse_vssadmin_shadowstorage,
 )
 
 SNAP_DEVICE = "\\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy9"
@@ -173,6 +174,48 @@ class SnapshotManagerTests(unittest.TestCase):
             VssSnapshotManager.snapshot_path(SNAP_DEVICE, "C:\\a.doc"),
             SNAP_DEVICE + "\\a.doc",
         )
+
+    def test_parse_vssadmin_shadowstorage_bilingual_and_unbounded(self):
+        """存储占用解析:块内每卷出现两次盘符行(包含卷+存储卷)不得截断
+        计数;无限制上限(无数值)回退 '-'。"""
+        zh = (
+            "vssadmin 1.1 - 卷影复制服务管理命令行工具\n"
+            "(C) 版权所有 2001-2013 Microsoft Corp.\n"
+            "\n"
+            "卷影复制存储关联\n"
+            "    包含卷影复制的卷: (C:)\\\\?\\Volume{11111111-2222-3333-4444-555555555555}\\\n"
+            "        卷影复制存储卷: (C:)\\\\?\\Volume{11111111-2222-3333-4444-555555555555}\\\n"
+            "        已使用的卷影复制存储空间: 20.4 GB (219,344,382,976 字节)\n"
+            "        已分配的卷影复制存储空间: 339 MB (355,590,144 字节)\n"
+            "        最大的卷影复制存储空间: 93.9 GB (10%)\n"
+            "    包含卷影复制的卷: (D:)\\\\?\\Volume{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}\\\n"
+            "        卷影复制存储卷: (D:)\\\\?\\Volume{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}\\\n"
+            "        已使用的卷影复制存储空间: 1.5 GB\n"
+            "        已分配的卷影复制存储空间: 2.0 GB\n"
+            "        最大的卷影复制存储空间: 无限制\n"
+        )
+        rows = parse_vssadmin_shadowstorage(zh)
+        self.assertEqual(len(rows), 2, "每卷两行盘符不得拆成两块")
+        self.assertEqual(rows[0]["drive"], "C:")
+        self.assertEqual(rows[0]["used"], "20.4 GB")
+        self.assertEqual(rows[0]["allocated"], "339 MB")
+        self.assertEqual(rows[0]["max"], "93.9 GB (10%)")
+        self.assertEqual(rows[1]["drive"], "D:")
+        self.assertEqual(rows[1]["used"], "1.5 GB")
+        self.assertEqual(rows[1]["max"], "-", "无限制(无数值)应回退 '-'")
+
+        en = (
+            "Shadow Copy Storage association\n"
+            "   For volume: (C:)\\\\?\\Volume{...}\\\n"
+            "   Shadow Copy Storage volume: (C:)\\\\?\\Volume{...}\\\n"
+            "   Used Shadow Copy Storage space: 5.1 GB (2%)\n"
+            "   Allocated Shadow Copy Storage space: 5.4 GB\n"
+            "   Maximum Shadow Copy Storage space: 264 GB (10%)\n"
+        )
+        rows_en = parse_vssadmin_shadowstorage(en)
+        self.assertEqual(rows_en, [{
+            "drive": "C:", "used": "5.1 GB", "allocated": "5.4 GB", "max": "264 GB (10%)",
+        }])
 
     def test_unresolved_device_records_id_for_later_cleanup(self):
         """创建成功但设备名解析失败:ID 必须落盘 —— 否则快照成了

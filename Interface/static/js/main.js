@@ -974,9 +974,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return parseFloat(m[1].replace(',', '.')) * (unit[m[2].toUpperCase()] || 1);
     };
     const shadowEl = (id) => document.getElementById(id);
-    // 容量数据缓存:返回卷列表时先渲染缓存再后台刷新,失败保留旧值 ——
-    // vssadmin 偶发失败不再把已用/上限闪成 "-"
-    const shadowStorageCache = { snaps: null, storage: null, stamp: 0 };
     const applyShadowMode = () => {
         const files = shadowState.mode === 'files';
         shadowEl('shadow_path_bar')?.classList.toggle('hidden', !files);
@@ -985,7 +982,7 @@ document.addEventListener('DOMContentLoaded', () => {
         shadowEl('shadow_storage')?.classList.toggle('hidden', files);
         shadowEl('shadow_hint')?.classList.toggle('hidden', files);
     };
-    const renderShadowVolumes = (snaps, storage) => {
+    const renderShadowVolumes = (snaps, storage, storageError) => {
         const box = shadowEl('shadow_storage');
         if (!box) return;
         const byDrive = {};
@@ -994,8 +991,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const key = String(r.drive).toUpperCase();
             byDrive[key] = { ...(byDrive[key] || {}), used: r.used, max: r.max };
         });
+        const capacityUnavailable = storageError === 'elevated_required' || storageError === 'query_failed';
         const drives = Object.keys(byDrive).sort();
-        box.innerHTML = drives.map((drive) => {
+        box.innerHTML = (capacityUnavailable
+            ? `<div class="shadow-storage-error">${getMsg(storageError === 'elevated_required' ? 'shadow_need_admin' : 'shadow_query_failed')}</div>`
+            : '')
+            + drives.map((drive) => {
             const info = byDrive[drive] || {};
             const used = info.used || '-';
             const max = info.max || '-';
@@ -1009,7 +1010,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 + `<div class="shadow-volume-head">`
                 + `<span class="shadow-storage-drive">${drive}</span>`
                 + (created ? `<span class="shadow-volume-created" title="${getMsg('col_created')}">${created}</span>` : '')
-                + `<span class="shadow-volume-size">${getMsg('shadow_used')} ${used} / ${getMsg('shadow_limit')} ${max}</span>`
+                + (capacityUnavailable ? '' : `<span class="shadow-volume-size">${getMsg('shadow_used')} ${used} / ${getMsg('shadow_limit')} ${max}</span>`)
                 + `<span class="spacer"></span>`
                 + `<button type="button" class="action-btn modern-btn" data-act="browse" data-i18n="shadow_act_open">${getMsg('shadow_act_open')}</button>`
                 + `<button type="button" class="action-btn modern-btn danger-btn" data-act="delete" data-i18n="shadow_act_delete">${getMsg('shadow_act_delete')}</button>`
@@ -1022,25 +1023,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('') || `<div class="shadow-volume-empty">${getMsg('list_empty')}</div>`;
     };
     const loadShadowStorage = () => {
-        if (shadowStorageCache.snaps) {
-            renderShadowVolumes(shadowStorageCache.snaps, shadowStorageCache.storage);
-        }
-
         Promise.all([
             window.pywebview?.api.list_shadow_snapshots() || Promise.resolve([]),
-            window.pywebview?.api.get_shadow_storage?.() || Promise.resolve([]),
-        ]).then(([snaps, storage]) => {
-            const storageFresh = Array.isArray(storage) && storage.length > 0;
-
-            if (!storageFresh && shadowStorageCache.storage && shadowStorageCache.storage.length) {
-                // 本次 vssadmin 失败:沿用上次容量,只更新快照清单
-                renderShadowVolumes(snaps, shadowStorageCache.storage);
-            } else {
-                renderShadowVolumes(snaps, storage || []);
-            }
-
-            shadowStorageCache.snaps = snaps;
-            if (storageFresh) shadowStorageCache.storage = storage;
+            window.pywebview?.api.get_shadow_storage?.() || Promise.resolve({ rows: [], error: null }),
+        ]).then(([snaps, storageResult]) => {
+            renderShadowVolumes(snaps, storageResult?.rows || [], storageResult?.error || null);
         }).catch(() => {});
     };
     const loadShadowSnapshots = () => {

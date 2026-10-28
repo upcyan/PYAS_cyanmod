@@ -1747,15 +1747,18 @@ class EtwMixin:
                          "createdStr": created_str or "-"})
         return rows
 
-    def get_shadow_storage(self) -> list:
-        """卷影存储占用数据源:每卷已使用/已分配/上限(vssadmin,非提权返回空)。"""
+    def get_shadow_storage(self) -> dict:
+        """卷影存储占用数据源:{rows, error}。error 可见地告诉前端为什么
+        拿不到容量(非提权/查询失败),而不是伪装成「没有数据」。"""
         from PYAS_Behavior import list_shadow_storage
 
         try:
-            return list_shadow_storage()
+            rows, error = list_shadow_storage()
         except Exception:
             logger.debug("shadow storage query failed", exc_info=True)
-            return []
+            return {"rows": [], "error": "query_failed"}
+
+        return {"rows": rows, "error": error}
 
     @staticmethod
     def _shadow_rel_norm(rel: str) -> str:
