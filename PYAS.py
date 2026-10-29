@@ -618,6 +618,10 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
             if hwnd:
                 self.user32.SetForegroundWindow(hwnd)
 
+            # 恢复时 WebView 会把焦点落在 tab 序首个可聚焦元素上(关于
+            # 按钮),留一圈聚焦框;主动摘掉
+            self.evaluate_js_safe("document.activeElement&&document.activeElement.blur();")
+
     def set_window(self, window):
         self._window = window
 

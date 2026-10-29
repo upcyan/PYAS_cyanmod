@@ -2922,3 +2922,8 @@ body.resizing-active * {
     color: var(--color-danger-strong, var(--text-primary));
     font-size: var(--text-sm);
 }
+
+.shadow-path-bar .shadow-search-box {
+    flex: 0 1 200px;
+    min-width: 120px;
+}

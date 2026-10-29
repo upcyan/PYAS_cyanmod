@@ -208,6 +208,8 @@ class RuntimeMixin:
             # seen 记录是否确认过,auto=不再显示说明
             "elevation_prompt_seen": False,
             "elevation_prompt_auto": True,
+            # 卷影快照每卷保留的历史份数
+            "behavior_snapshot_history": 3,
             "network_switch": False,
             "extension_switch": False,
             "sensitive_switch": False,

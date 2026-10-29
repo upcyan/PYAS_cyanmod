@@ -24,7 +24,7 @@ BOOL_KEYS = frozenset({'process_switch', 'suspend_switch', 'load_switch', 'docum
     'behavior_auto_rollback', 'elevated_run_switch'})
 STRING_KEYS = frozenset({'api_host', 'api_key', 'ai_provider_mode', 'ai_base_url',
     'ai_api_key', 'ai_api_key_enc', 'ai_model'})
-NUMBER_KEYS = frozenset({'size', 'interactive_timeout', 'ai_auto_execute_timeout', 'ai_delay_seconds'})
+NUMBER_KEYS = frozenset({'size', 'interactive_timeout', 'ai_auto_execute_timeout', 'ai_delay_seconds', 'behavior_snapshot_history'})
 LIST_KEYS = frozenset({'suffix', 'custom_rule', 'white_list', 'block_list', 'suppress_rules', 'alert_allow_rules'})
 POLICY_KEYS = BOOL_KEYS | STRING_KEYS | NUMBER_KEYS | LIST_KEYS
 MAX_BYTES = 2 * 1024 * 1024

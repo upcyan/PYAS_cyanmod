@@ -1006,10 +1006,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? Math.min(100, (usedB / maxB) * 100) : null;
             const created = info.createdStr && info.createdStr !== '-' ? info.createdStr : '';
             const device = info.device && info.device !== '-' ? String(info.device) : '';
+            const versions = Number(info.versions || 0);
+            const versionsText = versions > 0
+                ? getMsg('shadow_versions').replace('{n}', String(versions)) : '';
             return `<div class="shadow-volume-row" data-drive="${drive}">`
                 + `<div class="shadow-volume-head">`
                 + `<span class="shadow-storage-drive">${drive}</span>`
                 + (created ? `<span class="shadow-volume-created" title="${getMsg('col_created')}">${created}</span>` : '')
+                + (versionsText ? `<span class="shadow-volume-created">${versionsText}</span>` : '')
                 + (capacityUnavailable ? '' : `<span class="shadow-volume-size">${getMsg('shadow_used')} ${used} / ${getMsg('shadow_limit')} ${max}</span>`)
                 + `<span class="spacer"></span>`
                 + `<button type="button" class="action-btn modern-btn" data-act="browse" data-i18n="shadow_act_open">${getMsg('shadow_act_open')}</button>`
@@ -1072,23 +1076,30 @@ document.addEventListener('DOMContentLoaded', () => {
         if (shadowState.mode !== 'files') return;
         const input = shadowEl('shadow_path_input');
         if (input && input.value.trim()) {
-            shadowState.rel = input.value.trim();
-            if (!shadowState.rel.startsWith('\\')) shadowState.rel = '\\' + shadowState.rel;
+            shadowState.rel = shadowNormalizeRel(input.value.trim());
         }
         loadShadowFiles();
     };
     const shadowGoUp = () => {
         if (shadowState.mode !== 'files') return;
-        const parent = shadowState.rel.slice(0, -1).replace(/\\[^\\]*$/, '');
+        const rel = shadowState.rel.replace(/\\+$/, '');
+        const parent = rel.slice(0, -1).replace(/\\[^\\]*$/, '');
 
         if (!parent) {
-            // 根目录再往上一级 = 回卷列表(上一级按钮不再无声失效)
+            // 根目录再往上一级 = 回卷列表
             loadShadowSnapshots();
             return;
         }
 
         shadowState.rel = parent;
         loadShadowFiles();
+    };
+    // 目录行 dataset.path 带尾部反斜杠(\Users\):进入时必须剥掉,
+    // 否则「上一级」的 slice(0,-1) 只会吃掉斜杠本身,一级子目录
+    // 点上一级会被当成根目录直接弹回卷列表
+    const shadowNormalizeRel = (rel) => {
+        const clean = String(rel || '').replace(/\\+/g, '\\');
+        return clean.length > 1 ? clean.replace(/\\$/, '') : '\\';
     };
 
     shadowEl('shadow_storage')?.addEventListener('click', (event) => {
@@ -1104,6 +1115,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     shadowEl('shadow_go_btn')?.addEventListener('click', shadowGoPath);
     shadowEl('shadow_up_btn')?.addEventListener('click', shadowGoUp);
+    shadowEl('shadow_up_dir_btn')?.addEventListener('click', shadowGoUp);
+    shadowEl('shadow_home_btn')?.addEventListener('click', () => {
+        if (shadowState.mode === 'files') loadShadowSnapshots();
+    });
 
     // 文件列表:点目录行进入;恢复只认勾选的文件
     shadowEl('shadow_files_widget')?.addEventListener('click', (event) => {
@@ -1112,7 +1127,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!row) return;
 
-        shadowState.rel = row.dataset.path || '\\';
+        shadowState.rel = shadowNormalizeRel(row.dataset.path || '\\');
         loadShadowFiles();
     });
     shadowEl('shadow_restore_btn')?.addEventListener('click', () => {
@@ -1127,6 +1142,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
     shadowEl('shadow_path_input')?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') shadowGoPath();
+    });
+
+    // 当前目录内搜索:过滤已渲染行(不重复请求后端)
+    shadowEl('shadow_search_input')?.addEventListener('input', (event) => {
+        const needle = String(event.target.value || '').toLowerCase();
+        document.querySelectorAll('#shadow_files_widget .shadow-file-row').forEach((row) => {
+            const name = row.querySelector('.shadow-file-name')?.textContent.toLowerCase() || '';
+            row.style.display = (!needle || name.includes(needle)) ? '' : 'none';
+        });
+    });
+
+    // 审计页「回滚此进程」:确认后按最近一次勒索告警的 pid 回滚
+    document.getElementById('audit_rollback_btn')?.addEventListener('click', async () => {
+        const btn = document.getElementById('audit_rollback_btn');
+        const pid = parseInt(btn?.dataset.pid || '0', 10);
+
+        if (!pid) return;
+
+        const ok = await window.pywebview.api.show_confirm(
+            getMsg('audit_rollback'), getMsg('audit_rollback_confirm'));
+
+        if (ok) window.pywebview.api.rollback_ransomware_pid(pid);
     });
 
         if (targetId === 'release_window' && window.pywebview) {
@@ -1145,6 +1182,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     detail: String(l.detail || '').replace(/\n/g, ' '),
                 }));
                 renderDataGrid('#audit_window', rows, cols.audit, 'id', true);
+
+                // 「回滚此进程」:目标=日志里最近一条勒索告警的 pid;
+                // 没有告警行时按钮保持禁用
+                const latestRansom = logs.find(l => String(l.action || '') === 'Ransomware Heuristic' && l.pid > 4);
+                const btn = document.getElementById('audit_rollback_btn');
+
+                if (btn) {
+                    btn.disabled = !latestRansom;
+                    btn.dataset.pid = latestRansom ? String(latestRansom.pid) : '';
+                }
             }).catch(() => {});
         }
 

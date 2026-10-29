@@ -93,7 +93,9 @@ HANDLED_EVENT_IDS = frozenset(
 # 条目未等到写入事件就被 FIFO 挤出 → 一半写入无法归因。提容 + 延长保留;
 # TTL 同时防句柄指针复用错配(指针 120 秒内未被复用即过期)
 KEY_MAP_TTL_SECONDS = 300.0
-KEY_MAP_MAX_ENTRIES = 32768
+# 繁忙机器(智能体工具链)30 秒 6 万+ NameCreate:32768 条 FIFO 约 16 秒
+# 即被冲光,新建文件的写入若稍晚就查不到关联 —— 扩一倍换回冲刷余量
+KEY_MAP_MAX_ENTRIES = 65536
 PID_CACHE_TTL_SECONDS = 300.0
 PID_CACHE_MAX_ENTRIES = 512
 DEVICE_MAP_TTL_SECONDS = 300.0
@@ -826,6 +828,8 @@ class EtwFileWatcher:
         self.last_error = ""
         self.stats = {
             "name_create": 0, "create": 0, "write": 0, "write_unresolved": 0,
+            "name_create_no_key": 0, "write_no_keys": 0, "write_key_only_miss": 0,
+            "write_both_miss": 0,
             "rename": 0, "delete": 0, "other": 0, "parse_errors": 0,
         }
 
@@ -1064,6 +1068,12 @@ class EtwFileWatcher:
 
             with self._state_lock:
                 self.stats["name_create"] += 1
+
+                if not file_key:
+                    # NameCreate 事件缺 FileKey 属性:key_map 机制对这类
+                    # 事件整体无效(诊断用,区分「没拿到 key」与「被挤出」)
+                    self.stats["name_create_no_key"] += 1
+
             return
 
         if event_id == EVT_CREATE:
@@ -1075,10 +1085,22 @@ class EtwFileWatcher:
             return
 
         if event_id == EVT_WRITE:
-            source = self._key_map.get(file_key, now) or self._object_map.get(file_object, now)
+            # 先 key_map(FileKey)后 object_map(FileObject);miss 时按
+            # 缺 key/双 miss 细分计数 —— 「事件没带关联键」与「被挤出」
+            # 是两种完全不同的病因,probe 一次日志即可分辨
+            key_hit = self._key_map.get(file_key, now) if file_key else None
+            source = key_hit or (self._object_map.get(file_object, now) if file_object else None)
 
             with self._state_lock:
                 self.stats["write" if source else "write_unresolved"] += 1
+
+                if not source:
+                    if not file_key and not file_object:
+                        self.stats["write_no_keys"] += 1
+                    elif not file_object:
+                        self.stats["write_key_only_miss"] += 1
+                    else:
+                        self.stats["write_both_miss"] += 1
 
             if source:
                 self._dispatch(pid, source, now)
@@ -1743,8 +1765,13 @@ class EtwMixin:
             if created_wall:
                 created_str = time.strftime("%Y-%m-%d %H:%M", time.localtime(created_wall))
 
+            versions = 0
+
+            if hasattr(self, "_vss") and self._vss is not None:
+                versions = self._vss.version_count(drive)
+
             rows.append({"drive": drive, "device": _device or "-",
-                         "createdStr": created_str or "-"})
+                         "createdStr": created_str or "-", "versions": versions})
         return rows
 
     def get_shadow_storage(self) -> dict:
@@ -1834,7 +1861,7 @@ class EtwMixin:
         except OSError as error:
             return {"ok": False, "error": str(error)}
 
-        from PYAS_Behavior import BEHAVIOR_LOG_TEXTS
+        from PYAS_Behavior import ACTION_SNAPSHOT, BEHAVIOR_LOG_TEXTS
 
         self.write_log(
             "INFO",
@@ -1852,11 +1879,46 @@ class EtwMixin:
         if not self._vss.delete_snapshot(drive):
             return False
 
-        from PYAS_Behavior import BEHAVIOR_LOG_TEXTS
+        from PYAS_Behavior import ACTION_SNAPSHOT, BEHAVIOR_LOG_TEXTS
 
         self.write_log("INFO", ACTION_SNAPSHOT,
                        detail=self._loc(BEHAVIOR_LOG_TEXTS["snapshot_deleted"]).format(drive))
         return True
+
+    def rollback_ransomware_pid(self, pid: int) -> dict:
+        """审计页「回滚此进程」入口:按台账把该进程改写的文件恢复为快照版本。
+
+        回滚是逐文件 I/O,绝不能在 UI 桥线程里同步执行 —— 派后台线程,
+        结果经日志汇报。pid 已退出没关系:台账按 pid 存路径,快照在卷上。
+        """
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "invalid_pid"}
+
+        if pid <= 4 or not hasattr(self, "rollback_process_writes"):
+            return {"ok": False, "error": "unavailable"}
+
+        if not self._behavior_switch_cached():
+            return {"ok": False, "error": "behavior_off"}
+
+        self._ensure_vss_manager()
+
+        def worker():
+            try:
+                from PYAS_Behavior import ACTION_ROLLBACK, BEHAVIOR_LOG_TEXTS
+
+                summary = self.rollback_process_writes(pid)
+                self.write_log("INFO", ACTION_ROLLBACK,
+                               detail=self._loc(BEHAVIOR_LOG_TEXTS["manual_rollback"]).format(
+                                   pid, summary.get("restored", 0), summary.get("quarantined", 0),
+                                   summary.get("failed", 0)))
+            except Exception:
+                logger.warning("manual rollback failed", exc_info=True)
+
+        import threading as _threading
+        _threading.Thread(target=worker, name="PYAS-Behavior-ManualRollback", daemon=True).start()
+        return {"ok": True, "error": None}
 
     def restore_switches(self, keys: list[str]) -> None:
         """一次授权批量恢复开关到开启:提交成功后,非提权走 helper 提权重启,
@@ -1897,11 +1959,31 @@ class EtwMixin:
 
             stats = watcher.status()
             counts = stats.get("stats", {})
+
+            attribution = ""
+
+            try:
+                from PYAS_Attribution import get_layer
+
+                layer = get_layer().status()
+                attribution = (
+                    "; attribution: etw_entries={0} hits={1} miss={2}".format(
+                        layer.get("etw_entries", 0),
+                        layer.get("hits", {}).get("etw", 0),
+                        layer.get("hits", {}).get("miss", 0),
+                    )
+                )
+            except Exception:
+                pass
+
             detail = (
-                "consumption probe @{0}s: create={create} write={write} "
-                "write_unresolved={write_unresolved} rename={rename} delete={delete} "
-                "other={other} parse_errors={parse_errors}; maps: key={key_map} "
-                "object={object_map} devices={device_map}; state={state}"
+                "consumption probe @{0}s: create={create} name_create={name_create} "
+                "(no_key={name_create_no_key}) write={write} "
+                "write_unresolved={write_unresolved} (no_keys={write_no_keys} "
+                "key_only_miss={write_key_only_miss} both_miss={write_both_miss}) "
+                "rename={rename} delete={delete} other={other} "
+                "parse_errors={parse_errors}; maps: key={key_map} "
+                "object={object_map} devices={device_map}; state={state}" + attribution
             ).format(int(delay_seconds), key_map=stats.get("key_map", 0),
                      object_map=stats.get("object_map", 0),
                      device_map=stats.get("device_map", 0),

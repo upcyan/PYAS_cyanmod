@@ -113,7 +113,7 @@ class SnapshotManagerTests(unittest.TestCase):
     def test_create_returns_device_and_replaces_old(self):
         with tempfile.TemporaryDirectory() as tmp:
             runner = FakeVssRunner()
-            manager = self.make(tmp, runner=runner, cooldown_seconds=60.0)
+            manager = self.make(tmp, runner=runner, cooldown_seconds=60.0, history_keep=2)
 
             state, first = manager.create_if_due("C:", now=100.0)
 
@@ -127,12 +127,19 @@ class SnapshotManagerTests(unittest.TestCase):
             self.assertEqual((state, second), ("existing", first))
             self.assertEqual(len(runner.calls), 1)
 
-            state, third = manager.create_if_due("C:", now=200.0)  # 冷却结束,新建并删旧
+            state, third = manager.create_if_due("C:", now=200.0)  # 冷却结束,新建
 
             self.assertEqual(state, "created")
             self.assertTrue(third.endswith("ShadowCopy2"))
-            self.assertEqual(runner.deleted, ["shadow-id-1"])
-            self.assertEqual(manager.device_for("c:"), third)
+            self.assertEqual(manager.version_count("C:"), 2, "保留份数内不淘汰")
+            self.assertEqual(runner.deleted, [], "未超保留份数不删除历史")
+
+            state, fourth = manager.create_if_due("C:", now=300.0)  # 第 3 份:淘汰最旧
+
+            self.assertEqual(state, "created")
+            self.assertEqual(runner.deleted, ["shadow-id-1"], "超限淘汰最旧一份")
+            self.assertEqual(manager.version_count("C:"), 2)
+            self.assertEqual(manager.device_for("c:"), fourth)
 
     def test_failure_enters_cooldown_and_stays_silent(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -222,13 +229,14 @@ class SnapshotManagerTests(unittest.TestCase):
         无人纳管的孤儿(用户机器上已积累过 6 个),也无法在下次成功时删旧。"""
         with tempfile.TemporaryDirectory() as tmp:
             runner = FakeVssRunner()
-            manager = self.make(tmp, runner=runner, device_lister=FakeDeviceLister(mapping={}))
+            manager = self.make(tmp, runner=runner, device_lister=FakeDeviceLister(mapping={}),
+                                history_keep=1)
 
             self.assertEqual(manager.create_if_due("C:", now=1.0), ("failed", None))
             self.assertIn("unresolved", manager.last_error)
             self.assertEqual(manager.drives(), [], "无设备路径的条目不可用于回滚")
 
-            # 下一次创建成功时,孤儿 ID 被删除
+            # 下一次创建成功时,孤儿 ID 被淘汰删除(keep=1:新份挤掉旧份)
             manager._device_lister = FakeDeviceLister()
             manager.create_if_due("C:", now=10000.0)
             self.assertEqual(runner.deleted, ["shadow-id-1"])

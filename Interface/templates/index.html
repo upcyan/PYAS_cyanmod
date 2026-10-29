@@ -158,6 +158,7 @@
 
   <!-- 通用 -->
   <symbol id="i-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></symbol>
+  <symbol id="i-chevron-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"></polyline></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2Z"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></symbol>
   <symbol id="i-spinner" viewBox="0 0 50 50"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"><animate attributeName="stroke-dasharray" values="1,150;90,150;90,150" dur="1.5s" repeatCount="indefinite"/><animate attributeName="stroke-dashoffset" values="0;-35;-124" dur="1.5s" repeatCount="indefinite"/><animateTransform attributeName="transform" type="rotate" values="0 25 25;360 25 25" dur="2s" repeatCount="indefinite"/></circle></symbol>
@@ -907,6 +908,7 @@
                         <button class="icon-btn" data-target="tool_window"><svg><use href="#i-chevron-left"/></svg></button>
                         <h2 data-i18n="audit_records">事件审计</h2>
                         <div class="spacer"></div>
+                        <button class="action-btn modern-btn danger-btn" id="audit_rollback_btn" disabled data-i18n="audit_rollback">回滚此进程</button>
                     </div>
                     <div class="manage-widget flex-grow"><ul class="manage-list"></ul></div>
                 </section>
@@ -922,14 +924,21 @@
                     <div id="shadow_storage" class="shadow-storage"></div>
 
                     <div class="shadow-path-bar hidden" id="shadow_path_bar">
-                        <button class="icon-btn" id="shadow_up_btn" title="上一級"><svg><use href="#i-chevron-left"/></svg></button>
+                        <button class="icon-btn" id="shadow_home_btn" title="返回卷列表" data-i18n-title="shadow_act_back"><svg><use href="#i-chevron-left"/></svg></button>
+                        <button class="icon-btn" id="shadow_up_btn" title="上一級"><svg><use href="#i-chevron-up"/></svg></button>
                         <input type="text" id="shadow_path_input" spellcheck="false" placeholder="\">
+                        <div class="search-box shadow-search-box">
+                            <svg><use href="#i-search"/></svg>
+                            <input type="text" id="shadow_search_input" spellcheck="false" data-i18n-placeholder="shadow_search_ph" placeholder="搜索當前目錄...">
+                        </div>
                         <button class="action-btn modern-btn" id="shadow_go_btn" data-i18n="shadow_act_view">瀏覽</button>
                     </div>
 
                     <div class="shadow-file-list flex-grow hidden" id="shadow_files_widget"></div>
 
                     <div class="shadow-footer-bar hidden" id="shadow_files_footer">
+                        <button class="action-btn modern-btn" id="shadow_up_dir_btn" data-i18n="shadow_act_up">上一級</button>
+                        <div class="spacer"></div>
                         <button class="action-btn modern-btn" id="shadow_restore_btn" data-i18n="shadow_act_restore">恢復勾選檔案</button>
                     </div>
                 </section>

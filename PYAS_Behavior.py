@@ -71,6 +71,19 @@ ACTION_SNAPSHOT = "Behavior Snapshot"
 ACTION_ROLLBACK = "Behavior Rollback"
 
 BEHAVIOR_LOG_TEXTS = {
+    "manual_rollback": {
+        "traditional_switch": "手動回滾進程 {0}:還原 {1} 個文件,隔離 {2} 個,失敗 {3} 個",
+        "simplified_switch": "手动回滚进程 {0}:还原 {1} 个文件,隔离 {2} 个,失败 {3} 个",
+        "english_switch": "Manual rollback for process {0}: restored {1}, quarantined {2}, failed {3}",
+        "japanese_switch": "プロセス {0} を手動ロールバック: {1} 件復元、{2} 件隔離、{3} 件失敗",
+        "korean_switch": "프로세스 {0} 수동 롤백: {1}개 복원, {2}개 격리, {3}개 실패",
+        "french_switch": "Restauration manuelle du processus {0} : {1} restaurés, {2} mis en quarantaine, {3} échoués",
+        "spanish_switch": "Reversión manual del proceso {0}: {1} restaurados, {2} en cuarentena, {3} fallidos",
+        "hindi_switch": "प्रोसेस {0} मैनुअल रोलबैक: {1} पुनर्स्थापित, {2} क्वारंटाइन, {3} विफल",
+        "arabic_switch": "استرجاع يدوي للعملية {0}: تمت استعادة {1}، وحُجر {2}، وفشل {3}",
+        "russian_switch": "Ручная операция отката процесса {0}: восстановлено {1}, в карантине {2}, ошибок {3}",
+        "slovenian_switch": "Ročno povrnitev procesa {0}: obnovljenih {1}, v karanteni {2}, spodletelih {3}",
+    },
     "snapshot_deleted": {
         "traditional_switch": "已刪除卷影副本（{0}）",
         "simplified_switch": "已删除卷影副本（{0}）",
@@ -431,22 +444,25 @@ def _read_result_file(result_file: str):
 
 
 class VssSnapshotManager:
-    """每块卷最多保留一份「紧急快照」,新快照成功后再替换旧的。
+    """每卷保留最近 N 份「紧急快照」(默认 3),超出才删最旧的。
 
     runner/device_lister 可注入:测试给假件,不碰 PowerShell 与 vssadmin。
+    状态 v2:drive -> {"last_attempt", "history":[{id,device,created,
+    created_wall}, ...]}(新→旧);v1 平铺形态在加载时迁移为单元素 history。
     """
 
     def __init__(self, state_path: str, runner=None, cooldown_seconds: float = L2_SNAPSHOT_COOLDOWN_SECONDS,
-                 device_lister=None, resolve_retries: int = 3, resolve_delay: float = 3.0) -> None:
+                 device_lister=None, resolve_retries: int = 3, resolve_delay: float = 3.0,
+                 history_keep: int = 3) -> None:
         self._state_path = state_path
         self._runner = runner or self._run_powershell
         self._device_lister = device_lister or list_shadow_devices
         self._resolve_retries = max(1, resolve_retries)
         self._resolve_delay = resolve_delay
         self._cooldown = cooldown_seconds
+        self._history_keep = max(1, int(history_keep))
         self._lock = threading.Lock()
         self.last_error = ""
-        # drive("C:") -> {"id","device","created"(monotonic),"last_attempt"}
         self._snapshots: dict[str, dict] = {}
         # 创建中的卷 -> 开始时刻(monotonic):并发护栏,VSS 不接受并行创建
         self._inflight: dict[str, float] = {}
@@ -454,6 +470,13 @@ class VssSnapshotManager:
         self._purge_stale_results()
 
     # -- 公共接口 ----------------------------------------------------------
+
+    def _newest_with_device(self, entry: dict) -> dict | None:
+        for item in entry.get("history", []):
+            if item.get("device"):
+                return item
+
+        return None
 
     def create_if_due(self, drive: str, now: float | None = None):
         """冷却期内直接返回现有快照;到期才真正建新的。
@@ -469,10 +492,10 @@ class VssSnapshotManager:
             existing = self._snapshots.get(drive)
 
             if existing and stamp - existing.get("last_attempt", 0.0) < self._cooldown:
-                device = existing.get("device")
+                newest = self._newest_with_device(existing)
 
-                if device:
-                    return ("existing", device)
+                if newest:
+                    return ("existing", newest.get("device"))
 
                 return ("cooldown", None)
 
@@ -484,7 +507,8 @@ class VssSnapshotManager:
                 return ("cooldown", None)
 
             self._inflight[drive] = stamp
-            self._snapshots.setdefault(drive, {})["last_attempt"] = stamp
+            self._snapshots.setdefault(drive, {"last_attempt": stamp, "history": []})
+            self._snapshots[drive]["last_attempt"] = stamp
 
         try:
             device = self._create(drive, stamp)
@@ -492,46 +516,56 @@ class VssSnapshotManager:
             with self._lock:
                 self._inflight.pop(drive, None)
 
-        with self._lock:
-            if device:
-                self._snapshots[drive]["created"] = stamp
-
         return (("created", device) if device else ("failed", None))
 
     def device_for(self, drive: str) -> str | None:
         with self._lock:
             entry = self._snapshots.get(drive[:2].upper())
-            return entry.get("device") if entry else None
+            newest = self._newest_with_device(entry) if entry else None
+            return newest.get("device") if newest else None
 
     def created_stamp(self, drive: str) -> float | None:
         with self._lock:
             entry = self._snapshots.get(drive[:2].upper())
-            return entry.get("created") if entry else None
+            newest = self._newest_with_device(entry) if entry else None
+            return newest.get("created") if newest else None
 
-    def drives(self) -> list[tuple[str, str | None, float | None, float]]:
-        """[(drive, device, created, created_wall), ...] — created 为 None 表示
-        重启前的旧快照(不可用于回滚)。"""
-        with self._lock:
-            return [
-                (drive, entry.get("device"), entry.get("created"), entry.get("created_wall", 0))
-                for drive, entry in self._snapshots.items()
-                if entry.get("device")
-            ]
-
-    def delete_snapshot(self, drive: str) -> bool:
-        """删除指定卷的紧急快照(用户主动清理入口)。"""
+    def version_count(self, drive: str) -> int:
         with self._lock:
             entry = self._snapshots.get(drive[:2].upper())
-            shadow_id = entry.get("id") if entry else None
+            return len([i for i in (entry or {}).get("history", []) if i.get("device")])
 
-        if not shadow_id or not self._delete_by_id(shadow_id):
+    def drives(self) -> list[tuple[str, str | None, float | None, float]]:
+        """[(drive, device, created, created_wall), ...] 取每卷最新一份 —
+        created 为 None 表示重启前的旧快照(不可用于回滚)。"""
+        with self._lock:
+            rows = []
+
+            for drive, entry in self._snapshots.items():
+                newest = self._newest_with_device(entry)
+
+                if newest:
+                    rows.append((drive, newest.get("device"),
+                                 newest.get("created"), newest.get("created_wall", 0)))
+
+            return rows
+
+    def delete_snapshot(self, drive: str) -> bool:
+        """删除指定卷的全部快照(用户主动清理入口)。"""
+        with self._lock:
+            entry = self._snapshots.get(drive[:2].upper())
+            shadow_ids = [i.get("id") for i in (entry or {}).get("history", []) if i.get("id")]
+
+        if not shadow_ids:
             return False
+
+        ok = all(self._delete_by_id(sid) for sid in shadow_ids)
 
         with self._lock:
             self._snapshots.pop(drive[:2].upper(), None)
 
         self._save_state()
-        return True
+        return ok
 
     @staticmethod
     def snapshot_path(device: str, dos_path: str) -> str:
@@ -574,17 +608,21 @@ class VssSnapshotManager:
             self.last_error = (f"created shadow {bare} but device name unresolved"
                                f" after {self._resolve_retries} listing attempts")
 
-        new_entry = {"id": shadow_id.strip("{}"), "device": device,
-                     "last_attempt": stamp, "created_wall": time.time()}
-        previous = None
+        new_item = {"id": shadow_id.strip("{}"), "device": device,
+                    "created": stamp if device else None, "created_wall": time.time()}
+        evicted = []
 
         with self._lock:
-            previous = self._snapshots.get(drive)
-            self._snapshots[drive] = {**previous, **new_entry} if previous else dict(new_entry)
+            entry = self._snapshots.setdefault(drive, {"last_attempt": stamp, "history": []})
+            entry["history"].insert(0, new_item)
 
-        # 旧的快照在新快照就位后删除,失败不影响新快照可用性
-        if previous and previous.get("id") and previous["id"] != new_entry["id"]:
-            self._delete_by_id(previous["id"])
+            # 超出保留份数:最旧的从纳管中剔除并删除(失败不影响新快照)
+            while len(entry["history"]) > self._history_keep:
+                evicted.append(entry["history"].pop())
+
+        for item in evicted:
+            if item.get("id"):
+                self._delete_by_id(item["id"])
 
         self._save_state()
 
@@ -716,18 +754,38 @@ class VssSnapshotManager:
 
             if isinstance(stored, dict):
                 for drive, entry in stored.items():
-                    if isinstance(entry, dict) and entry.get("id") and entry.get("device"):
-                        # 重启后 monotonic 基准失效:created 置空 → 回滚不可用,
-                        # 但设备仍可被下次 L2 替换
-                        self._snapshots[drive] = {**entry, "created": None, "last_attempt": 0.0}
+                    if not isinstance(entry, dict):
+                        continue
+
+                    if isinstance(entry.get("history"), list):
+                        # v2:重启后 monotonic 基准失效,created 置空 → 回滚
+                        # 不可用,但设备仍可被下次 L2 替换/浏览
+                        history = [
+                            {**item, "created": None}
+                            for item in entry["history"]
+                            if isinstance(item, dict) and item.get("id") and item.get("device")
+                        ]
+                        self._snapshots[drive] = {"last_attempt": 0.0, "history": history}
+                    elif entry.get("id") and entry.get("device"):
+                        # v1 平铺形态 → 迁移为单元素 history
+                        self._snapshots[drive] = {
+                            "last_attempt": 0.0,
+                            "history": [{**entry, "created": None}],
+                        }
         except (OSError, ValueError):
             pass
 
     def _save_state(self):
         payload = {
-            drive: {"id": entry.get("id"), "device": entry.get("device")}
+            drive: {
+                "last_attempt": entry.get("last_attempt", 0.0),
+                "history": [
+                    {"id": item.get("id"), "device": item.get("device"),
+                     "created_wall": item.get("created_wall", 0)}
+                    for item in entry.get("history", [])
+                ],
+            }
             for drive, entry in self._snapshots.items()
-            if entry.get("id")
         }
 
         try:
@@ -852,8 +910,13 @@ class BehaviorMixin:
     def _ensure_vss_manager(self) -> None:
         if getattr(self, "_vss", None) is None:
             data_dir = os.path.join(self.path_config, "PYAS")
+
+            with self.lock_config:
+                keep = int(self.pyas_config.get("behavior_snapshot_history", 3) or 3)
+
             self._vss = VssSnapshotManager(
-                state_path=os.path.join(data_dir, "vss_snapshots.json")
+                state_path=os.path.join(data_dir, "vss_snapshots.json"),
+                history_keep=keep,
             )
 
     # -- L3 勒索告警挂钩(EtwMixin._etw_burst_alert 调用) --------------------
