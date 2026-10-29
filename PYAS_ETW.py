@@ -2174,7 +2174,16 @@ class EtwMixin:
     _CONTENT_DIR_MARKERS = ("\\steamapps\\",)
 
     @classmethod
-    def _etw_burst_noise(cls, path: str, pid: int, writer_trusted=None) -> bool:
+    def _path_in_program_area(cls, path: str) -> bool:
+        """目标路径是否落在程序/应用内容区域(段名判定,不绑定盘符)。"""
+        path_lower = path.lower()
+        rest = path_lower[2:] if len(path_lower) > 2 and path_lower[1] == ":" else path_lower
+        first_segment = rest.lstrip("\\").split("\\", 1)[0]
+
+        return (first_segment in cls._SYSTEM_DIR_SEGMENTS
+                or any(marker in path_lower for marker in cls._CONTENT_DIR_MARKERS))
+
+    def _etw_burst_noise(self, path: str, pid: int, writer_trusted=None) -> bool:
         """不参与勒索突发计数、但保留台账与溯源的路径。
 
         程序目录(安全软件诱饵/安装器解包/服务配置)、应用数据目录(浏览器
@@ -2183,34 +2192,49 @@ class EtwMixin:
         只能挡新建文件,挡不住 Steam 这类「创建后持续填充超过 30 秒」的
         下载;路径段名判定才是结构性的。
 
-        但段名只是必要条件:程序区域里也可能有文档,宽泛放行就是给勒索
-        软件留「在 Program Files 里加密文件」的通道 —— 还必须由写入方
-        进程的受信任签名佐证(Steam/Edge/厂商工具全部带有效 Authenticode;
-        勒索软件几乎不可能持有)。签名验证失败/查不到写入方一律照常计数,
-        fail-closed 宁误报不漏报。
+        段名只是必要条件,放行按三道收窄(fail-closed,任一不满足照常计数):
+        1. 写入方映像带受信任 Authenticode 签名(勒索软件几乎不可能持有);
+        2. 目标在写入方自己的安装树内(映像目录前缀)——「特定程序写
+           特定路径」:签名程序写别人的 Program Files 照样告警;
+        3. AppData 是唯一例外(程序写自身数据区,非文档位置),签名即可。
         """
+        if not self._path_in_program_area(path):
+            return False
+
+        image = self._etw_writer_image(pid)
+
+        if not image or not (writer_trusted(pid) if callable(writer_trusted) else False):
+            return False
+
         path_lower = path.lower()
         rest = path_lower[2:] if len(path_lower) > 2 and path_lower[1] == ":" else path_lower
         first_segment = rest.lstrip("\\").split("\\", 1)[0]
 
-        in_program_area = (first_segment in cls._SYSTEM_DIR_SEGMENTS
-                           or any(marker in path_lower for marker in cls._CONTENT_DIR_MARKERS))
+        # 应用数据区(ProgramData 与 AppData 同性质):签名程序的自身数据
+        # 目录不由其安装树涵盖(安全软件诱饵/服务状态都在 ProgramData),
+        # 签名即可放行;其余程序段要求「特定程序写特定路径」的安装树绑定
+        if first_segment == "programdata" or "\\appdata\\" in path_lower:
+            return True
 
-        if not in_program_area:
-            return False
+        image_dir = os.path.dirname(image).lower().rstrip("\\")
 
-        return writer_trusted(pid) if callable(writer_trusted) else False
+        return bool(image_dir) and path_lower.startswith(image_dir + "\\")
+
+    def _etw_writer_image(self, pid: int) -> str:
+        """写入方映像路径(事件时刻解析并缓存,进程退出后仍可验签)。"""
+        try:
+            _name, image = (self._etw_pid_info.get(pid)
+                            if getattr(self, "_etw_pid_info", None) else ("", ""))
+            return image or ""
+        except Exception:
+            return ""
 
     def _etw_writer_trusted(self, pid: int) -> bool:
         """写入方进程映像是否带受信任的 Authenticode 签名(per-image 缓存)。
 
         fail-closed:进程已退出但路径缓存仍在(事件时刻解析的映像文件),
         文件被删/验证异常一律按未验证处理。"""
-        try:
-            _name, image = (self._etw_pid_info.get(pid)
-                            if getattr(self, "_etw_pid_info", None) else ("", ""))
-        except Exception:
-            return False
+        image = self._etw_writer_image(pid)
 
         if not image:
             return False

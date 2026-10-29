@@ -274,11 +274,15 @@ class RecycleBinExclusionTests(unittest.TestCase):
                 )
                 self.reached = []
                 self.whitelisted = set()
-                # 程序区域豁免依赖写入方签名;测试按 pid 注入信任
+                # 程序区域豁免依赖写入方签名+安装树绑定;测试按 pid 注入
                 self.trusted_pids = {700}
+                self.writer_images = {700: "E:\\Program Files\\games\\steam\\steam.exe"}
 
             def _etw_writer_trusted(self, pid):
                 return pid in self.trusted_pids
+
+            def _etw_writer_image(self, pid):
+                return self.writer_images.get(pid, "")
 
             def _behavior_on_write(self, pid, path):
                 self.reached.append(path)
@@ -365,21 +369,33 @@ class RecycleBinExclusionTests(unittest.TestCase):
         )
 
     def test_program_area_by_segment_name_any_drive(self):
-        """程序区域按段名判定,不绑定 C 盘:用户把游戏库装在
-        E:\\Program Files\\games\\(实测 Steam 下载 chunk 触发勒索启发),
-        任意盘符的 Program Files/Windows/WindowsApps 都是程序区域。"""
+        """豁免绑定「特定程序+特定路径」:写入方映像的安装树是唯一放行
+        范围(签名+前缀);写别人的程序目录、无映像绑定的目标照常计数。
+        steam.exe(映像在 E:\\Program Files\\games\\steam\\)写自己的
+        steamapps 放行 —— 覆盖任意盘符的程序目录场景。"""
         host = self.make_host()
 
         host._on_etw_write(700, "E:\\Program Files\\games\\steam\\steamapps\\downloading\\1551360\\media\\Audio\\EngineSynth\\D_I4TC_European_Offroad_1_Exh.zip")
-        host._on_etw_write(700, "E:\\Program Files (x86)\\SomeApp\\data.bin")
-        host._on_etw_write(700, "D:\\Windows\\Temp\\cache.dat")
-        host._on_etw_write(700, "D:\\Games\\Steam\\steamapps\\downloading\\chunk_0.zip")
+        host._on_etw_write(700, "D:\\Games\\Steam\\steamapps\\downloading\\chunk_0.zip")  # 映像在 E 盘:树外
+        host._on_etw_write(700, "E:\\Program Files\\games\\steam\\newui\\skin.png")
+        host._on_etw_write(700, "D:\\Games\\Steam\\steamapps\\downloading\\chunk_1.zip")  # 树外第 2 个
 
-        self.assertEqual(
-            [r for r in host.reached if isinstance(r, tuple) and r[0] == "log"],
-            [], "任意盘符的程序/内容目录不得触发勒索告警",
-        )
-        self.assertTrue(host.reached, "台账照常记录")
+        logs = [r for r in host.reached if isinstance(r, tuple) and r[0] == "log"]
+        self.assertEqual(len(logs), 1, "仅树外目标计入,达阈值告警一次")
+        self.assertTrue(any(
+            isinstance(r, str) and r.startswith("E:\\Program Files\\games\\steam\\")
+            for r in host.reached), "安装树内的写入照常进台账")
+
+    def test_signed_writer_outside_own_tree_still_fires(self):
+        """签名程序写别人的 Program Files:签名不通用,必须照常告警 ——
+        堵住「可信程序被滥用/被仿冒目录」的漏检通道。"""
+        host = self.make_host()
+
+        host._on_etw_write(700, "C:\\Program Files\\Victim\\a.docx")
+        host._on_etw_write(700, "C:\\Program Files\\Victim\\b.docx")
+
+        logs = [r for r in host.reached if isinstance(r, tuple) and r[0] == "log"]
+        self.assertEqual(len(logs), 1, "目标不在写入方安装树内必须告警")
 
     def test_user_documents_still_fire_after_segment_exclusion(self):
         """段名排除不得误伤用户文档区:勒索的主战场必须保持告警能力。"""
