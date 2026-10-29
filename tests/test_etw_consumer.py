@@ -359,6 +359,34 @@ class RecycleBinExclusionTests(unittest.TestCase):
             "台账必须照常记录,回滚不受豁免影响",
         )
 
+    def test_program_area_by_segment_name_any_drive(self):
+        """程序区域按段名判定,不绑定 C 盘:用户把游戏库装在
+        E:\\Program Files\\games\\(实测 Steam 下载 chunk 触发勒索启发),
+        任意盘符的 Program Files/Windows/WindowsApps 都是程序区域。"""
+        host = self.make_host()
+
+        host._on_etw_write(700, "E:\\Program Files\\games\\steam\\steamapps\\downloading\\1551360\\media\\Audio\\EngineSynth\\D_I4TC_European_Offroad_1_Exh.zip")
+        host._on_etw_write(700, "E:\\Program Files (x86)\\SomeApp\\data.bin")
+        host._on_etw_write(700, "D:\\Windows\\Temp\\cache.dat")
+        host._on_etw_write(700, "D:\\Games\\Steam\\steamapps\\downloading\\chunk_0.zip")
+
+        self.assertEqual(
+            [r for r in host.reached if isinstance(r, tuple) and r[0] == "log"],
+            [], "任意盘符的程序/内容目录不得触发勒索告警",
+        )
+        self.assertTrue(host.reached, "台账照常记录")
+
+    def test_user_documents_still_fire_after_segment_exclusion(self):
+        """段名排除不得误伤用户文档区:勒索的主战场必须保持告警能力。"""
+        host = self.make_host()
+
+        host._on_etw_write(700, "D:\\Personal\\Documents\\a.docx")
+        host._on_etw_write(700, "C:\\Users\\u\\Desktop\\b.docx")
+        host._on_etw_write(700, "E:\\MyDocs\\Games\\notes.docx")
+
+        logs = [r for r in host.reached if isinstance(r, tuple) and r[0] == "log"]
+        self.assertEqual(len(logs), 1, "用户文档照常计数并在阈值处告警一次")
+
     def test_burst_alert_detail_carries_sample_paths(self):
         """告警明细必须带样本路径:否则 svchost/QQ 类误报只能看到进程名,
         定位写入目标要靠全盘扫描。"""

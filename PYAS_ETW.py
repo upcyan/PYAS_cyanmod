@@ -2162,24 +2162,36 @@ class EtwMixin:
         if burst:
             self._etw_burst_alert(burst)
 
-    @staticmethod
-    def _etw_burst_noise(path: str) -> bool:
+    # 程序/系统/应用内容区域的目录段名(大小写不敏感):按「段名」而非
+    # 「C 盘固定路径」判定 —— 用户把游戏库装在 E:\Program Files\games\
+    # (实测 Steam 下载 chunk 触发勒索启发),任何盘都可以有程序目录。
+    # 命中段名 = 应用在写自己的内容,不参与突发计数;台账与溯源保留。
+    _SYSTEM_DIR_SEGMENTS = frozenset({
+        "program files", "program files (x86)", "programdata",
+        "windows", "windowsapps", "appdata",
+    })
+    # 内容平台的自有数据目录(可出现在任意前缀下)
+    _CONTENT_DIR_MARKERS = ("\\steamapps\\",)
+
+    @classmethod
+    def _etw_burst_noise(cls, path: str) -> bool:
         """不参与勒索突发计数、但保留台账与溯源的路径。
 
-        ProgramData 与 Program Files 是机器级程序/数据目录:安全软件诱饵
-        (实测腾讯 iOA 的 DecoyFiles 触发本产品勒索启发)、安装器解包资源
-        (实测 OneDriveSetup)、服务配置都在此高频改写,按厂商逐个豁免是
-        无底洞。AppData 是应用数据目录:浏览器落扩展图标(实测 Edge)、
-        应用缓存同理。用户文档不在这三处:这里的爆发计数移除后,真实勒索
-        仍由签名扫描与用户目录的启发覆盖。
+        程序目录(安全软件诱饵/安装器解包/服务配置)、应用数据目录(浏览器
+        扩展图标/缓存)、游戏内容目录(Steam 下载 chunk)的共同点是:写入方
+        在写「自己的内容」,不是对用户文档的勒索式改写。pre-existing 过滤
+        只能挡新建文件,挡不住 Steam 这类「创建后持续填充超过 30 秒」的
+        下载;路径段名判定才是结构性的。用户文档目录不含这些段名,真实
+        勒索仍由签名扫描与用户目录的启发覆盖。
         """
         path_lower = path.lower()
-        programdata = os.environ.get("ALLUSERSPROFILE", "C:\\ProgramData")
-        markers = (os.path.join(programdata, ""),
-                   os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), ""),
-                   os.path.join(os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"), ""),
-                   "\\appdata\\")
-        return any(path_lower.startswith(m.lower()) or m in path_lower for m in markers)
+        rest = path_lower[2:] if len(path_lower) > 2 and path_lower[1] == ":" else path_lower
+        first_segment = rest.lstrip("\\").split("\\", 1)[0]
+
+        if first_segment in cls._SYSTEM_DIR_SEGMENTS:
+            return True
+
+        return any(marker in path_lower for marker in cls._CONTENT_DIR_MARKERS)
 
     def _etw_burst_alert(self, burst: BurstAlert) -> None:
         name, _ = self._etw_pid_info.get(burst.pid)
