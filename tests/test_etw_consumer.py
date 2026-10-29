@@ -274,6 +274,11 @@ class RecycleBinExclusionTests(unittest.TestCase):
                 )
                 self.reached = []
                 self.whitelisted = set()
+                # 程序区域豁免依赖写入方签名;测试按 pid 注入信任
+                self.trusted_pids = {700}
+
+            def _etw_writer_trusted(self, pid):
+                return pid in self.trusted_pids
 
             def _behavior_on_write(self, pid, path):
                 self.reached.append(path)
@@ -386,6 +391,31 @@ class RecycleBinExclusionTests(unittest.TestCase):
 
         logs = [r for r in host.reached if isinstance(r, tuple) and r[0] == "log"]
         self.assertEqual(len(logs), 1, "用户文档照常计数并在阈值处告警一次")
+
+    def test_program_area_unsigned_writer_still_fires(self):
+        """段名只是必要条件:程序区域里的写入方若无受信任签名,照常计数 ——
+        堵住「在 Program Files 里加密文档」的漏检通道(fail-closed)。"""
+        host = self.make_host()
+        host.trusted_pids = set()  # 写入方未签名/验证失败
+
+        host._on_etw_write(700, "C:\\Program Files\\Victim\\a.docx")
+        host._on_etw_write(700, "C:\\Program Files\\Victim\\b.docx")
+
+        logs = [r for r in host.reached if isinstance(r, tuple) and r[0] == "log"]
+        self.assertEqual(len(logs), 1, "程序区域+未签名写入方必须照常告警")
+
+    def test_program_area_trusted_writer_exempt(self):
+        """签名受信的写入方在程序区域的自有内容写入豁免(Steam 下载/
+        安装器解包),不再误报。"""
+        host = self.make_host()
+
+        for index in range(5):
+            host._on_etw_write(700, f"E:\\Program Files\\games\\steam\\steamapps\\downloading\\chunk_{index}.zip")
+
+        self.assertEqual(
+            [r for r in host.reached if isinstance(r, tuple) and r[0] == "log"],
+            [], "签名可信写入方在程序区域不得触发勒索告警",
+        )
 
     def test_burst_alert_detail_carries_sample_paths(self):
         """告警明细必须带样本路径:否则 svchost/QQ 类误报只能看到进程名,
