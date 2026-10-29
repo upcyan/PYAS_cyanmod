@@ -90,6 +90,24 @@ class AttributionCache:
 
             return (pid, name)
 
+    def peek(self, path: str) -> Optional[Tuple[int, str, float]]:
+        """只读探测:条目存在返回 (pid, name, 距上次记录的秒数)。
+        不推进 LRU、不清过期 —— 供 miss 诊断分辨「从未记录」与「已过期」。"""
+        if not path:
+            return None
+
+        key = self._key(path)
+        stamp = time.monotonic()
+
+        with self._lock:
+            entry = self._entries.get(key)
+
+            if not entry:
+                return None
+
+            pid, name, recorded = entry
+            return (pid, name, max(0.0, stamp - recorded))
+
     def clear(self) -> None:
         with self._lock:
             self._entries.clear()

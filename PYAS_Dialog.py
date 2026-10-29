@@ -2885,6 +2885,27 @@ class DialogMixin(AlertPolicyMixin):
 
         return lang if lang in SUPPORTED_LANGS else "traditional_switch"
 
+    def _log_attribution_miss(self, source: str, layer) -> None:
+        """溯源 miss 诊断:层 B 是否曾记录该路径、记录多久了、层内规模。
+        「从未记录」= 写入发生在 ETW 未启动窗口/关联未命中(记录侧);
+        「已过期」= 告警链路时延超 TTL;两条形态日志可直接分辨。"""
+        try:
+            etw_peek = layer.etw.peek(source)
+
+            if etw_peek is None and len(source) >= 2 and source[1] == ":":
+                etw_peek = layer.etw.peek("\\" + source[3:])
+
+            status = layer.status()
+            detail = "attribution miss: {0}; etw_peek={1}; layer={2}".format(
+                str(source)[-120:],
+                ("pid={0} name={1} age={2:.0f}s".format(*etw_peek)
+                 if etw_peek else "never_recorded"),
+                {k: status.get(k) for k in ("driver_entries", "etw_entries")},
+            )
+            self.write_log("INFO", "ETW Attribution", detail=detail)
+        except Exception:
+            log_exception("PYAS_Dialog._log_attribution_miss")
+
     def request_block_decision(self, action, source=None, target=None, pid=None, detection=None,
         finding_description=None):
         with self.lock_config:
@@ -2926,14 +2947,20 @@ class DialogMixin(AlertPolicyMixin):
             try:
                 from PYAS_Attribution import get_layer
 
-                layer_hit = get_layer().lookup(source)
+                layer = get_layer()
+                layer_hit = layer.lookup(source)
 
                 # ETW 事件返回的路径可能不带盘符(卷相对形态),两种形态都查
                 if layer_hit is None and len(source) >= 2 and source[1] == ":":
-                    layer_hit = get_layer().lookup("\\" + source[3:])
+                    layer_hit = layer.lookup("\\" + source[3:])
 
                 if layer_hit:
                     users = [(layer_hit[0], layer_hit[1])]
+                else:
+                    # miss 必须留痕:该路径是否曾被记录(peek 只读不推进
+                    # LRU)、记录了多久、层内现存多少 —— 一次弹窗即可
+                    # 分辨「从未记录」与「已过期」,定位记录/查询断点
+                    self._log_attribution_miss(source, layer)
             except Exception:
                 log_exception("PYAS_Dialog.request_block_decision.attribution")
 
