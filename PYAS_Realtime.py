@@ -19,6 +19,7 @@ FILE_OWNER_QUEUE_LIMIT = 512
 FILE_OWNER_RECHECK_SECONDS = 2.0
 
 from PYAS_WinAPI import (
+
     ERROR_LOCK_VIOLATION,
     ERROR_SHARING_VIOLATION,
     FILE_ATTRIBUTE_NORMAL,
@@ -31,6 +32,8 @@ from PYAS_WinAPI import (
     PYAS_PROCESS_NETWORK_ACCESS,
     PYAS_PROCESS_SCAN_ACCESS,
 )
+
+from PYAS_LogTexts import LOG_TEXTS as _LT
 
 # 标准 EICAR 测试串:分段保存,否则本文件会被自己的探针命中。
 # 它是公开的无害标记,用来验证检测→拦截→隔离整条链路,不属于恶意样本。
@@ -410,7 +413,7 @@ class RealtimeMixin:
                 self.write_log(
                     "WARN",
                     "File Watcher",
-                    detail=f"No file activity for {int(silent_for)}s; rescanning to make sure nothing was missed",
+                    detail=self._loc(_LT["watcher_idle_rescan"]).format(int(silent_for)),
                     success=False,
                 )
                 self._schedule_recovery("watchdog")
@@ -467,7 +470,7 @@ class RealtimeMixin:
                         self.write_log(
                             "WARN",
                             "File Watcher",
-                            detail=f"Real-time file protection cannot watch {self.path_user}; will retry",
+                            detail=self._loc(_LT["watcher_unavailable"]).format(self.path_user),
                             success=False,
                         )
                         time.sleep(5)
@@ -477,7 +480,7 @@ class RealtimeMixin:
                     self.write_log(
                         "INFO",
                         "File Watcher",
-                        detail="Real-time file protection is on (watching the user profile for file changes)",
+                        detail=self._loc(_LT["watcher_on"]),
                     )
 
             bytes_returned = ctypes.wintypes.DWORD()
@@ -816,7 +819,7 @@ class RealtimeMixin:
                         self.write_log(
                             "BLOCK",
                             "File Block",
-                            detail=None if quarantined >= 1 else "隔离区未新增(条目已存在或锁定失败)",
+                            detail=None if quarantined >= 1 else self._loc(_LT["quarantine_no_new"]),
                             source=file_path,
                             file_hash=self.calc_file_hash(file_path),
                         )

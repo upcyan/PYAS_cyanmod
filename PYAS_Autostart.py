@@ -13,6 +13,8 @@ import ctypes
 import ctypes.wintypes
 from concurrent.futures import ThreadPoolExecutor
 
+from PYAS_LogTexts import LOG_TEXTS as _LT
+
 
 class AutostartMixin:
     def _set_registry_autostart(self, enable):
@@ -300,7 +302,7 @@ if ($Legacy -and (Resolve-Sid $Legacy.Definition.Principal.UserId) -eq $Sid -and
                 self.write_log(
                     "WARN",
                     "manage_autostart",
-                    detail="Could not update the HKCU Run autostart entry",
+                    detail=self._loc(_LT["autostart_hkcu_failed"]),
                     success=False,
                 )
                 return False
@@ -344,7 +346,7 @@ if ($Legacy -and (Resolve-Sid $Legacy.Definition.Principal.UserId) -eq $Sid -and
             self.write_log(
                 "WARN",
                 "manage_autostart",
-                detail="Could not update the HKCU Run autostart entry",
+                detail=self._loc(_LT["autostart_hkcu_failed"]),
                 success=False,
             )
             return False
@@ -353,7 +355,7 @@ if ($Legacy -and (Resolve-Sid $Legacy.Definition.Principal.UserId) -eq $Sid -and
         self.write_log(
             "INFO",
             "manage_autostart",
-            detail="Autostart configured via registry (HKCU Run)",
+            detail=self._loc(_LT["autostart_registry"]),
             success=True,
         )
         return True
@@ -541,7 +543,7 @@ if ($Legacy -and (Resolve-Sid $Legacy.Definition.Principal.UserId) -eq $Sid -and
             self.write_log(
                 "WARN",
                 "manage_autostart",
-                detail="Elevated autostart setup failed; using the standard startup entry instead",
+                detail=self._loc(_LT["autostart_task_failed"]),
                 success=False,
             )
             return False
@@ -573,7 +575,7 @@ if ($Legacy -and (Resolve-Sid $Legacy.Definition.Principal.UserId) -eq $Sid -and
             self.write_log(
                 "WARN",
                 "manage_autostart",
-                detail="Elevated autostart setup failed; using the standard startup entry instead",
+                detail=self._loc(_LT["autostart_task_failed"]),
                 success=False,
             )
             return False
@@ -584,7 +586,7 @@ if ($Legacy -and (Resolve-Sid $Legacy.Definition.Principal.UserId) -eq $Sid -and
             "INFO",
             "manage_autostart",
             source=state["taskName"],
-            detail="Autostart configured via scheduled task (administrator at startup)",
+            detail=self._loc(_LT["autostart_task"]),
             success=True,
         )
         return True
@@ -889,7 +891,7 @@ if ($Legacy -and (Resolve-Sid $Legacy.Definition.Principal.UserId) -eq $Sid -and
             self.write_log(
                 "WARN",
                 "manage_startup",
-                detail="One or more startup items could not be updated",
+                detail=self._loc(_LT["startup_partial_failed"]),
                 success=False,
             )
 

@@ -8,6 +8,8 @@ import time
 from contextlib import contextmanager
 from uuid import uuid4
 
+from PYAS_LogTexts import LOG_TEXTS as _LT
+
 MAX_RULES = 256
 REPEAT_SECONDS = 60
 REPEAT_USES = 100
@@ -372,7 +374,7 @@ class AlertPolicyMixin:
                 return False
 
         if hasattr(self, "write_log"):
-            self.write_log("INFO", "Config Update", detail=f"Release record removed: {kind}/{str(ident)[:16]}")
+            self.write_log("INFO", "Config Update", detail=self._loc(_LT["release_removed"]).format(f"{kind}/{str(ident)[:16]}"))
         return True
 
     def clear_release_records(self, kind=None):
@@ -397,7 +399,7 @@ class AlertPolicyMixin:
             self._recent_alert_decisions = {}
 
         if changed and hasattr(self, "write_log"):
-            self.write_log("INFO", "Config Update", detail=f"Release records cleared: {kind or 'all'}")
+            self.write_log("INFO", "Config Update", detail=self._loc(_LT["release_cleared"]).format(kind or "all"))
         return True
 
     def _remember_alert_decisions(self, requests, choice, repeat=False):

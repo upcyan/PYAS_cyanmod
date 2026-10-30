@@ -4,6 +4,8 @@ import time
 import threading
 import requests
 
+from PYAS_LogTexts import LOG_TEXTS as _LT
+
 
 class CloudScanner:
     def __init__(self):
@@ -309,7 +311,7 @@ class CloudQueueMixin:
 
             if not success and not cancel_event.is_set():
                 self.write_log(
-                    "WARN", "Cloud API", source=file_path, detail="Failed", success=False
+                    "WARN", "Cloud API", source=file_path, detail=self._loc(_LT["cloud_failed"]), success=False
                 )
 
         except Exception as e:

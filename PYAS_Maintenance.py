@@ -5,6 +5,8 @@ import ctypes
 import ctypes.wintypes
 from PYAS_WinAPI import SHQUERYRBINFO
 
+from PYAS_LogTexts import LOG_TEXTS as _LT
+
 
 class MaintenanceMixin:
     def _traverse_delete(self, path):
@@ -173,7 +175,7 @@ class MaintenanceMixin:
                     pass
 
             self.write_log(
-                "INFO", "Clean Junk", detail=f"Deleted {total_deleted // 1024} KB", operate=True
+                "INFO", "Clean Junk", detail=self._loc(_LT["junk_deleted"]).format(total_deleted // 1024), operate=True
             )
             return total_deleted
 
@@ -267,7 +269,7 @@ class MaintenanceMixin:
                 self.write_log(
                     "INFO",
                     "Memory Boost",
-                    detail=f"Optimized {optimized_count} processes",
+                    detail=self._loc(_LT["mem_optimized"]).format(optimized_count),
                     operate=True,
                 )
 

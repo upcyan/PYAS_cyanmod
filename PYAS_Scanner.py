@@ -13,6 +13,8 @@ from PYAS_Tools import MEMORY_BASIC_INFORMATION
 from PYAS_Cloud import CloudQueueMixin
 from PYAS_Detection import DetectionResult, detection_result
 
+from PYAS_LogTexts import LOG_TEXTS as _LT
+
 
 class ScannerMixin(CloudQueueMixin):
     def init_engine_thread(self):
@@ -27,7 +29,7 @@ class ScannerMixin(CloudQueueMixin):
 
             self.heuristic.load_path(self.path_heuristic, callback=log_callback)
             self.properties.load_path(self.path_properties, callback=log_callback)
-            self.write_log("INFO", "System", detail="Engine Initialization Complete")
+            self.write_log("INFO", "System", detail=self._loc(_LT["engine_ready"]))
 
             if "-scan" in self.args_pyas:
                 try:
@@ -88,7 +90,7 @@ class ScannerMixin(CloudQueueMixin):
                         self.write_log(
                             "WARN",
                             "System",
-                            detail="Driver Protection Failed to Start",
+                            detail=self._loc(_LT["driver_start_failed"]),
                             success=False,
                         )
 

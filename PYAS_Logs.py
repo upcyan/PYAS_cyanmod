@@ -11,6 +11,8 @@ import uuid
 import webview
 from PYAS_Storage import atomic_write_json
 
+from PYAS_LogTexts import LOG_TEXTS as _LT
+
 
 class LogMixin:
     def load_logs(self):
@@ -146,7 +148,7 @@ class LogMixin:
                     self.write_log(
                         "INFO",
                         "Log Write Failed",
-                        detail="日志落盘已恢复",
+                        detail=self._loc(_LT["log_flush_recovered"]),
                         ui_visible=True,
                     )
                 return True

@@ -133,6 +133,8 @@ import threading as _threading
 import time as _time
 import hashlib as _hashlib
 
+from PYAS_LogTexts import LOG_TEXTS as _LT
+
 _VERDICT_CACHE = {}
 _VERDICT_CACHE_LOCK = _threading.Lock()
 _VERDICT_CACHE_TTL = 86400     # 24 小时:建议基于路径+SHA-256+检测的静态证据,反复触发无需重复询问模型
@@ -287,7 +289,7 @@ class AIMixin:
                         proposed['ai_api_key_enc'] = protect_ai_key(incoming)
                     except Exception:
                         log_exception('PYAS_AI.AIMixin.save_ai_config.encrypt')
-                        self.write_log('WARN', 'AI Config', detail='DPAPI encrypt failed; key not saved', success=False)
+                        self.write_log('WARN', 'AI Config', detail=self._loc(_LT["ai_key_encrypt_failed"]), success=False)
                         return {'ok': False, 'error': 'encrypt_failed'}
                     proposed['ai_api_key'] = ''
             changed = proposed != before
@@ -301,7 +303,7 @@ class AIMixin:
                     self._ai_config_epoch += 1
                     clear_verdict_cache()
                 return {'ok': False, 'error': 'persist_failed'}
-        self.write_log('INFO', 'AI Config', detail='Model access settings saved')
+        self.write_log('INFO', 'AI Config', detail=self._loc(_LT["ai_settings_saved"]))
         return {'ok': True}
 
     def test_ai_connection(self):

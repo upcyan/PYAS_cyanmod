@@ -8,6 +8,7 @@ import subprocess
 import ctypes
 import ctypes.wintypes
 from PYAS_WinAPI import (
+
     FILE_ATTRIBUTE_NORMAL,
     FILE_SHARE_READ,
     FILE_SHARE_WRITE,
@@ -23,6 +24,8 @@ from PYAS_WinAPI import (
     STORAGE_HOTPLUG_INFO,
     STORAGE_PROPERTY_QUERY,
 )
+
+from PYAS_LogTexts import LOG_TEXTS as _LT
 
 
 class SystemMixin:
@@ -572,7 +575,7 @@ class SystemMixin:
                 self.repair_system_wallpaper()
 
             self.write_log(
-                "INFO", "System Repair", detail=f"Repaired {len(items)} items", operate=True
+                "INFO", "System Repair", detail=self._loc(_LT["repair_done"]).format(len(items)), operate=True
             )
             return True
 

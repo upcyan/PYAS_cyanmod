@@ -8,6 +8,8 @@ import os
 import uuid
 import math
 
+from PYAS_LogTexts import LOG_TEXTS as _LT
+
 
 def normalized_path(path):
     return os.path.normcase(os.path.normpath(path)) if isinstance(path, str) and path else ""
@@ -591,7 +593,7 @@ class PopupWindowMixin:
                 self.write_log(
                     "INFO",
                     "Config Update",
-                    detail=f"Popup rule added: {rule['exe']} [{rule['id']}]",
+                    detail=self._loc(_LT["popup_rule_added"]).format(f"{rule['exe']} [{rule['id']}]"),
                 )
 
             pending.pop(rule["id"], None)
@@ -640,7 +642,7 @@ class PopupWindowMixin:
             self.write_log(
                 "INFO",
                 "Config Update",
-                detail=f"Popup rules removed: {len(rules) - len(remaining)}",
+                detail=self._loc(_LT["popup_rules_removed"]).format(len(rules) - len(remaining)),
             )
             self.save_config()
             return True
@@ -735,7 +737,7 @@ class PopupWindowMixin:
                                         "INFO",
                                         "Popup Blocker",
                                         source=target["path"],
-                                        detail=f"Hidden popup window: {target['title']}",
+                                        detail=self._loc(_LT["popup_hidden"]).format(target["title"]),
                                         pid=target["pid"],
                                     )
                             elif first_hide:
@@ -747,7 +749,7 @@ class PopupWindowMixin:
                                         "WARN",
                                         "Popup Blocker",
                                         source=target["path"],
-                                        detail="Unable to hide selected window",
+                                        detail=self._loc(_LT["popup_hide_failed"]),
                                         pid=target["pid"],
                                         success=False,
                                     )

@@ -99,6 +99,8 @@ from PYAS_Runtime import RuntimeMixin
 from PYAS_AI import AIMixin
 from PYAS_Agents import AgentMonitorMixin
 
+from PYAS_LogTexts import LOG_TEXTS as _LT
+
 
 class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin, AIMixin, AgentMonitorMixin):
     def __init__(self):
@@ -730,7 +732,7 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
             self.write_log(
                 "INFO",
                 "register_context_menu",
-                detail=f"classic context menu {'enabled' if enable else 'disabled'}",
+                detail=self._loc(_LT["classic_menu_on"] if enable else _LT["classic_menu_off"]),
             )
             return True
 
@@ -1121,7 +1123,9 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
             self.write_log(
                 "WARN",
                 "Driver Protection",
-                detail=f"Controlled {action} failed: 0x{driver_error & 0xFFFFFFFF:08X}",
+                detail=self._loc(_LT["driver_control_failed"]).format(
+                        "unload" if uninstall_driver else "load",
+                        f"0x{driver_error & 0xFFFFFFFF:08X}"),
                 success=False,
             )
 
@@ -1251,7 +1255,7 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
         self.write_log(
             "WARN",
             "Notification Permission",
-            detail="Windows notifications are disabled",
+            detail=self._loc(_LT["notify_disabled"]),
             success=False,
         )
 
@@ -1521,7 +1525,7 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
                 self.write_log(
                     "WARN",
                     "register_context_menu",
-                    detail="Registry operation failed",
+                    detail=self._loc(_LT["menu_registry_failed"]),
                     success=False,
                 )
 
@@ -1541,7 +1545,7 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
             if success and not modern_success and not getattr(self, '_menu_attempt_skipped', False):
                 self.write_log(
                     "INFO", "Context Menu Fallback",
-                    detail="Modern menu registration failed; scanning remains available in the original context menu (Show more options on Windows 11).",
+                    detail=self._loc(_LT["menu_fallback"]),
                     success=True,
                 )
             # The modern helper is a no-op on Windows 10/source runs; it must
@@ -1586,7 +1590,7 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
         menu_path = os.path.join(self.path_pyas, 'Menu')
         script = os.path.join(menu_path, 'register_menu.ps1' if enable else 'unregister_menu.ps1')
         if not os.path.isfile(script):
-            self.write_log('WARN', 'Modern Context Menu', detail='Registration files are missing', success=False)
+            self.write_log('WARN', 'Modern Context Menu', detail=self._loc(_LT["menu_files_missing"]), success=False)
             return remember(False, 'Registration files are missing')
         command = [os.path.join(self.path_system, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
             '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script]

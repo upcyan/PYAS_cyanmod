@@ -4,6 +4,8 @@ import os
 import time
 import shutil
 
+from PYAS_LogTexts import LOG_TEXTS as _LT
+
 
 class ThreatMixin:
     def manage_named_list(self, list_key, files, action="add", lock_func=None):
@@ -140,12 +142,12 @@ class ThreatMixin:
                         self.sync_driver_whitelist(value, action != "add", is_directory)
                     self.write_log(
                         "WARN", "Config Update",
-                        detail=f"List [{list_key}] {action} not saved: {acted_items}",
+                        detail=self._loc(_LT["list_add_failed"]).format(list_key, acted_items),
                         success=False,
                     )
                     return 0
                 self.write_log(
-                    "INFO", "Config Update", detail=f"List [{list_key}] {action}: {acted_items}"
+                    "INFO", "Config Update", detail=self._loc(_LT["list_add_done"]).format(list_key, acted_items)
                 )
 
         return len(acted_items)
@@ -214,12 +216,12 @@ class ThreatMixin:
                         self.sync_driver_whitelist(value, True, is_directory)
                     self.write_log(
                         "WARN", "Config Update",
-                        detail=f"List [{list_key}] remove not saved: {removed_items}",
+                        detail=self._loc(_LT["list_remove_failed"]).format(list_key, removed_items),
                         success=False,
                     )
                     return False
                 self.write_log(
-                    "INFO", "Config Update", detail=f"List [{list_key}] remove: {removed_items}"
+                    "INFO", "Config Update", detail=self._loc(_LT["list_remove_done"]).format(list_key, removed_items)
                 )
                 return True
 

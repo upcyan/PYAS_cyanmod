@@ -17,6 +17,8 @@ from PYAS_AI import (request_ai_verdict_cached, make_verdict_cache_key, is_verdi
                      clamp_ai_delay_seconds, AI_DELAY_DEFAULT, verdict_profile_key, ai_settings_identity)
 from PYAS_Decisions import AlertPolicyMixin
 
+from PYAS_LogTexts import LOG_TEXTS as _LT
+
 
 WS_CHILD = 0x40000000
 WS_VISIBLE = 0x10000000
@@ -2896,10 +2898,13 @@ class DialogMixin(AlertPolicyMixin):
                 etw_peek = layer.etw.peek("\\" + source[3:])
 
             status = layer.status()
-            detail = "attribution miss: {0}; etw_peek={1}; layer={2}".format(
-                str(source)[-120:],
-                ("pid={0} name={1} age={2:.0f}s".format(*etw_peek)
-                 if etw_peek else "never_recorded"),
+            recorded = (
+                "pid={0} name={1} age={2:.0f}s".format(*etw_peek)
+                if etw_peek
+                else self._loc(_LT["attribution_never_recorded"])
+            )
+            detail = self._loc(_LT["attribution_miss"]).format(
+                str(source)[-120:], recorded,
                 {k: status.get(k) for k in ("driver_entries", "etw_entries")},
             )
             self.write_log("INFO", "ETW Attribution", detail=detail)
