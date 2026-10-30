@@ -21,7 +21,7 @@ BOOL_KEYS = frozenset({'process_switch', 'suspend_switch', 'load_switch', 'docum
     'cloud_switch', 'suffix_switch', 'autostart_switch', 'context_switch', 'interactive_switch',
     'interactive_auto_block', 'classic_menu_switch', 'agent_switch', 'ai_assist_switch',
     'ai_auto_execute', 'ai_delay_switch', 'etw_attribution_switch', 'behavior_defense_switch',
-    'behavior_auto_rollback', 'elevated_run_switch'})
+    'behavior_auto_rollback', 'elevated_run_switch', 'canary_switch'})
 STRING_KEYS = frozenset({'api_host', 'api_key', 'ai_provider_mode', 'ai_base_url',
     'ai_api_key', 'ai_api_key_enc', 'ai_model'})
 NUMBER_KEYS = frozenset({'size', 'interactive_timeout', 'ai_auto_execute_timeout', 'ai_delay_seconds', 'behavior_snapshot_history'})

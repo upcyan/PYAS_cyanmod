@@ -775,6 +775,42 @@ class VssSnapshotManager:
         except (OSError, ValueError):
             pass
 
+    def verify_snapshots_intact(self):
+        """卷影完整性巡检:在册快照被外部删除(vssadmin/WMI/磁盘清理) =
+        勒索软件破坏回滚能力的典型前置动作,必须告警。
+
+        返回 None=无法判断(VSS 查询失败/服务未响应,不误报);
+        dict(missing=[...])=有在册 ID 从系统中消失。
+        """
+        try:
+            present = set(list_shadow_devices().keys())
+        except Exception:
+            logger.debug("shadow integrity check could not list devices", exc_info=True)
+            return None
+
+        if not present:
+            # 系统里一个卷影都没有:可能是 VSS 被清理,也可能我们本来
+            # 就没有在册快照 —— 只在有在册快照丢失时告警
+            pass
+
+        with self._lock:
+            managed = {
+                drive: [item.get("id") for item in entry.get("history", []) if item.get("id")]
+                for drive, entry in self._snapshots.items()
+            }
+
+        missing = []
+
+        for drive, ids in managed.items():
+            for shadow_id in ids:
+                if shadow_id.lower() not in present:
+                    missing.append(f"{drive}:{shadow_id}")
+
+        if missing:
+            logger.warning("managed shadow copies disappeared: %s", ", ".join(missing))
+
+        return {"missing": missing}
+
     def _save_state(self):
         payload = {
             drive: {

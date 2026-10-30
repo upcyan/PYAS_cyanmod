@@ -11,6 +11,7 @@ from PYAS_Behavior import (
     L2_SNAPSHOT_COOLDOWN_SECONDS, L2_THRESHOLD, L2_WINDOW_SECONDS, TouchedFilesLedger,
 )
 from PYAS_Version import VERSION
+from PYAS_Canary import CanaryMixin
 
 
 class RuntimeMixin:
@@ -210,6 +211,8 @@ class RuntimeMixin:
             "elevation_prompt_auto": True,
             # 卷影快照每卷保留的历史份数
             "behavior_snapshot_history": 3,
+            # 蜜罐文档:用户文档区布点诱饵,被触碰即高置信勒索告警
+            "canary_switch": True,
             "network_switch": False,
             "extension_switch": False,
             "sensitive_switch": False,

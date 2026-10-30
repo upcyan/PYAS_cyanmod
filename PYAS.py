@@ -98,11 +98,12 @@ from PYAS_Logs import LogMixin
 from PYAS_Runtime import RuntimeMixin
 from PYAS_AI import AIMixin
 from PYAS_Agents import AgentMonitorMixin
+from PYAS_Canary import CanaryMixin
 
 from PYAS_LogTexts import LOG_TEXTS as _LT
 
 
-class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin, AIMixin, AgentMonitorMixin):
+class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, RuntimeMixin, AIMixin, AgentMonitorMixin, CanaryMixin):
     def __init__(self):
         self._policy_required = True
         self._window = None

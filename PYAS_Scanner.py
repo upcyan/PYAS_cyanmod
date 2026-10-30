@@ -17,10 +17,37 @@ from PYAS_LogTexts import LOG_TEXTS as _LT
 
 
 class ScannerMixin(CloudQueueMixin):
+    def shadow_integrity_thread(self):
+        """在册卷影被外部删除 = 勒索破坏回滚能力的前置动作,轮询告警。
+
+        首轮延迟(等引擎与提权就绪);查询失败不误报,只在「确认消失」时告警。
+        """
+        import time as _time
+
+        _time.sleep(300.0)
+
+        while True:
+            try:
+                result = self.verify_snapshots_intact()
+
+                if result and result.get("missing"):
+                    self.write_log(
+                        "WARN", "Behavior Snapshot",
+                        detail=self._loc(_LT["shadow_integrity_violation"]).format(
+                            ", ".join(result["missing"][:4])),
+                        success=False,
+                    )
+            except Exception:
+                log_exception("PYAS_Scanner.ScannerMixin.shadow_integrity_thread")
+
+            _time.sleep(300.0)
+
     def init_engine_thread(self):
         try:
             self.start_daemon_thread(self.backup_mbr)
             self.start_daemon_thread(self.relock_file)
+            self.start_daemon_thread(self.canary_housekeeping)
+            self.start_daemon_thread(self.shadow_integrity_thread)
             self.init_whitelist()
             self.start_daemon_thread(self.popup_intercept_thread)
 
@@ -151,10 +178,40 @@ class ScannerMixin(CloudQueueMixin):
             log_exception("PYAS_Scanner.ScannerMixin._is_reparse_point:101")
             return False
 
+    AMSI_SCRIPT_EXTS = frozenset({
+        ".js", ".jse", ".vbs", ".vbe", ".wsf", ".wsh", ".ps1", ".psm1",
+        ".hta", ".bat", ".cmd",
+    })
+
+    def _amsi_scan(self, file_path):
+        """AMSI 脚本内容扫描通道(独立/fail-open):命中返回判定,否则 None。"""
+        try:
+            if os.path.splitext(file_path)[1].lower() not in self.AMSI_SCRIPT_EXTS:
+                return None
+
+            from PYAS_Amsi import get_scanner
+
+            outcome = get_scanner().scan_file(file_path)
+
+            if outcome and outcome[0]:
+                return detection_result(f"AMSI.Script.{outcome[1]}", "am")
+        except Exception:
+            log_exception("PYAS_Scanner.ScannerMixin._amsi_scan")
+
+        return None
     def scan_engine(self, file_path):
         with self.lock_config:
             ext_switch = self.pyas_config.get("extension_switch", False)
             sen_switch = self.pyas_config.get("sensitive_switch", False)
+
+        try:
+            amsi_label = self._amsi_scan(file_path)
+
+            if amsi_label:
+                return amsi_label
+        except Exception:
+            log_exception("PYAS_Scanner.ScannerMixin.scan_engine:amsi")
+            pass
 
         try:
             pe_label, pe_score = self.properties.pe_scan(file_path, enhanced_mode=sen_switch)
