@@ -3,6 +3,7 @@
 import io
 import os
 import sys
+import tempfile
 import threading
 import unittest
 import zipfile
@@ -37,7 +38,9 @@ class CanaryTests(unittest.TestCase):
 
         self.assertIn("word/document.xml", archive.namelist())
         document = archive.read("word/document.xml").decode("utf-8")
-        self.assertIn("PYAS", document, "文档内容必须内嵌 PYAS 声明,防止用户误认为真实文档")
+        # 对抗要求:正文不得携带任何安全相关指纹(会被对抗型勒索嗅探跳过)
+        for banned in ("PYAS", "诱饵", "勒索", "防护", "杀毒"):
+            self.assertNotIn(banned, document, f"正文不得包含指纹字段: {banned}")
 
     def test_trigger_fires_once_per_pid_with_rollback(self):
         host = CanaryHost()
@@ -73,6 +76,37 @@ class CanaryTests(unittest.TestCase):
 
         self.assertEqual(host.logs, [], "开关关闭时不告警")
         self.assertEqual(host.rollbacks, [])
+
+    def test_legacy_fingerprint_upgraded_and_ads_written(self):
+        """对抗加固:旧版诱饵正文内嵌「PYAS/诱饵」指纹(会被对抗型勒索
+        嗅探跳过),巡检检测到即换新为随机正文,并在 NTFS 备用数据流写入
+        声明(正文与用途解耦)。"""
+        from unittest.mock import patch
+
+        import PYAS_Canary
+
+        with tempfile.TemporaryDirectory() as base:
+            legacy = os.path.join(base, "财务报表_2026.docx")
+
+            with open(legacy, "wb") as handle:
+                handle.write(b"PK legacy with PYAS Security Cyanmod fingerprint")
+
+            host = CanaryHost({"canary_switch": True})
+            host.path_user = base
+
+            with patch.object(PYAS_Canary, "_shell_folder", staticmethod(lambda csidl: base)):
+                host.ensure_canaries()
+
+            data = open(legacy, "rb").read()
+            self.assertNotIn(b"PYAS", data, "旧指纹正文必须被换新")
+
+            # NTFS 备用数据流:声明与正文解耦,枚举/Word 均不可见
+            try:
+                with open(legacy + ":pyas_canary", encoding="utf-8") as stream:
+                    declaration = stream.read()
+                self.assertIn("PYAS", declaration)
+            except OSError:
+                self.skipTest("当前卷不支持 NTFS 备用数据流")
 
     def test_non_canary_path_is_zero_cost(self):
         host = CanaryHost()

@@ -13,6 +13,7 @@
 以及可选的 _behavior_maybe_rollback(pid)(命中后触发自动回滚)。
 """
 import ctypes
+import io
 import logging
 import os
 import time
@@ -45,16 +46,39 @@ def _shell_folder(csidl: int) -> str:
         return ""
 
 
+# 正文句库:通用办公文档的中性句子,**不含任何安全/杀软/诱饵相关词**。
+# 勒索软件若在加密前嗅探内容,"PYAS/诱饵/防护"等字段就是跳过蜜罐的
+# 指纹 —— 正文必须像一份真实文档,且每次布点随机拼接(hash 不固定)。
+# 声明(这是 PYAS 的诱饵、勿删、如何关闭)写入 NTFS 备用数据流
+# <file>:pyas_canary,资源管理器与 Word 均不可见,普通枚举不读取。
+_DOCUMENT_SENTENCES = (
+    "本周例会讨论了项目排期,各模块负责人需在下周五前提交进度说明。",
+    "请相关部门核对上月台账,差异项以书面形式反馈至综合办公室。",
+    "系统升级安排在周末进行,期间服务可能出现短暂中断。",
+    "会议纪要已同步至共享目录,如有遗漏请及时补充。",
+    "本季度预算执行情况整体平稳,个别科目需在月末前调整。",
+    "新版本部署完成后,请各终端自行确认功能是否正常。",
+    "对外合作文本的修订意见截止本月底,逾期视为无异议。",
+    "值班安排已更新,节假日值守人员以最新表格为准。",
+    "档案室将于下周一例行盘点,期间暂停纸质资料借阅。",
+    "请勿将内部资料上传至外部网盘,遵守信息安全基本要求。",
+)
+
+
+def _canary_document_text() -> str:
+    """随机拼接的中性正文(每次布点不同,消除内容指纹)。"""
+    import random
+
+    sentences = random.sample(_DOCUMENT_SENTENCES, 4)
+    return "".join(f"<w:p><w:r><w:t>{s}</w:t></w:r></w:p>" for s in sentences)
+
+
 def _canary_docx_bytes() -> bytes:
-    """最小 OOXML 文档,内容即声明 —— 用户双击打开就能看到说明。"""
+    """最小 OOXML 文档:随机中性正文,无任何可指纹化的安全字段。"""
     document = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-        "<w:body><w:p><w:r><w:t>PYAS Security Cyanmod \u52d2\u7d22\u9632\u62a4\u8bf1\u9975\u6587\u4ef6</w:t></w:r></w:p>"
-        "<w:p><w:r><w:t>\u8fd9\u662f\u6740\u6bd2\u8f6f\u4ef6\u6545\u610f\u653e\u7f6e\u7684\u8bf1\u9975\u6587\u4ef6\uff0c\u7528\u4e8e\u68c0\u6d4b\u52d2\u7d22\u884c\u4e3a\u3002"
-        "\u8bf7\u52ff\u7f16\u8f91\u6216\u5220\u9664\uff1b\u5220\u9664\u540e\u4f1a\u81ea\u52a8\u6062\u590d\u3002"
-        "\u5982\u9700\u5173\u95ed\u6b64\u529f\u80fd\uff0c\u8bf7\u5230\u9632\u62a4\u9875\u7684\u300c\u52d2\u7d22\u8bf1\u9975\u300d\u5f00\u5173\u3002</w:t></w:r></w:p>"
-        "</w:body></w:document>"
+        "<w:body>" + _canary_document_text() + "</w:body></w:document>"
     )
     content_types = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -70,7 +94,7 @@ def _canary_docx_bytes() -> bytes:
         '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
         "</Relationships>"
     )
-    buffer = io_bytes()
+    buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("[Content_Types].xml", content_types)
         archive.writestr("_rels/.rels", rels)
@@ -78,9 +102,22 @@ def _canary_docx_bytes() -> bytes:
     return buffer.getvalue()
 
 
-def io_bytes():
-    import io
-    return io.BytesIO()
+def _write_declaration_stream(full_path: str) -> None:
+    """把「这是 PYAS 蜜罐」的声明写入 NTFS 备用数据流(ADS)。
+
+    Word/资源管理器/普通目录枚举都看不到备用流,防误删说明与诱饵
+    内容解耦 —— 内容不再携带任何可被勒索软件嗅探的安全字段。非 NTFS
+    卷写入失败可容忍(声明仅服务于人工排查)。
+    """
+    try:
+        with open(full_path + ":pyas_canary", "w", encoding="utf-8") as stream:
+            stream.write(
+                "PYAS Security Cyanmod 勒索防护诱饵文件。请勿删除或编辑;"
+                "删除后由 PYAS 自动恢复。如需关闭此功能,请到防护页的"
+                "「勒索诱饵」开关。"
+            )
+    except OSError:
+        logger.debug("canary declaration stream not written (non-NTFS?)", exc_info=True)
 
 
 class CanaryMixin:
@@ -139,12 +176,28 @@ class CanaryMixin:
             for _key, (full, payload) in self.canary_paths().items():
                 try:
                     if os.path.isfile(full):
-                        continue
+                        # 兼容换新:早期版本诱饵正文内嵌「PYAS/诱饵」指纹,
+                        # 会被对抗型勒索嗅探跳过 —— 检测到即重写为随机正文
+                        try:
+                            with open(full, "rb") as existing:
+                                head = existing.read(4096)
 
+                            if b"PYAS" in head:
+                                with open(full, "wb") as handle:
+                                    handle.write(payload)
+
+                                planted += 1
+                                _write_declaration_stream(full)
+                        except OSError:
+                            pass
+
+                        continue
                     os.makedirs(os.path.dirname(full), exist_ok=True)
 
                     with open(full, "wb") as handle:
                         handle.write(payload)
+
+                    _write_declaration_stream(full)
 
                     ctypes.windll.kernel32.SetFileAttributesW(full, FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)
                     planted += 1
