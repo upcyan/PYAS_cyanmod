@@ -2111,8 +2111,9 @@ class EtwMixin:
         if self._etw_path_noise(path) or not self._etw_should_track(path):
             return
 
-        # 蜜罐文档检测(独立模块,fail-safe,不影响主链)
-        self._canary_on_write(pid, path)
+        # 蜜罐文档检测(独立模块,fail-safe:宿主未挂载 CanaryMixin 时跳过)
+        if hasattr(self, "_canary_on_write"):
+            self._canary_on_write(pid, path)
 
         # 层 B:写入时刻记录发起方;名字此刻解析,进程退出后仍可归因
         try:
