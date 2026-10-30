@@ -69,6 +69,8 @@ class _Owner:
 
     def write_log(self, level, action, **kwargs):
         self.logs.append({"level": level, "action": action, **kwargs})
+    def _loc(self, texts):
+        return texts.get('simplified_switch') or next(iter(texts.values()))
 
 
 def _write_sentinel(data_dir, nonce="nonce01"):

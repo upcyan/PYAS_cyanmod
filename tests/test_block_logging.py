@@ -40,6 +40,7 @@ class RealtimeBlockLogTests(unittest.TestCase):
         owner.request_block_decision = Mock(return_value=block)
         owner.calc_file_hash = Mock(return_value="deadbeef")
         owner.write_log = Mock()
+        owner._loc = Mock(return_value="隔离区未新增(条目已存在或锁定失败)")
         owner.manage_named_list = (
             Mock(side_effect=RuntimeError("quarantine unavailable"))
             if raises else Mock(return_value=quarantined)

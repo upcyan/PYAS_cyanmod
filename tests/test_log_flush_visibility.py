@@ -30,6 +30,8 @@ class LogOwner(LogMixin):
         self._window = None
         self.file_log = r"C:\ProgramData\PYAS\Report.json"
         self._flush_failing = False
+    def _loc(self, texts):
+        return texts.get("simplified_switch") or next(iter(texts.values()))
 
 
 class FlushVisibilityTests(unittest.TestCase):

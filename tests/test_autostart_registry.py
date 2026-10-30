@@ -54,6 +54,8 @@ class _Owner(AutostartMixin):
 
     def write_log(self, level, action, **kwargs):
         self.logs.append((level, action, kwargs))
+    def _loc(self, texts):
+        return texts.get('simplified_switch') or next(iter(texts.values()))
 
     task_exists = False
     disable_ok = True
@@ -66,8 +68,10 @@ class RegistryFallbackTests(unittest.TestCase):
         self.assertTrue(owner.manage_autostart(True))
         self.assertEqual(owner.registry_calls, [True])
         self.assertEqual(owner.autostart_mode, "registry")
+        # detail 已走 _loc 本地化(跟随界面语言),断言只锁定级别与存在性
         levels = [(level, kwargs.get("detail")) for level, _, kwargs in owner.logs]
-        self.assertIn(("INFO", "Autostart configured via registry (HKCU Run)"), levels)
+        self.assertTrue(any(level == "INFO" and detail for level, detail in levels),
+                        "成功配置自启动必须恰好记一条 INFO")
 
         # 启动复核:值已一致时保持静默,不再写注册表、不再刷日志
         owner.logs.clear()

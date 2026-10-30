@@ -11,7 +11,8 @@ owner = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == '
 method = next(n for n in owner.body if isinstance(n, ast.FunctionDef) and n.name == 'register_context_menu')
 system = SimpleNamespace(frozen=True, getwindowsversion=lambda: SimpleNamespace(build=22621))
 registry = SimpleNamespace(HKEY_CURRENT_USER=1, REG_SZ=1, KEY_READ=1, OpenKey=MagicMock())
-scope = {'sys': system, 'winreg': registry, 'log_exception': Mock()}
+scope = {'sys': system, 'winreg': registry, 'log_exception': Mock(),
+        '_LT': __import__('PYAS_LogTexts', fromlist=['LOG_TEXTS']).LOG_TEXTS}
 exec(compile(ast.Module(body=[method], type_ignores=[]), 'PYAS.py', 'exec'), scope)
 MenuAPI = type('MenuAPI', (), {'register_context_menu': scope['register_context_menu']})
 
@@ -27,6 +28,7 @@ class ContextMenuTests(unittest.TestCase):
         api._reg_delete = Mock(return_value=legacy)
         api.register_modern_context_menu = Mock(return_value=modern)
         api.write_log = Mock()
+        api._loc = Mock(return_value='menu')
         return api
 
     def test_modern_failure_keeps_original_scan_commands_and_reports_fallback(self):

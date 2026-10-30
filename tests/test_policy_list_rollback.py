@@ -32,6 +32,9 @@ class Recorder:
         self.logs = []
         self.driver = []
 
+    def _loc(self, texts):
+        return texts.get("simplified_switch") or next(iter(texts.values()))
+
     def norm_path(self, value, must_exist=False):
         if isinstance(value, (list, tuple)):
             return [self.norm_path(item, must_exist) for item in value]

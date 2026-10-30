@@ -26,6 +26,8 @@ class StubOwner:
 
     def write_log(self, level, action, detail=None, success=True, **kwargs):
         self.logs.append((level, action, detail))
+    def _loc(self, texts):
+        return texts.get('simplified_switch') or next(iter(texts.values()))
 
     def lock_file(self, *args, **kwargs):
         pass

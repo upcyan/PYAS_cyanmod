@@ -61,7 +61,7 @@ class IconInstallTests(unittest.TestCase):
         cls.sprite_symbols = symbols_of(cls.sprite)
 
     def test_sprite_defines_expected_set(self):
-        self.assertEqual(len(self.sprite_symbols), 52, '重绘集应为 52 个 symbol')
+        self.assertEqual(len(self.sprite_symbols), 53, '重绘集应为 53 个 symbol')
         self.assertIn('i-spinner', self.sprite_symbols)
 
     def test_every_use_resolves_in_same_document(self):
@@ -114,8 +114,8 @@ class IconInstallTests(unittest.TestCase):
         """main.js 动态拼的 <use> 也要能在 index.html 解析到"""
         all_uses = uses_of(read(MAIN_JS))
         js_uses = sorted(set(all_uses))
-        self.assertEqual(len(all_uses), 5, 'main.js 应有 5 处 <use>: %s' % js_uses)
-        self.assertEqual(js_uses, ['i-chevron-down', 'i-close', 'i-copy', 'i-folder'],
+        self.assertEqual(len(all_uses), 6, 'main.js 应有 6 处 <use>: %s' % js_uses)
+        self.assertEqual(js_uses, ['i-chevron-down', 'i-chevron-left', 'i-close', 'i-copy', 'i-folder'],
                          'main.js 的图标集合变了: %s' % js_uses)
         defined = set(symbols_of(read(INDEX)))
         for used in sorted(js_uses):
@@ -130,8 +130,8 @@ class IconInstallTests(unittest.TestCase):
             self.assertIsNotNone(m, '%s 缺 stroke-width' % sid)
         var_count = sum(1 for sid, tag in self.sprite_symbols.items()
                         if sid != 'i-spinner' and 'stroke-width="var(--icon-stroke, 2)"' in tag)
-        self.assertEqual(var_count, 51,
-                         '除 i-spinner 外的 51 个 symbol 都应在 symbol 上用描边变量,实际 %d' % var_count)
+        self.assertEqual(var_count, 52,
+                         '除 i-spinner 外的 52 个 symbol 都应在 symbol 上用描边变量,实际 %d' % var_count)
         style = read(STYLE)
         self.assertIn('--icon-stroke: 1.5', style, '.item-icon 需用变量把描边传进 shadow')
         self.assertNotIn('stroke-width: 1.5', style, '对 use 无效的旧写法应已移除')

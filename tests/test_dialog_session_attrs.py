@@ -47,6 +47,8 @@ class ConfigApp(DialogMixin):
     def write_log(self, *args, **kwargs):
         self.logs.append((args, kwargs))
         return True
+    def _loc(self, texts):
+        return texts.get('simplified_switch') or next(iter(texts.values()))
 
 
 class _EventHook:

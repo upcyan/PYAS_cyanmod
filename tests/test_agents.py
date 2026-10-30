@@ -12,6 +12,8 @@ class Owner(AgentMonitorMixin):
 
     def write_log(self, *args, **kwargs):
         self.logs.append((args, kwargs))
+    def _loc(self, texts):
+        return texts.get('simplified_switch') or next(iter(texts.values()))
 
 
 class MatchTests(unittest.TestCase):

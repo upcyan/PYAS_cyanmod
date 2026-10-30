@@ -37,6 +37,9 @@ class WatcherHarness(RealtimeMixin):
     def write_log(self, *args, **kwargs):
         pass
 
+    def _loc(self, texts):
+        return texts.get('simplified_switch') or next(iter(texts.values()))
+
     def norm_path(self, path, must_exist=False):
         if not path:
             return ""
