@@ -397,6 +397,28 @@ class RecycleBinExclusionTests(unittest.TestCase):
         logs = [r for r in host.reached if isinstance(r, tuple) and r[0] == "log"]
         self.assertEqual(len(logs), 1, "目标不在写入方安装树内必须告警")
 
+    def test_temp_unpacking_exempt_even_unsigned(self):
+        """未签名安装器在 Temp 解包(NSIS 7z-out,实测 MiniMax Code Setup
+        解包 node_modules 的 .md/.txt 撞阈值)是最高频的正常行为:临时区
+        豁免不要求签名;程序区域其余位置未签名写入仍照常告警。"""
+        host = self.make_host()
+        host.trusted_pids = set()  # 写入方无签名
+
+        host._on_etw_write(700, "C:\\Users\\sublime\\AppData\\Local\\Temp\\nst392A.tmp\\7z-out\\LICENSE.electron.txt")
+        host._on_etw_write(700, "C:\\Users\\sublime\\AppData\\Local\\Temp\\nst392A.tmp\\7z-out\\resources\\app.asar.unpacked\\MCODE_FORK.md")
+
+        self.assertEqual(
+            [r for r in host.reached if isinstance(r, tuple) and r[0] == "log"],
+            [], "Temp 解包不得触发勒索告警",
+        )
+
+        # 对照:同样未签名,写 Temp 之外的程序区域必须照常告警
+        host._on_etw_write(700, "C:\\Program Files\\Victim\\c.docx")
+        host._on_etw_write(700, "D:\\Apps\\Victim\\d.docx")
+
+        logs = [r for r in host.reached if isinstance(r, tuple) and r[0] == "log"]
+        self.assertEqual(len(logs), 1, "Temp 之外的未签名程序区域写入照常告警")
+
     def test_user_documents_still_fire_after_segment_exclusion(self):
         """段名排除不得误伤用户文档区:勒索的主战场必须保持告警能力。"""
         host = self.make_host()

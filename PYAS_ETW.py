@@ -2170,8 +2170,12 @@ class EtwMixin:
         "program files", "program files (x86)", "programdata",
         "windows", "windowsapps", "appdata",
     })
-    # 内容平台的自有数据目录(可出现在任意前缀下)
-    _CONTENT_DIR_MARKERS = ("\\steamapps\\",)
+    # 内容平台的自有数据目录(可出现在任意前缀下);\temp\ 是临时文件区:
+    # 未签名安装器(NSIS/7z 解包,实测 MiniMax Code Setup 在
+    # AppData\Local\Temp 解包 node_modules 的 .md/.txt 撞阈值)与各类
+    # 工具的落地缓存都在此,用户文档不在 —— 落地的恶意文件由签名扫描
+    # 负责,突发启发不统计临时区。
+    _CONTENT_DIR_MARKERS = ("\\steamapps\\", "\\temp\\")
 
     @classmethod
     def _path_in_program_area(cls, path: str) -> bool:
@@ -2200,6 +2204,11 @@ class EtwMixin:
         """
         if not self._path_in_program_area(path):
             return False
+
+        # 临时区在签名门之前:未签名安装器解包是最高频正常行为,而 Temp
+        # 没有用户文档(落地恶意文件由签名扫描负责,启发不统计临时区)
+        if "\\temp\\" in path.lower():
+            return True
 
         image = self._etw_writer_image(pid)
 
