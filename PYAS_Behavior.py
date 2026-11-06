@@ -59,6 +59,10 @@ L2_WINDOW_SECONDS = 10.0
 L2_SNAPSHOT_COOLDOWN_SECONDS = 600.0
 # 创建超时(PowerShell 120s)+ 设备解析重试(约 10s)之上留裕量
 INFLIGHT_WINDOW_SECONDS = 180.0
+# 巡检连续确认「失账」的轮数:达到即把该 ID 移出台账并终止告警循环。
+# VSS 差异区满会正常淘汰最老副本,不消账则同一条失账每 5 分钟重告一次、
+# 永不停止(2026-11-06 实测连刷 140+ 条 WARN)。首轮即告警,不延迟响应。
+MISS_PRUNE_ROUNDS = 3
 
 ROLLBACK_TTL_SECONDS = 1800.0
 LEDGER_MAX_PER_PID = 512
@@ -453,7 +457,7 @@ class VssSnapshotManager:
 
     def __init__(self, state_path: str, runner=None, cooldown_seconds: float = L2_SNAPSHOT_COOLDOWN_SECONDS,
                  device_lister=None, resolve_retries: int = 3, resolve_delay: float = 3.0,
-                 history_keep: int = 3) -> None:
+                 history_keep: int = 3, miss_prune_rounds: int = MISS_PRUNE_ROUNDS) -> None:
         self._state_path = state_path
         self._runner = runner or self._run_powershell
         self._device_lister = device_lister or list_shadow_devices
@@ -461,6 +465,7 @@ class VssSnapshotManager:
         self._resolve_delay = resolve_delay
         self._cooldown = cooldown_seconds
         self._history_keep = max(1, int(history_keep))
+        self._miss_prune_rounds = max(1, int(miss_prune_rounds))
         self._lock = threading.Lock()
         self.last_error = ""
         self._snapshots: dict[str, dict] = {}
@@ -780,36 +785,55 @@ class VssSnapshotManager:
         勒索软件破坏回滚能力的典型前置动作,必须告警。
 
         返回 None=无法判断(VSS 查询失败/服务未响应,不误报);
-        dict(missing=[...])=有在册 ID 从系统中消失。
+        dict(missing=[...], pruned=[...])=有在册 ID 从系统中消失。
+        同一 ID 连续 MISS_PRUNE_ROUNDS 轮确认消失后移出台账(pruned):
+        首轮已告警,之后多半是 VSS 空间上限正常淘汰最老副本,不消账会
+        每 5 分钟重告一次、永不停止。轮数落盘,重启不重置。
         """
         try:
-            present = set(list_shadow_devices().keys())
+            present = set(self._device_lister().keys())
         except Exception:
             logger.debug("shadow integrity check could not list devices", exc_info=True)
             return None
 
-        if not present:
-            # 系统里一个卷影都没有:可能是 VSS 被清理,也可能我们本来
-            # 就没有在册快照 —— 只在有在册快照丢失时告警
-            pass
+        missing = []
+        pruned = []
 
         with self._lock:
-            managed = {
-                drive: [item.get("id") for item in entry.get("history", []) if item.get("id")]
-                for drive, entry in self._snapshots.items()
-            }
+            for drive, entry in self._snapshots.items():
+                kept = []
 
-        missing = []
+                for item in entry.get("history", []):
+                    shadow_id = item.get("id")
 
-        for drive, ids in managed.items():
-            for shadow_id in ids:
-                if shadow_id.lower() not in present:
+                    if not shadow_id:
+                        continue
+
+                    if shadow_id.lower() in present:
+                        item["miss_count"] = 0
+                        kept.append(item)
+                        continue
+
+                    item["miss_count"] = int(item.get("miss_count", 0)) + 1
                     missing.append(f"{drive}:{shadow_id}")
+
+                    if item["miss_count"] >= self._miss_prune_rounds:
+                        pruned.append(f"{drive}:{shadow_id}")
+                    else:
+                        kept.append(item)
+
+                entry["history"] = kept
+
+        if missing or pruned:
+            self._save_state()
 
         if missing:
             logger.warning("managed shadow copies disappeared: %s", ", ".join(missing))
 
-        return {"missing": missing}
+        if pruned:
+            logger.info("shadow ledger reconciled: %s", ", ".join(pruned))
+
+        return {"missing": missing, "pruned": pruned}
 
     def _save_state(self):
         payload = {
@@ -817,7 +841,8 @@ class VssSnapshotManager:
                 "last_attempt": entry.get("last_attempt", 0.0),
                 "history": [
                     {"id": item.get("id"), "device": item.get("device"),
-                     "created_wall": item.get("created_wall", 0)}
+                     "created_wall": item.get("created_wall", 0),
+                     "miss_count": item.get("miss_count", 0)}
                     for item in entry.get("history", [])
                 ],
             }
@@ -954,6 +979,18 @@ class BehaviorMixin:
                 state_path=os.path.join(data_dir, "vss_snapshots.json"),
                 history_keep=keep,
             )
+
+    def verify_snapshots_intact(self):
+        """卷影完整性轮询的宿主入口(ScannerMixin.shadow_integrity_thread 调用)。
+
+        该能力此前只在 VssSnapshotManager 上,宿主没有这个方法,轮询线程
+        每轮 AttributeError —— 完整性监控实际从未运行过(2026-10-31 实测)。
+        委托给懒创建的管理器:状态文件里存着上个会话在册的卷影,首轮巡检
+        也必须能发现它们被外部删除,不能等本会话首次建快照后才武装。
+        """
+        self._ensure_vss_manager()
+
+        return self._vss.verify_snapshots_intact()
 
     # -- L3 勒索告警挂钩(EtwMixin._etw_burst_alert 调用) --------------------
 

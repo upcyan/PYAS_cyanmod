@@ -117,6 +117,39 @@ class PolicyAccessTests(unittest.TestCase):
         self.assertNotIn('unknown_field', self.backend.document)
         self.assertFalse(self.owner.pyas_config['process_switch'])
 
+    def test_legacy_import_after_initialization_restores_old_switches(self):
+        """升级首启选了默认策略后,旧配置仍可经一次授权补导。"""
+        import json
+        self.initialize()
+        raw = json.dumps({'cloud_switch': True, 'theme': 'black_switch'}).encode()
+        self.backend.read_legacy = lambda: raw
+        preview = self.owner.get_policy_migration_preview()
+        self.assertTrue(preview['available'])
+        self.assertTrue(self.owner.import_legacy_policy(preview['digest'])['ok'])
+        self.assertTrue(self.backend.document['cloud_switch'])
+        self.assertFalse(self.owner.pyas_config.get('cloud_switch'), '重启前不得显示为已开启')
+        self.assertEqual(self.owner.get_policy_status()['state'], 'restart_required')
+        self.assertTrue(self.backend.user['legacy_imported'])
+        self.assertTrue(self.owner.get_policy_status()['legacy_imported'])
+
+    def test_legacy_import_marks_choice_even_for_defaults(self):
+        """选默认值同样是一次明确取舍:标记后不再反复提供导入入口。"""
+        self.assertTrue(self.owner.initialize_security_policy()['ok'])
+        self.assertTrue(self.backend.user['legacy_imported'])
+
+    def test_legacy_import_rejects_changed_snapshot_without_prompt(self):
+        self.initialize()
+        self.backend.read_legacy = lambda: b'{"cloud_switch":true}'
+        self.backend.allow = False
+        result = self.owner.import_legacy_policy('wrong-digest')
+        self.assertFalse(result['ok'])
+        self.assertEqual(self.backend.prompts, 0)
+
+    def test_legacy_import_requires_initialized_policy(self):
+        result = self.owner.import_legacy_policy('d' * 64)
+        self.assertFalse(result['ok'])
+        self.assertEqual(self.backend.prompts, 0)
+
     def test_changed_legacy_snapshot_never_opens_authorization(self):
         self.backend.read_legacy = lambda: b'{"process_switch":true}'
         result = self.owner.initialize_security_policy(True, 'wrong')

@@ -2219,6 +2219,10 @@ body.resizing-active * {
 }
 .policy-status-panel p { margin: 6px 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .policy-status-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
+/* 策略未初始化时的锁定开关:必须与普通「关闭」一眼可辨 —— 2026-10-31
+   升级案例里用户把禁用灰态全部读成「开关坏了/打不开」 */
+.toggle-switch.policy-locked { cursor: not-allowed; }
+.toggle-switch.policy-locked .slider { opacity: .4; filter: grayscale(1); }
 .policy-review-dialog {
     width: min(760px, calc(100vw - 40px)); max-height: calc(100vh - 40px);
     padding: 20px; border: 1px solid var(--border-color); border-radius: var(--radius-control);

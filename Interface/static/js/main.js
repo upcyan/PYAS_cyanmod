@@ -1324,7 +1324,6 @@ document.addEventListener('DOMContentLoaded', () => {
         homeLogBackfillInFlight = true;
         window.pywebview.api.get_logs().then(logs => {
             homeLogBackfillInFlight = false;
-            window.pywebview.api.report_ui_error('home-log-backfill', 'received ' + (logs ? logs.length : 'null') + ' entries');
             // 无历史日志时直接返回:绝不再回调 renderHomeLogs——
             // 空列表会再次触发 backfill,形成互递归把主线程微任务饿死(新装首启零日志即假死)
             // 但面板本身要有话说,否则新装首启是一整块空白,故在这里直接落空态文案。
@@ -1436,7 +1435,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!logGridBusy && logGridTimer === null) logGridTimer = setTimeout(refreshLogGrid, 300);
         }
 
-        if ((entry.action === 'System' && entry.detail === 'Engine Initialization Complete') || (entry.level === 'WARN' && entry.action === 'init_engine_thread')) {
+        // 引擎就绪按稳定 code 匹配:detail 已本地化,按英文字符串匹配在非英文
+        // 界面永不命中,first_launch 会一直卡 true(防护不自启,2026-10-31 案例)
+        if ((entry.action === 'System' && entry.code === 'engine_ready') || (entry.level === 'WARN' && entry.action === 'init_engine_thread')) {
             closeStartupOverlay();
             if (window.onEngineReady) window.onEngineReady();
         }

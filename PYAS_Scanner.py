@@ -11,6 +11,7 @@ import ctypes
 import ctypes.wintypes
 from PYAS_Tools import MEMORY_BASIC_INFORMATION
 from PYAS_Cloud import CloudQueueMixin
+from PYAS_Behavior import MISS_PRUNE_ROUNDS
 from PYAS_Detection import DetectionResult, detection_result
 
 from PYAS_LogTexts import LOG_TEXTS as _LT
@@ -21,21 +22,38 @@ class ScannerMixin(CloudQueueMixin):
         """在册卷影被外部删除 = 勒索破坏回滚能力的前置动作,轮询告警。
 
         首轮延迟(等引擎与提权就绪);查询失败不误报,只在「确认消失」时告警。
+        同一条缺失只告警一次(2026-11-04 实测:VSS 存储空间不足的自动回收会让
+        同一条持续缺失数小时,5 分钟一刷共 260 条 —— 重复响铃只会被当噪音;
+        集合恢复为空即台账对账完成后重置,新的缺失再报)。
         """
         import time as _time
 
         _time.sleep(300.0)
+        notified = set()
 
         while True:
             try:
                 result = self.verify_snapshots_intact()
 
                 if result and result.get("missing"):
+                    fresh = [item for item in result["missing"] if item not in notified]
+
+                    if fresh:
+                        notified.update(fresh)
+                        self.write_log(
+                            "WARN", "Behavior Snapshot",
+                            detail=self._loc(_LT["shadow_integrity_violation"]).format(
+                                ", ".join(fresh[:4])),
+                            success=False,
+                        )
+
+                if result and result.get("pruned"):
+                    # 消账:同一失账已告警到轮数上限,移出台账终止循环
+                    notified.difference_update(result["pruned"])
                     self.write_log(
-                        "WARN", "Behavior Snapshot",
-                        detail=self._loc(_LT["shadow_integrity_violation"]).format(
-                            ", ".join(result["missing"][:4])),
-                        success=False,
+                        "INFO", "Behavior Snapshot",
+                        detail=self._loc(_LT["shadow_ledger_reconciled"]).format(
+                            MISS_PRUNE_ROUNDS, ", ".join(result["pruned"][:4])),
                     )
             except Exception:
                 log_exception("PYAS_Scanner.ScannerMixin.shadow_integrity_thread")
@@ -56,7 +74,14 @@ class ScannerMixin(CloudQueueMixin):
 
             self.heuristic.load_path(self.path_heuristic, callback=log_callback)
             self.properties.load_path(self.path_properties, callback=log_callback)
-            self.write_log("INFO", "System", detail=self._loc(_LT["engine_ready"]))
+            # code 是前端 onEngineReady 的稳定锚点:detail 文案已本地化,
+            # 按英文字符串匹配的旧约定在非英文界面永不命中(first_launch 卡 true)
+            self.write_log(
+                "INFO",
+                "System",
+                detail=self._loc(_LT["engine_ready"]),
+                code="engine_ready",
+            )
 
             if "-scan" in self.args_pyas:
                 try:
@@ -90,7 +115,16 @@ class ScannerMixin(CloudQueueMixin):
                         "(()=>{const ats=document.querySelector('[data-config-key=autostart_switch]');if(ats)ats.checked=false;})();"
                     )
 
-            if not first_launch:
+            # first_launch 的落盘依赖前端 onEngineReady 回写;策略已经管理员
+            # 授权初始化时不再被它拦住 —— 文案匹配回归曾让它永远卡 true,
+            # 防护开关即使全开也不随启动拉起(2026-10-31 升级案例)
+            policy_authorized = False
+            policy_store = getattr(self, "_policy_store", None)
+
+            if policy_store is not None and getattr(policy_store, "revision", None) is not None:
+                policy_authorized = True
+
+            if not first_launch or policy_authorized:
                 with self.lock_config:
                     if self.pyas_config.get("process_switch"):
                         self.start_feature_thread(self.protect_proc_thread, "process_switch")
@@ -259,7 +293,11 @@ class ScannerMixin(CloudQueueMixin):
             return
 
         log_at[norm_path] = now
-        self.write_log("WARN", "Scan Deferred", source=norm_path, code=error, success=False)
+        self.write_log(
+            "WARN", "Scan Deferred",
+            source=norm_path, code=error, success=False,
+            detail=self._loc(_LT["scan_deferred"]).format(error),
+        )
 
     def safe_scan_engine(self, file_path):
         norm_path = self.norm_path(file_path)

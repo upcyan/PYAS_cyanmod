@@ -55,6 +55,8 @@ import time
 import uuid
 from collections import OrderedDict
 
+from PYAS_Diagnostics import log_exception
+
 logger = logging.getLogger("PYAS.ETW")
 
 IS_WINDOWS = sys.platform == "win32"
@@ -561,6 +563,11 @@ BURST_PRE_EXISTING_SECONDS = 30.0
 # 的文档仍会照常告警,且突发启发只统计「改写会话早期已存在的文件」,
 # 误放新落盘附件的风险本身就被这层过滤挡住。
 IM_CACHE_MARKERS = ("\\nt_qq\\", "\\xwechat_files\\", "\\wechat files\\")
+# MSIX 应用包目录:安装/更新服务批量重写包内资产(实测 2026-11-05:
+# AMD Radeon 更新经 svchost 10 秒改写 40 个瓦片 PNG,触发勒索告警误报)。
+# 目录由 TrustedInstaller ACL 管辖,恶意代码难以获得写权限,资产 churn
+# 属正常服务行为 —— 与 IM 缓存同性质,一并豁免溯源与启发。
+WINDOWSAPPS_MARKER = "\\windowsapps\\"
 
 
 class BurstAlert:
@@ -1357,6 +1364,19 @@ ETW_LOG_TEXTS = {
         "russian_switch": "Защита, требующая прав администратора, не запущена; интерфейс теперь показывает фактическое состояние (выкл): {0}",
         "slovenian_switch": "Zaščita, ki zahteva povišane pravice, ni aktivna; vmesnik zdaj prikazuje dejansko stanje (izklopljeno): {0}",
     },
+    "auto_restore_failed": {
+        "traditional_switch": "特權運行自動恢復未完成，下次啟動將重試",
+        "simplified_switch": "特权运行自动恢复未完成，下次启动将重试",
+        "english_switch": "Privilege-run auto-restore did not finish; it will retry on the next start",
+        "japanese_switch": "特権実行の自動復元が完了しませんでした。次回起動時に再試行します",
+        "korean_switch": "특권 실행 자동 복원이 완료되지 않았습니다. 다음 시작 시 다시 시도합니다",
+        "french_switch": "La restauration automatique du mode privilégié ne s'est pas terminée ; nouvelle tentative au prochain démarrage",
+        "spanish_switch": "La restauración automática del modo privilegiado no terminó; se reintentará en el próximo inicio",
+        "hindi_switch": "विशेषाधिकार-रन स्वतः पुनर्स्थापना पूरी नहीं हुई; अगले स्टार्ट पर पुनः प्रयास होगा",
+        "arabic_switch": "لم تكتمل الاستعادة التلقائية للتشغيل المميز؛ ستُعاد المحاولة عند التشغيل التالي",
+        "russian_switch": "Автовосстановление привилегированного режима не завершено; повтор при следующем запуске",
+        "slovenian_switch": "Samodejna obnovitev privilegiranega načina ni bila končana; poskus bo ponovljen ob naslednjem zagonu",
+    },
     "reconcile_dialog_title": {
         "traditional_switch": "防護開關狀態核對",
         "simplified_switch": "防护开关状态核对",
@@ -1628,6 +1648,20 @@ class EtwMixin:
             self.start_daemon_thread(lambda: self._auto_restore_for_privilege_run(corrections))
 
     def _auto_restore_for_privilege_run(self, keys: list[str]) -> None:
+        # 后台守护线程的兜底:单次异常(实测瞬时 WinError 32 打断过整个
+        # 恢复流程,线程死亡后提权闭环静默失效)只记日志,启动核对下轮重试
+        try:
+            self._restore_for_privilege_run(keys)
+        except Exception:
+            log_exception("PYAS_ETW.EtwMixin._auto_restore_for_privilege_run")
+            self.write_log(
+                "WARN",
+                "ETW Attribution",
+                detail=self._loc(ETW_LOG_TEXTS["auto_restore_failed"]),
+                success=False,
+            )
+
+    def _restore_for_privilege_run(self, keys: list[str]) -> None:
         # 首次或用户要求每次询问时,先弹说明弹窗(带「不再显示」勾选),
         # 确认后才发起提权 —— UAC 不再无说明地直接弹出
         if self._should_prompt_elevation():
@@ -1931,7 +1965,16 @@ class EtwMixin:
                 for key in keys:
                     self.pyas_config[key] = True
 
-            return bool(self.save_config())
+            try:
+                return bool(self.save_config())
+            except Exception:
+                # 保存失败时内存不能残留「假开」:回滚到纠正后的显示值,
+                # 否则界面显示开启而防护实际未运行
+                with self.lock_config:
+                    for key in keys:
+                        self.pyas_config[key] = False
+
+                raise
 
         result = self._policy_call(
             scope, update, False, 'restore:' + ','.join(sorted(keys)),
@@ -2099,10 +2142,14 @@ class EtwMixin:
     @staticmethod
     def _etw_path_noise(path: str) -> bool:
         """不参与溯源与勒索启发的路径:回收站(用户主动清空,风暴会冲掉
-        溯源缓存并刷误报)与 IM 聊天数据目录(应用自身缓存改写)。"""
+        溯源缓存并刷误报)、IM 聊天数据目录与 MSIX 包目录(应用自身
+        缓存/资产 churn,安装器批量更新图标即勒索误报形态)。"""
         path_lower = path.lower()
 
         if "$recycle.bin" in path_lower:
+            return True
+
+        if WINDOWSAPPS_MARKER in path_lower:
             return True
 
         return any(marker in path_lower for marker in IM_CACHE_MARKERS)

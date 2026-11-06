@@ -336,11 +336,14 @@ class PolicyAccessMixin:
 
     def get_policy_status(self):
         store = getattr(self, '_policy_store', None)
-        if not store: return {'state': 'unavailable', 'initialized': False}
+        if not store: return {'state': 'unavailable', 'initialized': False,
+                              'legacy_available': False, 'legacy_imported': True}
         status = store.snapshot()
-        # Preview is explicit and outside config/queue locks; do not read an
-        # untrusted legacy file on every status poll.
-        status['legacy_available'] = True
+        # 存在性在 backend 构造时探测一次;这条 1 秒轮询不读不可信旧文件,
+        # 预览值由用户显式点击时单独读取
+        status['legacy_available'] = bool(getattr(store.backend, 'legacy_present', False))
+        with self.lock_config:
+            status['legacy_imported'] = bool(self.pyas_config.get('legacy_imported'))
         return status
 
     def _legacy_policy_candidate(self):
@@ -394,6 +397,9 @@ class PolicyAccessMixin:
             candidate.update(source[0])
             user_data = source[2]
             _append_missing_white_list(candidate, store.defaults.get('white_list', []))
+        # 无论导入还是默认,初始化本身就是一次对旧配置的明确取舍:
+        # 标记后设置页不再继续提供「导入旧配置」入口
+        user_data = {**user_data, 'legacy_imported': True}
         values = policy_values(candidate)
         def initialize():
             with self.lock_config:
@@ -430,4 +436,47 @@ class PolicyAccessMixin:
                     for key in ('etw_attribution_switch', 'behavior_defense_switch'):
                         self.pyas_config[key] = False
                 self.write_log('INFO', 'Policy Authorization', detail=self._loc(_BASIC_MODE_TEXTS))
+        return result
+
+    def import_legacy_policy(self, digest=None):
+        """策略已初始化后补导旧配置:与初始化同一套「审核-授权-提交」,
+        提交后同样要重启才生效。升级首启选了默认策略的用户由此找回原设置。"""
+        store = getattr(self, '_policy_store', None)
+        if store is None or store.revision is None:
+            return {'ok': False, 'error': 'not_initialized_or_unavailable'}
+        source = self._legacy_policy_candidate()
+        if source is None or source[1] != digest:
+            return {'ok': False, 'error': 'legacy_configuration_changed'}
+        candidate = copy.deepcopy(store.defaults)
+        candidate.update(source[0])
+        _append_missing_white_list(candidate, store.defaults.get('white_list', []))
+        values = policy_values(candidate)
+        user_data = {**source[2], 'legacy_imported': True}
+
+        def apply_import():
+            with self.lock_config:
+                previous = copy.deepcopy(self.pyas_config)
+                self.pyas_config.update(values)
+                self.pyas_config.update(user_data)
+                try:
+                    ok = self.save_config()
+                finally:
+                    # 与初始化同理:重启前不把未运行的防护显示为已开启
+                    for key in POLICY_KEYS:
+                        if key in previous: self.pyas_config[key] = previous[key]
+                        else: self.pyas_config.pop(key, None)
+            if ok:
+                store.status = {'state': 'restart_required', 'error': ''}
+                return {'ok': True, 'restart_required': True}
+            return {'ok': False, 'error': 'policy_commit_failed'}
+
+        from PYAS_ETW import is_elevated
+
+        result = self._policy_call(POLICY_KEYS, apply_import,
+            {'ok': False, 'error': 'administrator_authorization_required'}, 'import-legacy',
+            relaunch_pid=os.getpid() if not is_elevated() else None)
+        if not result.get('ok'):
+            status = store.snapshot()
+            result = {**result, 'state': status['state'], 'detail': status.get('error', ''),
+                      'cancelled': status.get('cancelled', False)}
         return result

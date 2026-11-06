@@ -124,6 +124,7 @@ class SystemMixin:
 
     def backup_mbr(self, max_drives=26):
         self.mbr_backup = {}
+        permission_warned = False
 
         for drive in range(max_drives):
             if not self._is_internal_physical_drive(drive):
@@ -135,6 +136,16 @@ class SystemMixin:
 
                     if len(mbr) == 512 and mbr[510:512] == b"\x55\xAA":
                         self.mbr_backup[drive] = mbr
+
+            except PermissionError:
+                # 非提权会话打不开物理盘是常态(备份裸机 MBR 需要管理员):
+                # 每会话记一条 WARN 即可,堆栈无信息量,不走 log_exception
+                if not permission_warned:
+                    permission_warned = True
+                    self.write_log(
+                        "WARN", "System",
+                        detail=self._loc(_LT["mbr_backup_needs_admin"]), success=False,
+                    )
 
             except Exception:
                 log_exception("PYAS_System.SystemMixin.backup_mbr:97")

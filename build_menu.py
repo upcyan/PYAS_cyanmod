@@ -92,7 +92,9 @@ def read_version():
 def find_msvc():
     if not VSWHERE.exists():
         die("未找到 vswhere", "请安装 Visual Studio 2026(含 C++ 桌面开发)")
-    result = subprocess.run([str(VSWHERE), "-latest", "-property", "installationPath"],
+    # -products *:vswhere 默认产品列表不含 Build Tools,纯构建机只装
+    # BuildTools 时不带它就拿不到安装路径(2026-10-31 本机重建工具链踩中)
+    result = subprocess.run([str(VSWHERE), "-latest", "-products", "*", "-property", "installationPath"],
                             capture_output=True, text=True)
     vs = (result.stdout or "").strip().splitlines()
     if not vs:

@@ -1070,6 +1070,7 @@ class _ThreatPromptQueue:
                             break
                     time.sleep(2)
 
+                fallback_choice = "block"
                 with self.condition:
                     self.session = self.session_factory(
                         request.lang, request.title, request.message, request.timeout,
@@ -1080,7 +1081,7 @@ class _ThreatPromptQueue:
                 session.run()
             except Exception:
                 log_exception("PYAS_Dialog._ThreatPromptQueue._run")
-                # 弹窗创建/运行失败时下面 finally 会 fail-closed 判为拦截:
+                # 弹窗创建/运行失败时下面 finally 会按 fallback_choice 收尾:
                 # 必须让用户知道"有东西被拦了、原因是裁决界面不可用",
                 # 否则就是看不见的静默拦截。
                 try:
@@ -1088,9 +1089,32 @@ class _ThreatPromptQueue:
                         self.failure_notify(request.action, request.source, request.target, None)
                 except Exception:
                     log_exception("PYAS_Dialog._ThreatPromptQueue._run.notify")
+                # WebView2 环境偶发初始化失败(2026-11-02 实测:某次自启实例三连
+                # 失败且新窗口重试无效,进程重启即愈)。降级 Win32 原生询问窗完成
+                # 裁决——它不依赖 WebView2,至少让用户看到拦了什么、亲手选择。
+                try:
+                    if not session.ready.is_set() and not request.done.is_set():
+                        fallback_choice = self._native_verdict_prompt(request)
+                except Exception:
+                    log_exception("PYAS_Dialog._ThreatPromptQueue._run.native")
             finally:
                 # Window creation failures still resolve the current request.
-                self.complete("block")
+                self.complete(fallback_choice)
+
+    @staticmethod
+    def _native_verdict_prompt(request):
+        """WebView2 不可用时的原生裁决兜底:是=放行,否=拦截,关闭=拦截。
+
+        按钮文案由系统按用户区域本地化;标题/正文沿用请求里已本地化的文本。
+        置顶询问,与弹窗同一交互级别 —— 不允许在无人值守时因界面故障
+        静默折叠成拦截(fail-closed 仍兜底,但先给用户一次亲手选择的机会)。
+        """
+        mb = ctypes.windll.user32.MessageBoxW
+        mb.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint]
+        mb.restype = ctypes.c_int
+        flags = 0x00000004 | 0x00000030 | 0x00040000 | 0x00010000  # YESNO|ICONWARNING|TOPMOST|SETFOREGROUND
+        answer = mb(None, str(request.message or ""), str(request.title or "PYAS"), flags)
+        return "allow" if answer == 6 else "block"  # IDYES=6
 
     def reopen(self):
         with self.condition:
@@ -2629,7 +2653,9 @@ class DialogMixin(AlertPolicyMixin):
             time.sleep(interval)
 
     def _handle_selftest_threat(self, sentinel):
-        with open(sentinel, encoding="utf-8") as handle:
+        # utf-8-sig:PowerShell Set-Content -Encoding UTF8 写出的哨兵带 BOM,
+        # 外部工具触发的自测不该因三个字节解析失败(suppressed=29 刷屏的教训)
+        with open(sentinel, encoding="utf-8-sig") as handle:
             payload = json.load(handle)
 
         # 先删文件再弹窗:用户放着不裁决也不会重弹

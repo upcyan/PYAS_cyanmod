@@ -70,6 +70,16 @@ class RuleScanner:
             if not self.rules:
                 return False, False
 
+            # 0 字节占位(含 WindowsApps 应用执行别名这类 reparse point)没有
+            # 可匹配内容;不拦的话 yara 打开失败,每 30 秒刷一条无关错误日志。
+            # 只对真实存在且为空的文件跳过:文件不存在/不可 stat 时保持原
+            # yara 错误路径,调用方(测试 mock、真实缺文件)行为不变
+            try:
+                if os.path.getsize(file_path) == 0:
+                    return False, False
+            except OSError:
+                pass
+
             matches = self.rules.match(filepath=file_path)
 
             if matches:

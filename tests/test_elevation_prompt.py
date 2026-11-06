@@ -92,6 +92,24 @@ class ElevationPromptTests(unittest.TestCase):
         ask.assert_not_called()
         self.assertEqual(host.restored, [["etw_attribution_switch"]])
 
+    def test_restore_failure_is_contained_not_fatal(self):
+        """恢复线程不能被单次异常打死(2026-10-31 瞬时 WinError 32 曾中断提权闭环)。"""
+        host = PromptHost({
+            "elevated_run_switch": True,
+            "elevation_prompt_seen": True,
+            "elevation_prompt_auto": True,
+        })
+
+        def boom(keys):
+            raise PermissionError(13, "另一个程序正在使用此文件。", None, 32)
+
+        host.restore_switches = boom
+
+        # 不抛出:兜底记日志后返回,下次启动核对重试
+        host._auto_restore_for_privilege_run(["etw_attribution_switch"])
+
+        self.assertTrue(any("WARN" in str(args[0]) for args, _ in host.logs), "失败必须留痕")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -794,6 +794,19 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
 
         return [rect.left, rect.top, rect.right, rect.bottom]
 
+    def _window_dpi_scale(self, hwnd):
+        """窗口所在显示器当前 DPI 相对 96 的倍率;拿不到按 100% 处理。"""
+        try:
+            if hasattr(self.user32, 'GetDpiForWindow'):
+                dpi = self.user32.GetDpiForWindow(hwnd)
+
+                if dpi:
+                    return dpi / 96.0
+        except Exception:
+            log_exception('PYAS._window_dpi_scale')
+
+        return 1.0
+
     def set_window_rect(self, left, top, width, height):
         """摆窗口到指定位置/尺寸,返回状态字符串,便于前端 HUD 直接显示。
 
@@ -812,9 +825,16 @@ class _MainMixin(PolicyAccessMixin, WindowsMixin, ConfigMixin, LogMixin, Runtime
             return 'no-hwnd'
 
         try:
-            left, top = int(left), int(top)
-            width = max(int(width), self.MIN_WINDOW_WIDTH)
-            height = max(int(height), self.MIN_WINDOW_HEIGHT)
+            # JS 端的 screenX/outerWidth/pointer screenX 都是 CSS 逻辑像素,
+            # 而 SetWindowPos/MoveWindow 只认物理像素:125%/150% 缩放下不做
+            # 换算,窗口每帧只按 1/缩放倍率移动,边框就会和光标分离
+            # (2026-10-31 用户在 125% 缩放机器上实测)。按窗口当前 DPI 换算,
+            # 跨显示器拖动时 GetDpiForWindow 自然取到新值
+            scale = self._window_dpi_scale(hwnd)
+            left = round(float(left) * scale)
+            top = round(float(top) * scale)
+            width = max(round(float(width) * scale), round(self.MIN_WINDOW_WIDTH * scale))
+            height = max(round(float(height) * scale), round(self.MIN_WINDOW_HEIGHT * scale))
 
             user32 = getattr(self, '_rect_user32', None)
 

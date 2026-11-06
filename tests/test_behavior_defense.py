@@ -1,16 +1,18 @@
 """行为防护纯逻辑的约束:台账、快照路径、回滚决策(PowerShell/真 VSS 不在测试范围)。"""
 
+import json
 import os
 import sys
 import tempfile
 import threading
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from PYAS_ETW import BurstHeuristic
 from PYAS_Behavior import (
-    ACTION_ROLLBACK, ROLLBACK_STAGING_DIRNAME, BehaviorMixin,
+    ACTION_ROLLBACK, MISS_PRUNE_ROUNDS, ROLLBACK_STAGING_DIRNAME, BehaviorMixin,
     TouchedFilesLedger, VssSnapshotManager, parse_vssadmin_shadows,
     parse_vssadmin_shadowstorage,
 )
@@ -171,6 +173,90 @@ class SnapshotManagerTests(unittest.TestCase):
 
             self.assertTrue(revived.device_for("C:"))
             self.assertIsNone(revived.created_stamp("C:"), "重启后时间基准失效,不可回滚")
+
+    @staticmethod
+    def seed_state(tmp, history):
+        """直接写台账种子,模拟上个会话遗留的纳管快照。"""
+        with open(Path(tmp) / "vss_snapshots.json", "w", encoding="utf-8") as f:
+            json.dump({"C:": {"last_attempt": 0.0, "history": history}}, f)
+
+    def test_missing_snapshot_prunes_after_consecutive_rounds(self):
+        """失账 ID:首轮即告警,连续 MISS_PRUNE_ROUNDS 轮后消账,循环封顶。
+
+        VSS 差异区满会正常淘汰最老副本,不消账则同一条失账每 5 分钟重告一次
+        永不停止(2026-11-06 实测 C: 一条失账连刷 140+ 条 WARN)。
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self.seed_state(tmp, [
+                {"id": "shadow-id-1", "device": SNAP_DEVICE, "created_wall": 1.0},
+                {"id": "shadow-id-stale", "device": SNAP_DEVICE + "x", "created_wall": 2.0},
+            ])
+            lister = FakeDeviceLister(mapping={"shadow-id-1": SNAP_DEVICE})
+            manager = self.make(tmp, runner=FakeVssRunner(), device_lister=lister)
+
+            for _ in range(MISS_PRUNE_ROUNDS - 1):
+                result = manager.verify_snapshots_intact()
+
+                self.assertEqual(result["missing"], ["C::shadow-id-stale"])
+                self.assertEqual(result["pruned"], [], "未到轮数只告警不消账")
+
+            result = manager.verify_snapshots_intact()
+
+            self.assertEqual(result["pruned"], ["C::shadow-id-stale"], "连续确认到轮数即消账")
+            self.assertNotIn(
+                "shadow-id-stale",
+                [item["id"] for item in manager._snapshots["C:"]["history"]],
+                "消账后不再重告",
+            )
+            self.assertTrue(manager.device_for("C:"), "仍健在的快照不受影响")
+
+            result = manager.verify_snapshots_intact()
+
+            self.assertEqual((result["missing"], result["pruned"]), ([], []), "消账后循环终止")
+
+    def test_miss_count_persists_across_restart(self):
+        """轮数计数落盘:重启不重置,否则每次开机又重告满 3 轮。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            self.seed_state(tmp, [
+                {"id": "shadow-id-stale", "device": SNAP_DEVICE, "created_wall": 1.0},
+            ])
+            lister = FakeDeviceLister(mapping={})
+            manager = self.make(tmp, runner=FakeVssRunner(), device_lister=lister)
+
+            result = manager.verify_snapshots_intact()
+
+            self.assertEqual(result["missing"], ["C::shadow-id-stale"])
+            self.assertEqual(result["pruned"], [])
+
+            revived = self.make(tmp, runner=FakeVssRunner(), device_lister=lister)
+            result = revived.verify_snapshots_intact()
+
+            self.assertEqual(result["missing"], ["C::shadow-id-stale"])
+            self.assertEqual(result["pruned"], [], "第 2 轮,继承重启前的计数")
+
+            result = revived.verify_snapshots_intact()
+
+            self.assertEqual(result["pruned"], ["C::shadow-id-stale"], "第 3 轮消账")
+
+    def test_miss_count_resets_when_shadow_reappears(self):
+        """失账 ID 重新出现在系统里:计数清零,重新从首轮数起。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            self.seed_state(tmp, [
+                {"id": "shadow-id-1", "device": SNAP_DEVICE, "created_wall": 1.0,
+                 "miss_count": MISS_PRUNE_ROUNDS - 1},
+            ])
+            lister = FakeDeviceLister(mapping={"shadow-id-1": SNAP_DEVICE})
+            manager = self.make(tmp, runner=FakeVssRunner(), device_lister=lister)
+
+            result = manager.verify_snapshots_intact()
+
+            self.assertEqual(result["missing"], [], "重新在册即不算失账")
+
+            lister.mapping.pop("shadow-id-1")
+            result = manager.verify_snapshots_intact()
+
+            self.assertEqual(result["missing"], ["C::shadow-id-1"])
+            self.assertEqual(result["pruned"], [], "计数已清零,重新从首轮数起")
 
     def test_snapshot_path_math(self):
         self.assertEqual(
@@ -487,6 +573,32 @@ class RollbackTests(unittest.TestCase):
 
             self.assertEqual(len(host._behavior_ledger), 0)
             self.assertEqual(len(host.logs), 0)
+
+    def test_shadow_integrity_poll_delegates_to_snapshot_manager(self):
+        """ScannerMixin.shadow_integrity_thread 调宿主的 verify_snapshots_intact。
+
+        该方法曾只存在于 VssSnapshotManager 上,宿主没有 -> 轮询线程每轮
+        AttributeError,完整性监控实际从未运行(2026-10-31 实测)。
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            host = RollbackHost(tmp)
+            sentinel = {"missing": ["D:deadbeef"]}
+            stub = unittest.mock.Mock()
+            stub.verify_snapshots_intact.return_value = sentinel
+            host._ensure_vss_manager = lambda: setattr(host, "_vss", stub)
+
+            self.assertEqual(host.verify_snapshots_intact(), sentinel)
+
+    def test_shadow_integrity_works_before_any_snapshot_exists(self):
+        """上个会话在册的卷影也要能巡检:懒创建管理器,而不是等首次建快照。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            host = RollbackHost(tmp)
+
+            result = host.verify_snapshots_intact()
+
+            self.assertIsNotNone(host._vss, "管理器必须被懒创建")
+            self.assertTrue(result is None or result == {"missing": [], "pruned": []},
+                            "无在册快照时不得误报缺失")
 
 
 if __name__ == "__main__":

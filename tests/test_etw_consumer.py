@@ -346,6 +346,18 @@ class RecycleBinExclusionTests(unittest.TestCase):
 
         self.assertEqual(host.reached, [], "IM 缓存目录默认即噪音,不触达台账/告警")
 
+    def test_windowsapps_asset_churn_is_noise_by_default(self):
+        """MSIX 包目录资产 churn 不进溯源与启发:安装/更新服务经 svchost
+        批量重写包内图标即勒索误报形态(实测 AMD Radeon 更新 10 秒 40 个
+        瓦片 PNG 触发告警);目录归 TrustedInstaller 管辖,豁免不放大风险。"""
+        host = self.make_host()
+
+        host._on_etw_write(700, "C:\\Program Files\\WindowsApps\\AdvancedMicroDevicesInc-2.AMDRadeonSoftware_10.25.10376.0_x64__0a9344xs7nr4m\\Assets\\Square150x150Logo.png")
+        host._on_etw_write(700, "D:\\Program Files\\WindowsApps\\Vendor.App_1.0_x64__deadbeef\\Assets\\Logo.jpg")
+        host._on_etw_delete(700, "C:\\Program Files\\WindowsApps\\Vendor.App_1.0_x64__deadbeef\\old.docx")
+
+        self.assertEqual(host.reached, [], "WindowsApps 路径默认即噪音,不触达台账/告警")
+
     def test_programdata_never_fires_burst_but_keeps_ledger(self):
         """ProgramData 是全部安装软件的机器级数据目录:安全软件诱饵(实测
         腾讯 iOA DecoyFiles 触发勒索启发)、同步盘数据库都在此高频改写。

@@ -8,7 +8,9 @@ document.addEventListener('DOMContentLoaded', () => {
             failed: 'Policy authorization or saving failed. No automatic retry was sent.', unknown: 'The commit result is unknown. Restart and check the policy before making more changes.',
             defaults: 'Review default policy', legacy: 'Review old settings', review: 'Review all security settings before saving.',
             warning: 'Old settings were user-writable and are not automatically trusted.', confirm: 'I have reviewed these settings', approve: 'Authorize and save', cancel: 'Cancel',
-            unavailable: 'No valid settings are available to import.', cancelled: 'Administrator authorization was cancelled.' },
+            unavailable: 'No valid settings are available to import.', cancelled: 'Administrator authorization was cancelled.',
+            importBtn: 'Import old settings', importHint: 'An older configuration was found. Import it to restore your previous protection settings.',
+            locked: 'Locked until the administrator policy is initialized.' },
         zh: { title: '管理员安全策略', missing: '尚未初始化可信策略。请审核默认设置或旧配置，再由管理员授权保存。',
             pending: '正在等待管理员授权或确认保存结果…', restart: '策略已保存，需要重新启动 PYAS 后生效。',
             restartNow: '立即重新启动', restarting: '正在重新启动…',
@@ -16,7 +18,9 @@ document.addEventListener('DOMContentLoaded', () => {
             failed: '策略授权或保存失败，未自动重试。', unknown: '保存结果尚无法确认，请重新启动并核对策略后再操作。',
             defaults: '审核默认策略', legacy: '审核旧配置', review: '请逐项核对安全设置后再授权保存。',
             warning: '旧配置曾允许普通用户修改，不会被自动信任。', confirm: '我已审核以上设置', approve: '授权并保存', cancel: '取消',
-            unavailable: '没有可导入的有效配置。', cancelled: '已取消管理员授权，未提交策略。' },
+            unavailable: '没有可导入的有效配置。', cancelled: '已取消管理员授权，未提交策略。',
+            importBtn: '导入旧配置', importHint: '检测到旧版本配置，可导入恢复原有防护设置。',
+            locked: '管理员安全策略初始化前暂不可更改。' },
         tw: { title: '管理員安全策略', missing: '尚未初始化可信策略。請審核預設設定或舊配置，再由管理員授權儲存。',
             pending: '正在等待管理員授權或確認儲存結果…', restart: '策略已儲存，需要重新啟動 PYAS 後生效。',
             restartNow: '立即重新啟動', restarting: '正在重新啟動…',
@@ -24,7 +28,9 @@ document.addEventListener('DOMContentLoaded', () => {
             failed: '策略授權或儲存失敗，未自動重試。', unknown: '儲存結果尚無法確認，請重新啟動並核對策略後再操作。',
             defaults: '審核預設策略', legacy: '審核舊配置', review: '請逐項核對安全設定後再授權儲存。',
             warning: '舊配置曾允許普通使用者修改，不會被自動信任。', confirm: '我已審核以上設定', approve: '授權並儲存', cancel: '取消',
-            unavailable: '沒有可匯入的有效配置。', cancelled: '已取消管理員授權，未提交策略。' },
+            unavailable: '沒有可匯入的有效配置。', cancelled: '已取消管理員授權，未提交策略。',
+            importBtn: '匯入舊設定', importHint: '偵測到舊版本設定，可匯入恢復原有防護設定。',
+            locked: '管理員安全策略初始化前暫不可更改。' },
     };
     const texts = () => /^zh/i.test(document.documentElement.lang)
         ? (/TW|HK|Hant/i.test(document.documentElement.lang) ? copy.tw : copy.zh) : copy.en;
@@ -34,25 +40,37 @@ document.addEventListener('DOMContentLoaded', () => {
     message.id = 'policy_status_text';
     const actions = document.createElement('div'); actions.className = 'policy-status-actions';
     const defaults = document.createElement('button'), legacy = document.createElement('button');
-    const restart = document.createElement('button');
+    const restart = document.createElement('button'), importBtn = document.createElement('button');
     defaults.id = 'policy_initialize_btn'; legacy.id = 'policy_migrate_btn';
-    restart.id = 'policy_restart_btn';
-    for (const button of [defaults, legacy, restart]) { button.type = 'button'; button.className = 'action-btn modern-btn'; }
-    restart.classList.add('hidden');
-    actions.append(defaults, legacy, restart);
+    restart.id = 'policy_restart_btn'; importBtn.id = 'policy_import_btn';
+    for (const button of [defaults, legacy, restart, importBtn]) { button.type = 'button'; button.className = 'action-btn modern-btn'; }
+    restart.classList.add('hidden'); importBtn.classList.add('hidden');
+    actions.append(defaults, legacy, restart, importBtn);
     panel.append(heading, message, actions); document.body.appendChild(panel);
     let active = true, epoch = 0, flight = null, status = null, busy = false, notice = '', restarting = false;
     const disabled = new Map();
     const userKeys = new Set(['driver_alert_exempt', 'driver_home_hidden', 'dnd_switch']);
     const api = () => window.pywebview?.api;
+    const setLockedLook = (element, locked) => {
+        const label = element.closest('.toggle-switch');
+        if (!label) return;
+        // 禁用灰态与普通「关闭」必须一眼可辨,否则会被读成「开关坏了」
+        label.classList.toggle('policy-locked', locked);
+        label.title = locked ? texts().locked : '';
+    };
     const updateControls = blocked => {
         for (const element of document.querySelectorAll('[data-config-key]')) {
             if (userKeys.has(element.dataset.configKey)) continue;
-            if (blocked) { if (!disabled.has(element)) disabled.set(element, element.disabled); element.disabled = true; }
+            if (blocked) {
+                if (!disabled.has(element)) disabled.set(element, element.disabled);
+                element.disabled = true;
+                setLockedLook(element, true);
+            }
         }
         if (!blocked) {
             for (const [element, previous] of disabled) {
                 if (!element.dataset.pending) element.disabled = previous;
+                setLockedLook(element, false);
             }
             disabled.clear();
         }
@@ -64,29 +82,37 @@ document.addEventListener('DOMContentLoaded', () => {
         const waiting = busy || ['authorizing', 'applying'].includes(value.state);
         const blocked = waiting || !value.initialized || ['restart_required', 'commit_unknown', 'unavailable'].includes(value.state);
         updateControls(blocked);
-        const visible = waiting || value.state !== 'ready' || !!value.error;
-        panel.classList.toggle('hidden', !visible);
-        heading.textContent = t.title;
-        // A saved policy is only read at startup, so this state offers exactly
+        // A saved policy is only read at startup, so restart_required offers exactly
         // one action: confirm and restart. Nothing else can move it forward.
         const needsRestart = value.state === 'restart_required';
+        // 已初始化但旧配置仍在且未导入过:提供补导入口(升级时选了默认值的用户)
+        const importable = value.initialized && value.state === 'ready' && !waiting
+            && !needsRestart && value.legacy_available && !value.legacy_imported;
+        const visible = waiting || value.state !== 'ready' || !!value.error || importable;
+        panel.classList.toggle('hidden', !visible);
+        heading.textContent = t.title;
         let text = !value.initialized ? t.missing : t.failed;
         if (waiting) text = t.pending;
         else if (needsRestart) text = t.restart;
         else if (value.state === 'commit_unknown') text = t.unknown;
         else if (value.error) text = t.failed + ' ' + String(value.error);
+        else if (importable) text = t.importHint;
         if (restarting) text = t.restarting;
         else if (notice) text = notice;
         if (message.textContent !== text) message.textContent = text;
         defaults.textContent = t.defaults; legacy.textContent = t.legacy;
-        defaults.classList.toggle('hidden', needsRestart);
-        legacy.classList.toggle('hidden', needsRestart);
+        importBtn.textContent = t.importBtn;
+        defaults.classList.toggle('hidden', needsRestart || value.initialized);
+        legacy.classList.toggle('hidden', needsRestart || value.initialized);
         restart.classList.toggle('hidden', !needsRestart);
+        importBtn.classList.toggle('hidden', !importable);
         restart.textContent = restarting ? t.restarting : t.restartNow;
         restart.disabled = restarting;
-        const showActions = needsRestart || (!value.initialized && !waiting && value.state !== 'commit_unknown');
+        const showActions = needsRestart || importable
+            || (!value.initialized && !waiting && value.state !== 'commit_unknown');
         actions.classList.toggle('hidden', !showActions);
         defaults.disabled = legacy.disabled = waiting;
+        importBtn.disabled = waiting;
     };
     const refresh = () => {
         const bridge = api();
@@ -156,6 +182,33 @@ document.addEventListener('DOMContentLoaded', () => {
     window.pyasPolicyRestartFailed = restartFailed;
     defaults.addEventListener('click', () => setup(false));
     legacy.addEventListener('click', () => setup(true));
+    // 策略已初始化后的补导:与初始化同一套「预览-审核-授权」,只是入口常驻
+    importBtn.addEventListener('click', async () => {
+        if (busy || !active) return;
+        const bridge = api(), view = epoch;
+        if (!bridge || typeof bridge.import_legacy_policy !== 'function') return;
+        notice = ''; busy = true; render(status);
+        try {
+            const preview = await bridge.get_policy_migration_preview();
+            if (view !== epoch || !active) return;
+            if (!preview?.available) { notice = texts().unavailable; return; }
+            busy = false; render(status);
+            if (!await review(preview.values, true) || view !== epoch || !active) return;
+            busy = true; render(status);
+            const result = await bridge.import_legacy_policy(preview.digest || null);
+            if (view !== epoch || !active) return;
+            epoch++;
+            if (result?.ok) render({ state: 'restart_required', initialized: true });
+            else {
+                const state = result?.state || status?.state || 'commit_failed';
+                const detail = result?.detail || status?.error || result?.error || '';
+                notice = result?.cancelled ? texts().cancelled : '';
+                render({ state, initialized: true, error: String(detail) });
+            }
+        } catch (error) {
+            if (view === epoch && active) notice = texts().failed;
+        } finally { busy = false; if (status) render(status); refresh(); }
+    });
     restart.addEventListener('click', () => {
         if (restarting) return;
         // The only action this state offers: confirm and restart. It stays
@@ -177,7 +230,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!localStorage.getItem('pyas_policy_offer_shown')) {
         localStorage.setItem('pyas_policy_offer_shown', '1');
         const offerOnce = () => {
-            if (status && !status.initialized && status.state === 'not_initialized') setup(false);
+            // 升级场景优先引导导入旧配置:老用户已启用的防护不该被默认值悄悄覆盖
+            if (status && !status.initialized && status.state === 'not_initialized')
+                setup(!!status.legacy_available);
         };
         setTimeout(offerOnce, 1200);
     }

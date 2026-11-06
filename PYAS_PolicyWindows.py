@@ -515,6 +515,8 @@ class WindowsPolicyBackend:
         self.policy_file = os.path.join(self.root, 'Config.json')
         self.user_file = os.path.join(user_data_dir(), 'Preferences.json')
         self.legacy_file = legacy_config_path()
+        # 只在构造时探测一次存在性:状态轮询(1 秒一次)不重读不可信的旧文件
+        self.legacy_present = os.path.isfile(self.legacy_file)
         self.leases = set()
         self.lock = threading.RLock()
 
