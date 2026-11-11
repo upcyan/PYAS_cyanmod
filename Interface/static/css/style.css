@@ -349,7 +349,10 @@ body {
     color: var(--text-secondary);
     margin-top: var(--space-1);
     white-space: nowrap;
-    overflow-x: auto;
+    /* 长路径不出横向滚动条:中段省略由 main.js 的 progressPathView 按「最前面路径+…+文件名」
+       随宽度重算;这里 overflow 收尾,text-overflow 只作 JS 不可用时的尾部省略兜底 */
+    overflow: hidden;
+    text-overflow: ellipsis;
     padding-bottom: 4px;
 }
 

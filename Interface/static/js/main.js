@@ -1227,18 +1227,128 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    // —— 扫描/删除进度路径的中段省略 ————————————————————————————————————————
+    // 长路径压缩成「最前面路径 + … + 文件名」（如 C:/Users/…/manifest.json），
+    // 横向滚动条由 CSS 收掉；窗口/布局变化时按当前宽度重新计算省略位置。
+    // 测量用 canvas measureText，不触发布局重排；宽度/字体/路径都没变时直接跳过。
+    const progressPathView = (() => {
+        const ELLIPSIS = '…';
+        let measurer = null;
+        let lastSig = '';
+
+        const measureWidth = (style, text) => {
+            if (!measurer) measurer = document.createElement('canvas');
+            const ctx = measurer.getContext('2d');
+            ctx.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+            return ctx.measureText(text).width;
+        };
+
+        // 最大的 n：前缀 text.slice(0, n) 拼上 suffix 后不超过 budget
+        const fitPrefix = (text, suffix, budget, width) => {
+            let lo = 0, hi = text.length;
+            while (lo < hi) {
+                const mid = (lo + hi + 1) >> 1;
+                if (width(text.slice(0, mid) + suffix) <= budget) lo = mid; else hi = mid - 1;
+            }
+            return lo;
+        };
+
+        // 最大的 n：text 的末 n 个字符拼上省略号后不超过 budget
+        const fitSuffix = (text, budget, width) => {
+            let lo = 0, hi = text.length;
+            while (lo < hi) {
+                const mid = (lo + hi + 1) >> 1;
+                if (width(ELLIPSIS + text.slice(text.length - mid)) <= budget) lo = mid; else hi = mid - 1;
+            }
+            return lo;
+        };
+
+        const render = (el) => {
+            const full = el.dataset.fullPath;
+            if (full == null) return;
+            const style = getComputedStyle(el);
+            const avail = el.clientWidth - 1; // 1px 余量：防亚像素取整把最后一个字符挤溢出
+            if (avail <= 0) return;           // 页面隐藏等场景：等可见后由 resize/RO 再触发
+            const sig = `${avail}|${style.fontStyle}|${style.fontWeight}|${style.fontSize}|${style.fontFamily}|${full}`;
+            if (sig === lastSig) return;      // 宽度/字体/路径都没变，不必重算
+            const width = (text) => measureWidth(style, text);
+
+            let result = full;
+            if (width(full) > avail) {
+                // 尾部取文件名（最后一段）；路径以分隔符结尾时回退取最后一段目录名
+                const lastSep = Math.max(full.lastIndexOf('\\'), full.lastIndexOf('/'));
+                let headText = '', tailShown = full;
+                if (lastSep >= 0) {
+                    if (lastSep === full.length - 1) {
+                        const prevSep = Math.max(full.slice(0, lastSep).lastIndexOf('\\'), full.slice(0, lastSep).lastIndexOf('/'));
+                        headText = prevSep >= 0 ? full.slice(0, prevSep + 1) : '';
+                        tailShown = prevSep >= 0 ? full[lastSep] + full.slice(prevSep + 1) : full;
+                    } else {
+                        headText = full.slice(0, lastSep + 1);
+                        tailShown = full[lastSep] + full.slice(lastSep + 1);
+                    }
+                }
+                if (width(ELLIPSIS + tailShown) <= avail) {
+                    // 1）收紧头部：优先按完整路径段回退，段都放不下再按字符回退
+                    let n = fitPrefix(headText, ELLIPSIS + tailShown, avail, width);
+                    if (n > 0 && n < headText.length) {
+                        // 只向后吸附到段边界，不展示半截目录名（lastIndexOf 负 fromIndex 会全串搜索，必须挡住）
+                        const sepIdx = Math.max(headText.lastIndexOf('\\', n - 1), headText.lastIndexOf('/', n - 1));
+                        if (sepIdx >= 0) n = sepIdx + 1;
+                    }
+                    result = headText.slice(0, n) + ELLIPSIS + tailShown;
+                } else {
+                    // 2）头部清空仍放不下：从尾部前端截，保住文件名结尾（扩展名）
+                    const n = fitSuffix(tailShown, avail, width);
+                    result = ELLIPSIS + tailShown.slice(tailShown.length - n);
+                }
+            }
+            el.textContent = result;
+            lastSig = sig;
+        };
+
+        const refresh = () => {
+            const el = document.getElementById('progress_text');
+            // 只在「路径态」刷新：消息态由 data-i18n / data-dynamic-msg 管理，不能被旧路径盖掉
+            if (!el || el.hasAttribute('data-i18n') || el.hasAttribute('data-dynamic-msg')) return;
+            render(el);
+        };
+
+        const renderPath = (el, path) => {
+            el.removeAttribute('data-i18n');
+            el.removeAttribute('data-dynamic-msg');
+            el.dataset.fullPath = String(path == null ? '' : path);
+            render(el);
+        };
+
+        // 窗口/布局变化 → 按新宽度重新省略（rAF 合帧；RO 兜住不经过窗口 resize 的布局变化）
+        let rafId = 0;
+        const scheduleRefresh = () => {
+            if (rafId) return;
+            rafId = requestAnimationFrame(() => { rafId = 0; refresh(); });
+        };
+        window.addEventListener('resize', scheduleRefresh);
+        if (typeof ResizeObserver === 'function') {
+            const ro = new ResizeObserver(scheduleRefresh);
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => ro.observe(document.getElementById('progress_text')), { once: true });
+            else ro.observe(document.getElementById('progress_text'));
+        }
+
+        return { renderPath };
+    })();
+
     window.updateScanProgress = (path) => {
         const title = document.querySelector('#scan_window .section-title');
         const text = document.getElementById('progress_text');
         if (title) { title.setAttribute('data-i18n', 'status_scanning'); title.textContent = getMsg('status_scanning'); }
-        if (text) { text.removeAttribute('data-i18n'); text.removeAttribute('data-dynamic-msg'); text.textContent = path; }
+        if (text) progressPathView.renderPath(text, path);
     };
 
     window.updateDeleteProgress = (path) => {
         const title = document.querySelector('#scan_window .section-title');
         const text = document.getElementById('progress_text');
         if (title) { title.setAttribute('data-i18n', 'status_deleting'); title.textContent = getMsg('status_deleting'); }
-        if (text) { text.removeAttribute('data-i18n'); text.removeAttribute('data-dynamic-msg'); text.textContent = path; }
+        if (text) progressPathView.renderPath(text, path);
     };
 
     window.finishScan = (msgData, count) => {
