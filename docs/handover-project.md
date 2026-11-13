@@ -8,7 +8,7 @@
 PYAS Security Cyanmod 是 87owo/PYAS(Windows 开源杀毒)的中文增强分支。技术形态:**Python 3.14 + pywebview(WebView2)用户态杀毒**,全程策略模式(写配置经策略 broker 事务化提交),无内核驱动依赖(驱动防护为可选组件)。
 
 - 构建:`py -3 build.py local`(dev 渠道)/ CI tag `v*` 触发自动发布(release);release 说明取仓库根 `RELEASE_NOTES.md`
-- 测试:`py -3 -m unittest discover tests`(614 项;运行中的 PYAS 会干扰部分文件锁类测试,单跑消失即环境问题)
+- 测试:`py -3 -m unittest discover tests`(667 项;运行中的 PYAS 会干扰部分文件锁类测试,单跑消失即环境问题——实时防护会短暂持有测试刚写出的 exe 命名临时文件,契约预检对此有一次重试)
 - 多语言:11 语言(繁中/简中/英/日/韩/法/西/印地/阿/俄/斯洛文尼亚);**动作列**由前端 i18n.js 查词(构建守卫 `test_log_action_i18n` 强制)、**详情列**写时本地化(集中表 `PYAS_LogTexts`,模块表 `ETW_LOG_TEXTS`/`BEHAVIOR_LOG_TEXTS`/`CANARY_LOG_TEXTS`)
 - 策略契约:`pyas_default` 新增配置键必须登记 `PYAS_Policy` 对应桶(BOOL/STRING/NUMBER/LIST/USER),守卫 `test_policy_config_keys`
 - 本机体验包:版本号 3.7.1-20 发布于 10-27;21→32 系列在本地(30 起含蜜罐/AMSI),推送与发布需用户批准
@@ -49,6 +49,7 @@ PYAS Security Cyanmod 是 87owo/PYAS(Windows 开源杀毒)的中文增强分支�
 - **Edit 工具锚点跨方法签名会静默删码**(fef4443/多轮教训):改完必跑对应测试文件
 - **heredoc 写补丁不可靠**(CRLF/转义):多行修改用 Write/Edit 工具
 - **多会话并行常态**:动手前 grep 现状,勿基于旧快照打补丁;外部会话产出的未跟踪文件会被 add -A 扫入
-- **发布流程**:main 推送 → tag v* → CI 全自动(见 `github-proxy-setup` 记忆:直连/代理按时刻漂移,失败换路;Steam++ 在 `C:\Program Files\Steam++\Steam++.exe`,未运行时 Start-Process 拉起)
+- **发布流程**:main 推送 → tag v* → CI 全自动(release 说明取根目录 `RELEASE_NOTES.md`)。**publish() 现在自动生成并上传 `<安装包>.sha256` 旁路文件与 `latest.json` 更新清单,并把清单提交回 main([skip ci],jsDelivr 由此取数;本地发布失败只告警可手动补提交)**;应用端检查更新在 GitHub API 不可达时经 jsDelivr/raw+镜像读 latest.json 兜底(清单 mirrors 字段可下发补充镜像,register_session_mirrors 校验 ≤6 条)
+- **发布纪律**:发布 tag 前 tip 提交不得带 [skip ci];tag 推送后 CI 的 latest.json 回提交完成前,不要再向 main 推送(否则 CI 的 HEAD:main 推送会被拒,清单落不了库)
 - **SAC(智能应用控制)**:本机开启且不可豁免——拦未签名 exe(驱动/右键菜单扫描器/新构建安装包);彻底解法只有关闭 SAC(不可逆),用户尚未决定
 - 完整历史教训与机制细节见项目记忆 `pyas-cyanmod-project.md`(约 160 行,按时间线组织)
