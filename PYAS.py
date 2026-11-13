@@ -82,6 +82,8 @@ PYAS_MESSAGE_QUIT = 4
 PYAS_MESSAGE_DRIVER_UNLOAD = 5
 PYAS_MESSAGE_DRIVER_UNINSTALL = 6
 PYAS_MAINTENANCE_MESSAGE = 0x8000 + 0x501
+MSGFLT_REMOVE = 2
+MSGFLT_DISALLOW = 2
 PYAS_MAINTENANCE_COMMANDS = frozenset(
     {
         PYAS_MESSAGE_CLOSE,
@@ -1958,6 +1960,8 @@ class WindowHook:
             except Exception:
                 log_exception('PYAS.WindowHook.hook:dwm')
 
+            self.maintenance_channel_ready = False
+
             try:
                 self.user32.ChangeWindowMessageFilterEx.argtypes = [
                     ctypes.c_void_p,
@@ -1965,18 +1969,25 @@ class WindowHook:
                     ctypes.c_uint,
                     ctypes.c_void_p,
                 ]
+                self.user32.ChangeWindowMessageFilter.argtypes = [ctypes.c_uint, ctypes.c_uint]
+                self.user32.ChangeWindowMessageFilter.restype = ctypes.wintypes.BOOL
 
-                # MSGFLT_ALLOW=1: 允许(可能未提权的)安装器等进程投递维护消息。
-                # 上游原代码使用的 ChangeWindowMessageFilter(msg, 0) 参数非法,
-                # 必然失败并导致 maintenance_channel_ready 永远为 False,
-                # 使 -quit 的退出消息被窗口过程直接忽略。
+                self.user32.ChangeWindowMessageFilter(PYAS_MAINTENANCE_MESSAGE, MSGFLT_REMOVE)
+                filter_info = (ctypes.wintypes.DWORD * 2)(8, 0)
+
+                # 上游 3.7.2 方案:进程级先移除维护消息许可,窗口级明确禁止并
+                # 回读校验(fail-closed)——伪造维护消息被挡死;-quit 的实际
+                # 命令数据走下方单独放行的 WM_COPYDATA 通道,功能不受影响
                 if not self.user32.ChangeWindowMessageFilterEx(
-                    hwnd, PYAS_MAINTENANCE_MESSAGE, 1, None
+                    hwnd, PYAS_MAINTENANCE_MESSAGE, MSGFLT_DISALLOW, ctypes.byref(filter_info)
                 ):
-                    raise OSError("Could not allow maintenance message channel")
+                    raise OSError("Could not protect maintenance message channel")
 
-                self.user32.ChangeWindowMessageFilterEx(hwnd, self.WM_COPYDATA, 1, None)
+                if filter_info[1] == 3:
+                    raise OSError("Maintenance message remains allowed by a wider filter")
+
                 self.maintenance_channel_ready = True
+                self.user32.ChangeWindowMessageFilterEx(hwnd, self.WM_COPYDATA, 1, None)
             except Exception:
                 log_exception("PYAS.WindowHook.hook:732")
                 pass

@@ -1130,7 +1130,7 @@ rule TrojanDownloader_PS_StagedExecution
         author = "PYAS Security"
         date = "2026-09-21"
         scope = "PowerShell and embedded PowerShell command content"
-        evidence = "compound condition requires PowerShell networking, a download method, remote URI, execution primitive and staging, delay or stealth behavior"
+        evidence = "compound condition requires PowerShell networking, a download method, remote URI, execution primitive and independent staging, delay or window-control behavior; execution-policy bypass alone is insufficient"
         attribution = "capability cluster; not a verified malware-family attribution"
     strings:
         $client_1 = "Net.WebClient" ascii wide nocase
@@ -1152,7 +1152,6 @@ rule TrojanDownloader_PS_StagedExecution
         $context_2 = "WindowStyle" ascii wide nocase
         $context_3 = "$env:APPDATA" ascii wide nocase
         $context_4 = "$env:TEMP" ascii wide nocase
-        $context_5 = "ExecutionPolicy" ascii wide nocase
     condition:
         Script_Text_Reasonable and 1 of ($client_*) and 1 of ($download_*) and
         1 of ($remote_*) and 1 of ($context_*) and
