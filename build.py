@@ -752,7 +752,7 @@ def publish(asset, version, interactive=False):
 
     # 旁路校验文件与更新清单:应用端双校验成真,API 全断时版本发现走清单兜底
     digest_hex = hashlib.sha256(asset.read_bytes()).hexdigest()
-    sidecar = write_update_sidecar(asset)
+    sidecar = write_update_sidecar(asset, digest_hex)
     manifest = write_update_manifest(asset, version, digest_hex)
     log("发布", f"已生成 {sidecar.name} 与 latest.json(sha256 {digest_hex[:16]}…)")
 
@@ -844,6 +844,7 @@ BUILD_CONTRACT_PATTERNS = (
     'test_update_protocol.py',
     'test_update_resume.py',
     'test_update_manifest.py',
+    'test_build_publish.py',
     'test_policy_config_keys.py',
     'test_policy_relaunch.py',
     'test_write_owner_query.py',
