@@ -40,6 +40,10 @@ class BuildPublishContractTests(unittest.TestCase):
         # 清单里的 asset 必须原样通过应用端 normalize_asset 的源锚校验,
         # 否则 API 全断时的兜底通道下载端会拒绝(双校验来源缺一不可)
         from PYAS_Updates import normalize_asset
+        root_latest = build.ROOT / 'latest.json'
+        saved = root_latest.read_bytes() if root_latest.exists() else None
+        self.addCleanup(lambda: root_latest.write_bytes(saved) if saved is not None
+            else root_latest.unlink(missing_ok=True))
         manifest = build.write_update_manifest(self.asset, '9.9.9-1', self.digest)
         data = json.loads(manifest.read_text(encoding='utf-8'))
         self.assertEqual(data['version'], 'v9.9.9-1')
@@ -52,10 +56,11 @@ class BuildPublishContractTests(unittest.TestCase):
         self.assertEqual(selected['digest'], 'sha256:' + self.digest)
 
     def test_publish_pipeline_calls_are_consistent(self):
-        # 静态检查:publish 源码里对 sidecar/manifest 的调用必须与签名对齐
+        # 静态检查:publish 源码里对 sidecar/manifest/R2 的调用必须与签名对齐
         source = inspect.getsource(build.publish)
         self.assertIn('write_update_sidecar(asset, digest_hex)', source)
-        self.assertIn('write_update_manifest(asset, version, digest_hex)', source)
+        self.assertIn('write_update_manifest(asset, version, digest_hex, r2_base=r2_base)', source)
+        self.assertIn('upload_release_to_r2(asset, sidecar, version)', source)
         self.assertIn('commit_update_manifest()', source)
         for name in ('create_release_gh', 'create_release_api'):
             signature = list(inspect.signature(getattr(build, name)).parameters)

@@ -49,7 +49,8 @@ PYAS Security Cyanmod 是 87owo/PYAS(Windows 开源杀毒)的中文增强分支�
 - **Edit 工具锚点跨方法签名会静默删码**(fef4443/多轮教训):改完必跑对应测试文件
 - **heredoc 写补丁不可靠**(CRLF/转义):多行修改用 Write/Edit 工具
 - **多会话并行常态**:动手前 grep 现状,勿基于旧快照打补丁;外部会话产出的未跟踪文件会被 add -A 扫入
-- **发布流程**:main 推送 → tag v* → CI 全自动(release 说明取根目录 `RELEASE_NOTES.md`)。**publish() 现在自动生成并上传 `<安装包>.sha256` 旁路文件与 `latest.json` 更新清单,并把清单提交回 main([skip ci],jsDelivr 由此取数;本地发布失败只告警可手动补提交)**;应用端检查更新在 GitHub API 不可达时经 jsDelivr/raw+镜像读 latest.json 兜底(清单 mirrors 字段可下发补充镜像,register_session_mirrors 校验 ≤6 条)
+- **发布流程**:main 推送 → tag v* → CI 全自动(release 说明取根目录 `RELEASE_NOTES.md`)。**publish() 现在自动生成并上传 `<安装包>.sha256` 旁路文件与 `latest.json` 更新清单,并把清单提交回 main([skip ci],jsDelivr 由此取数;本地发布失败只告警可手动补提交)**;应用端检查更新在 GitHub API 不可达时经 R2 直链(启用时)/jsDelivr/raw+镜像读 latest.json 兜底(清单 mirrors 字段可下发补充镜像,register_session_mirrors 校验 ≤6 条;清单 r2_base 字段可在会话内激活 R2 下载渠道)
+- **R2 自有分发渠道(Cloudflare 静态桶,一次性手工接线)**:①CF 控制台建 R2 桶(建议名 `pyas-releases`,位置自动)②桶 → Settings → Public access 绑自定义域名(如 `dl.<你的域名>`,域名须托管在同一 CF 账号)③R2 → Manage R2 API Tokens 建 Object Read & Write 的桶级 token④GitHub 仓库 Settings → Secrets and variables → Actions 配 5 项:`R2_ACCOUNT_ID`(CF 账户 ID)、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`(token 的 Access Key ID/Secret Access Key)、`R2_BUCKET`(桶名)、`R2_PUBLIC_BASE`(如 `https://dl.<你的域名>`,尾斜杠可带可不带)。**配置后的下一次发布自动同步**:`{base}/releases/v<版本>/安装包+.sha256`(immutable 长缓存)与 `{base}/latest.json`(no-cache 直链);任一上传失败自动降级 GitHub 单源,清单不宣传 r2_base。**客户端 R2 下载渠道随清单 r2_base 字段自动激活,无需发版**;若要「检查更新」也走 R2 直达(GitHub 全断时的最后一条路),把 `PYAS_Updates.R2_PUBLIC_BASE` 常量烘焙成实际域名再发一版。10GB 免费额度 ≈ 130 个 74MB 版本,暂无自动清理,满后在 CF 控制台删旧版本目录
 - **发布纪律**:发布 tag 前 tip 提交不得带 [skip ci];tag 推送后 CI 的 latest.json 回提交完成前,不要再向 main 推送(否则 CI 的 HEAD:main 推送会被拒,清单落不了库)
 - **SAC(智能应用控制)**:本机开启且不可豁免——拦未签名 exe(驱动/右键菜单扫描器/新构建安装包);彻底解法只有关闭 SAC(不可逆),用户尚未决定
 - 完整历史教训与机制细节见项目记忆 `pyas-cyanmod-project.md`(约 160 行,按时间线组织)

@@ -58,6 +58,50 @@ def register_session_mirrors(mirrors):
     _SESSION_MIRRORS[:] = accepted
     return accepted
 
+
+# R2 自有分发渠道(Cloudflare 静态桶,自定义域名直链)。R2 不是前缀代理,
+# 不能拼 mirror+github-url;它按确定性布局直接托管对象:
+#   {base}/latest.json                    清单(no-cache,始终最新)
+#   {base}/releases/<tag>/<文件名>        安装包与 .sha256 旁路文件
+# 内置常量由发版烘焙;更新清单的 r2_base 字段也能在会话内激活(免发版接线)。
+R2_PUBLIC_BASE = ''
+_SESSION_R2_BASE = ''
+
+def register_session_r2_base(base):
+    """登记清单下发的 R2 公开源(会话级);空串/None=清除回落内置常量,非法值忽略。"""
+    global _SESSION_R2_BASE
+    candidate = str(base or '').strip()
+    if not candidate:
+        _SESSION_R2_BASE = ''
+        return ''
+    parsed = urlsplit(candidate)
+    if (parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password
+            or parsed.query or parsed.fragment or parsed.path not in ('', '/') or len(candidate) > 120):
+        return None
+    if not candidate.endswith('/'):
+        candidate += '/'
+    _SESSION_R2_BASE = candidate
+    return candidate
+
+def active_r2_base():
+    """当前生效的 R2 公开源(清单会话注册优先于内置常量);空=未启用。"""
+    return _SESSION_R2_BASE or R2_PUBLIC_BASE
+
+def r2_manifest_url():
+    base = active_r2_base()
+    return base + 'latest.json' if base else None
+
+def r2_object_urls(asset):
+    """R2 渠道的安装包/旁路文件直链;未启用或资产信息不完整返回 None。"""
+    base = active_r2_base()
+    if not base:
+        return None
+    version, name = str(asset.get('version') or ''), str(asset.get('name') or '')
+    if not version or not name or any(ch in version + name for ch in '/?#\\'):
+        return None
+    root = base + 'releases/' + version + '/'
+    return {'installer': root + name, 'sidecar': root + name + '.sha256'}
+
 def normalize_asset(asset):
     if not isinstance(asset, dict):
         return None
@@ -187,45 +231,69 @@ class UpdateDownloadManager:
     def _open_stream(self, url, offset=0):
         """取安装包流;offset>0 时带 Range 请求断点续传。
 
-        渠道阶梯(直连→系统代理→镜像)由注入的 fetch 自己实现(生产环境是
-        ToolsMixin._github_get),这里只判响应可用性:200 全量;offset>0 时
-        206 且 Content-Range 起点吻合为续传,200 视为服务器忽略 Range(调用方
-        须从零重写)。其余一律视为渠道不可用。返回 (response, resumed)。
+        渠道顺序:R2 自有渠道(启用时,确定性直链,不走镜像阶梯)→ 注入的
+        fetch 阶梯(生产环境 ToolsMixin._github_get:直连→系统代理→镜像)。
+        200 全量;offset>0 时 206 且 Content-Range 起点吻合为续传,200 视为
+        服务器忽略 Range(调用方须从零重写)。其余视为该渠道不可用,换下一个。
+        返回 (response, resumed)。
         """
         if offset < 0:
             offset = 0
-        kwargs = {'stream': True}
-        if offset:
-            kwargs['extra_headers'] = {'Range': 'bytes=' + str(offset) + '-'}
-        response = self.fetch(url, **kwargs)
-        status = getattr(response, 'status_code', 200)
-        if status == 200:
-            return response, False
-        if status == 206 and offset:
-            headers = getattr(response, 'headers', None) or {}
-            match = re.match(r'bytes\s+(\d+)-', str(headers.get('Content-Range') or ''))
-            if match and int(match.group(1)) == offset:
-                return response, True
-        try:
-            response.close()
-        except Exception:
-            pass
-        raise ValueError('Update source returned HTTP ' + str(status))
+        targets = []
+        r2_urls = r2_object_urls(self.selection or {})
+        if r2_urls:
+            targets.append((r2_urls['installer'], False))
+        targets.append((url, True))
+        error = None
+        for target, allow_mirrors in targets:
+            kwargs = {'stream': True}
+            if offset:
+                kwargs['extra_headers'] = {'Range': 'bytes=' + str(offset) + '-'}
+            if not allow_mirrors:
+                kwargs['mirrors'] = False
+            try:
+                response = self.fetch(target, **kwargs)
+            except Exception as exc:
+                error = error or exc
+                continue
+            status = getattr(response, 'status_code', 200)
+            if status == 200:
+                return response, False
+            if status == 206 and offset:
+                headers = getattr(response, 'headers', None) or {}
+                match = re.match(r'bytes\s+(\d+)-', str(headers.get('Content-Range') or ''))
+                if match and int(match.group(1)) == offset:
+                    return response, True
+            self._close_quiet(response)
+            error = ValueError('Update source returned HTTP ' + str(status))
+        raise error if error else RuntimeError('update source unavailable')
 
     def _read_checksum(self, asset):
-        """读发布里的 .sha256 旁路文件,得到第二份校验码(渠道阶梯在 fetch 内)。"""
-        response = self.fetch(asset['checksum_url'], timeout=15)
-        try:
-            text = str(getattr(response, 'text', '') or '')
-        finally:
+        """读发布里的 .sha256 旁路文件得第二份校验码:R2 直链优先,其余走 fetch 阶梯。"""
+        targets = []
+        r2_urls = r2_object_urls(asset)
+        if r2_urls:
+            targets.append((r2_urls['sidecar'], False))
+        targets.append((asset['checksum_url'], True))
+        error = None
+        for target, allow_mirrors in targets:
+            kwargs = {'timeout': 15}
+            if not allow_mirrors:
+                kwargs['mirrors'] = False
             try:
-                response.close()
-            except Exception:
-                pass
-        match = re.search(r'\b([0-9a-fA-F]{64})\b', text)
-        if not match:
-            raise ValueError('Invalid checksum file')
-        return 'sha256:' + match.group(1).lower()
+                response = self.fetch(target, **kwargs)
+            except Exception as exc:
+                error = error or exc
+                continue
+            try:
+                text = str(getattr(response, 'text', '') or '')
+            finally:
+                self._close_quiet(response)
+            match = re.search(r'\b([0-9a-fA-F]{64})\b', text)
+            if match:
+                return 'sha256:' + match.group(1).lower()
+            error = ValueError('Invalid checksum file')
+        raise ValueError('Update checksum unavailable') from error
 
     def _prune_orphan_parts(self, name):
         """清掉同安装包名下过期的孤儿 .part(崩溃残留;本任务自己的 .part 不在此列)。"""

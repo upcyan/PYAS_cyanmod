@@ -84,5 +84,11 @@ jobs:
         if: github.ref_type == 'tag'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # --skip-build:上一步已构建,这里只做 gh release create + 上传
+          # R2 自有分发渠道:五个 secrets 都配置后才启用,缺任一则跳过走 GitHub 单源
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_PUBLIC_BASE: ${{ secrets.R2_PUBLIC_BASE }}
+        # --skip-build:上一步已构建,这里只做发布+上传(gh release + R2 同步 + 清单回提交)
         run: python build.py release --skip-build

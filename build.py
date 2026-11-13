@@ -15,6 +15,7 @@ CI 构建请显式写 --channel normal。
 
 import argparse
 import hashlib
+import hmac
 import importlib.util
 import json
 import os
@@ -607,12 +608,13 @@ def write_update_sidecar(asset, digest_hex):
     return sidecar
 
 
-def write_update_manifest(asset, version, digest_hex):
+def write_update_manifest(asset, version, digest_hex, r2_base=""):
     """生成仓库根目录的 latest.json(API 全断时的版本发现兜底清单)。
 
-    应用端经 jsDelivr/raw+镜像 拉取;asset.url 仍是 github.com releases 直链
-    (应用端 normalize_asset 只认这个源锚),sha256 随清单下发作为校验来源之一。
-    mirrors 留空列表:将来接入自有渠道(Cloudflare R2 等)时由 CI 填入。
+    应用端经 R2 直链(启用时)/jsDelivr/raw+镜像 拉取;asset.url 仍是
+    github.com releases 直链(应用端 normalize_asset 只认这个源锚),sha256
+    随清单下发作为校验来源之一。r2_base 非空时写入清单,应用端会在会话内
+    激活 R2 下载渠道;mirrors 字段留给 gh-proxy 系前缀镜像。
     """
     tag = f"v{version}"
     manifest = {
@@ -627,11 +629,95 @@ def write_update_manifest(asset, version, digest_hex):
             "checksum_url": f"https://github.com/{GITHUB_REPO}/releases/download/{tag}/{asset.name}.sha256",
             "version": tag,
         },
+        "r2_base": r2_base,
         "mirrors": [],
     }
     target = ROOT / "latest.json"
     target.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return target
+
+
+def r2_env():
+    """R2 上传的五项配置(CI secrets 注入);任一缺失或公开源形态不干净返回 None。
+
+    R2_ACCOUNT_ID/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY/R2_BUCKET 用于 S3
+    兼容上传;R2_PUBLIC_BASE 是绑定了桶的自定义域名公开源(客户端据此直链)。
+    """
+    values = {key: os.environ.get(key, "").strip() for key in
+        ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "R2_PUBLIC_BASE")}
+    if not all(values.values()):
+        return None
+    from urllib.parse import urlsplit
+    parsed = urlsplit(values["R2_PUBLIC_BASE"])
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.path not in ("", "/")
+            or parsed.query or parsed.fragment or parsed.username or parsed.password):
+        return None
+    if not values["R2_PUBLIC_BASE"].endswith("/"):
+        values["R2_PUBLIC_BASE"] += "/"
+    return values
+
+
+def _r2_authorization(method, url_path, headers_map, payload_sha256, access_key, secret_key, amz_date=None):
+    """AWS SigV4 签名(service=s3, region=auto,R2 兼容)→ (Authorization, amz_date)。"""
+    amz_date = amz_date or time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    datestamp = amz_date[:8]
+    headers_map = {**headers_map, "x-amz-date": amz_date, "x-amz-content-sha256": payload_sha256}
+    signed_headers = ";".join(sorted(headers_map))
+    canonical_headers = "".join(f"{name}:{headers_map[name]}\n" for name in sorted(headers_map))
+    canonical_request = "\n".join(
+        [method, url_path, "", canonical_headers, signed_headers, payload_sha256])
+    scope = f"{datestamp}/auto/s3/aws4_request"
+    string_to_sign = "\n".join(["AWS4-HMAC-SHA256", amz_date, scope,
+        hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()])
+    signing_key = ("AWS4" + secret_key).encode("utf-8")
+    for part in (datestamp, "auto", "s3", "aws4_request"):
+        signing_key = hmac.new(signing_key, part.encode("utf-8"), hashlib.sha256).digest()
+    signature = hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    authorization = (f"AWS4-HMAC-SHA256 Credential={access_key}/{scope}, "
+        f"SignedHeaders={signed_headers}, Signature={signature}")
+    return authorization, amz_date
+
+
+def r2_upload_object(config, key, file_path, content_type, cache_control):
+    """经 S3 兼容 API 上传单个对象(UNSIGNED-PAYLOAD);失败抛异常由调用方定夺。"""
+    import urllib.request
+
+    host = f"{config['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com"
+    url_path = f"/{config['R2_BUCKET']}/{key}"
+    authorization, amz_date = _r2_authorization("PUT", url_path, {"host": host},
+        "UNSIGNED-PAYLOAD", config["R2_ACCESS_KEY_ID"], config["R2_SECRET_ACCESS_KEY"])
+    request = urllib.request.Request(
+        f"https://{host}{url_path}", data=Path(file_path).read_bytes(), method="PUT", headers={
+            "Authorization": authorization,
+            "x-amz-date": amz_date,
+            "x-amz-content-sha256": "UNSIGNED-PAYLOAD",
+            "Content-Type": content_type,
+            "Cache-Control": cache_control,
+        })
+    with urllib.request.urlopen(request, timeout=600) as response:
+        if response.status not in (200, 201):
+            raise OSError(f"R2 upload {key} -> HTTP {response.status}")
+
+
+def upload_release_to_r2(asset, sidecar, version):
+    """把安装包与旁路文件同步到 R2(清单对象在 publish 终版生成后再传)。
+
+    密钥缺失 → 返回 ''(渠道未接线,发布流程照常走 GitHub 单源);
+    任一上传失败 → 记告警返回 '',清单不宣传 R2(jsDelivr/raw 链路不受影响)。
+    """
+    config = r2_env()
+    if config is None:
+        log("发布", "R2 密钥未配置,跳过自有渠道上传(GitHub 单源发布)")
+        return ""
+    try:
+        r2_upload_object(config, f"releases/v{version}/{asset.name}", asset,
+            "application/octet-stream", "public, max-age=31536000, immutable")
+        r2_upload_object(config, f"releases/v{version}/{asset.name}.sha256", sidecar,
+            "text/plain", "public, max-age=31536000, immutable")
+    except Exception as error:
+        log("发布", f"R2 安装包上传失败,清单不写入 r2_base(GitHub 链路不受影响): {error}")
+        return ""
+    return config["R2_PUBLIC_BASE"]
 
 
 def commit_update_manifest():
@@ -753,8 +839,15 @@ def publish(asset, version, interactive=False):
     # 旁路校验文件与更新清单:应用端双校验成真,API 全断时版本发现走清单兜底
     digest_hex = hashlib.sha256(asset.read_bytes()).hexdigest()
     sidecar = write_update_sidecar(asset, digest_hex)
-    manifest = write_update_manifest(asset, version, digest_hex)
+    # R2 自有渠道:密钥齐了才启用;安装包与旁路文件先传,成功才在清单里宣传
+    r2_base = upload_release_to_r2(asset, sidecar, version)
+    manifest = write_update_manifest(asset, version, digest_hex, r2_base=r2_base)
     log("发布", f"已生成 {sidecar.name} 与 latest.json(sha256 {digest_hex[:16]}…)")
+    if r2_base:
+        try:
+            r2_upload_object(r2_env(), "latest.json", manifest, "application/json", "no-cache")
+        except Exception as error:
+            log("发布", f"R2 清单对象上传失败(安装包渠道已就绪,下次发布重试): {error}")
 
     if shutil.which("gh"):
         create_release_gh(asset, version, extra_assets=(sidecar, manifest))
@@ -845,6 +938,7 @@ BUILD_CONTRACT_PATTERNS = (
     'test_update_resume.py',
     'test_update_manifest.py',
     'test_build_publish.py',
+    'test_build_r2.py',
     'test_policy_config_keys.py',
     'test_policy_relaunch.py',
     'test_write_owner_query.py',

@@ -491,13 +491,14 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
 
         return unique
 
-    def _github_get(self, url, extra_headers=None, **kwargs):
+    def _github_get(self, url, extra_headers=None, mirrors=True, **kwargs):
         """按渠道依次取 GitHub 数据:直连 → 系统代理 → 元数据镜像。
 
         只要有一个渠道能通就返回;403/429 是 GitHub 给的真实状态,仅对
         api.github.com 原样上交(限流要提示用户),其余主机的非 200 按
         「该渠道不可用」换下一个(下载与旁路校验不该被单个镜像的 403 卡死)。
         上次成功的渠道在会话内粘滞 10 分钟,避免每轮都从已失效渠道白等超时。
+        mirrors=False 跳过镜像段(R2 等自有直链不值得被镜像二次包装)。
         """
         import time
         from urllib.parse import urlsplit
@@ -513,8 +514,9 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
         attempts = [(None, url)]
         for proxy in self._system_proxy_candidates():
             attempts.append((proxy, url))
-        for mirror in effective_mirrors():
-            attempts.append((None, mirror + url))
+        if mirrors:
+            for mirror in effective_mirrors():
+                attempts.append((None, mirror + url))
 
         hint = getattr(self, '_github_channel_hint', None)
         if hint and time.monotonic() < hint[1] and 0 <= hint[0] < len(attempts):
@@ -738,17 +740,23 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
         return {"error": True, 'error_code': 'invalid_response'}
 
     def _fetch_update_manifest(self):
-        """GitHub API 不可达时的更新清单兜底:main 分支上的 latest.json。
+        """GitHub API 不可达时的更新清单兜底:R2 自有渠道(启用时)→ main 分支 latest.json。
 
         清单由发布流水线生成并提交;安装包 URL 仍是 github.com releases
         (normalize_asset 照常把门),清单里的 sha256 作为下载校验来源之一,
-        内容锚不变。jsDelivr 优先(国内边缘可达),失败再走 raw
-        经镜像前缀;jsDelivr 对分支内容有缓存,新发布后可能滞后数小时。
+        内容锚不变。清单的 r2_base 字段可在会话内激活 R2 下载渠道(免发版)。
+        jsDelivr 优先于 raw(国内边缘可达),失败再走 raw 经镜像前缀;
+        jsDelivr 对分支内容有缓存,新发布后可能滞后数小时——R2 直链无此滞后。
         """
         repository = 'upcyan/PYAS_cyanmod'
-        from PYAS_Updates import effective_mirrors, register_session_mirrors
+        from PYAS_Updates import (effective_mirrors, register_session_mirrors,
+            register_session_r2_base, r2_manifest_url)
 
-        targets = [f'https://cdn.jsdelivr.net/gh/{repository}@main/latest.json']
+        targets = []
+        r2_url = r2_manifest_url()
+        if r2_url:
+            targets.append(r2_url)
+        targets.append(f'https://cdn.jsdelivr.net/gh/{repository}@main/latest.json')
         targets += [mirror + f'https://raw.githubusercontent.com/{repository}/main/latest.json'
             for mirror in effective_mirrors()]
         text = None
@@ -776,11 +784,17 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
         asset = data.get('asset')
         if not version or not isinstance(asset, dict):
             return None
-        # 清单可以顺带下发补充镜像;非法条目在 register_session_mirrors 里被滤掉
+        # 清单可以顺带下发补充镜像与 R2 公开源;非法条目在各自登记函数里被滤掉,
+        # 清单明确声明 r2_base 为空时视为「R2 未就绪」,回落内置常量
         mirrors = data.get('mirrors')
         if isinstance(mirrors, list):
             try:
                 register_session_mirrors(mirrors)
+            except Exception:
+                pass
+        if 'r2_base' in data:
+            try:
+                register_session_r2_base(data.get('r2_base'))
             except Exception:
                 pass
         current = VERSION
