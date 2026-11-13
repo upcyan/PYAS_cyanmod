@@ -3675,17 +3675,13 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const fetchReleases = async (repo, maxVersion) => {
-        const res = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=20`, {
-            headers: { 'Accept': 'application/vnd.github+json' }
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const list = await res.json();
-        return (list || []).filter(rel => rel && rel.tag_name).map(rel => ({
-            tag: String(rel.tag_name).trim(),
-            name: String(rel.name || rel.tag_name || ''),
-            date: String(rel.published_at || '').slice(0, 10),
-            body: String(rel.body || '').slice(0, 2000)
-        })).filter(e => !maxVersion || (versionDigits(e.tag).length && versionAtMost(e.tag, maxVersion)));
+        // 变更记录不再前端裸 fetch GitHub API(无任何容错,GitHub 抖动时本页必挂):
+        // 走 Python 桥 fetch_release_changelog,与「检查更新」共用代理+镜像阶梯
+        const api = window.pywebview?.api;
+        if (!api?.fetch_release_changelog) throw new Error('bridge unavailable');
+        const res = await api.fetch_release_changelog(repo, 20);
+        if (!res || !res.success) throw new Error((res && res.error_code) || 'changelog unavailable');
+        return (res.releases || []).filter(e => !maxVersion || (versionDigits(e.tag).length && versionAtMost(e.tag, maxVersion)));
     };
 
     const renderChangelog = () => {

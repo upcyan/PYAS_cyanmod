@@ -14,7 +14,9 @@ CI 构建请显式写 --channel normal。
 """
 
 import argparse
+import hashlib
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -598,7 +600,60 @@ def read_release_notes(version):
     return f"{title}\n\n{body}"
 
 
-def create_release_gh(asset, version):
+def write_update_sidecar(asset, digest_hex):
+    """生成 <安装包>.sha256 旁路文件(应用端 _read_checksum 的第二份校验码)。"""
+    sidecar = asset.parent / (asset.name + ".sha256")
+    sidecar.write_text(f"{digest_hex}  {asset.name}\n", encoding="ascii")
+    return sidecar
+
+
+def write_update_manifest(asset, version, digest_hex):
+    """生成仓库根目录的 latest.json(API 全断时的版本发现兜底清单)。
+
+    应用端经 jsDelivr/raw+镜像 拉取;asset.url 仍是 github.com releases 直链
+    (应用端 normalize_asset 只认这个源锚),sha256 随清单下发作为校验来源之一。
+    mirrors 留空列表:将来接入自有渠道(Cloudflare R2 等)时由 CI 填入。
+    """
+    tag = f"v{version}"
+    manifest = {
+        "version": tag,
+        "published_at": time.strftime("%Y-%m-%d", time.gmtime()),
+        "notes": read_release_notes(version)[:4000],
+        "asset": {
+            "name": asset.name,
+            "url": f"https://github.com/{GITHUB_REPO}/releases/download/{tag}/{asset.name}",
+            "size": asset.stat().st_size,
+            "digest": "sha256:" + digest_hex,
+            "checksum_url": f"https://github.com/{GITHUB_REPO}/releases/download/{tag}/{asset.name}.sha256",
+            "version": tag,
+        },
+        "mirrors": [],
+    }
+    target = ROOT / "latest.json"
+    target.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return target
+
+
+def commit_update_manifest():
+    """把 latest.json 提交回 main,让 jsDelivr 能拉到最新清单;尽力而为。
+
+    CI 里 checkout 自带 GITHUB_TOKEN 凭据,直接 push;本地发布失败只告警
+    (Release 已发出去,清单可以手动补提交)。
+    """
+    identity = ["git", "-c", "user.name=PYAS-CI", "-c", "user.email=noreply@github.com"]
+    results = [
+        run(["git", "add", "latest.json"], capture_output=True),
+        run([*identity, "commit", "-m", "latest.json 更新清单随发布自动提交 [skip ci]"], capture_output=True),
+        run(["git", "push", "origin", "HEAD:main"], capture_output=True),
+    ]
+    if all(result.returncode == 0 for result in results):
+        log("发布", "latest.json 已提交回 main(jsDelivr 数分钟内可拉)")
+        return True
+    log("发布", "latest.json 自动提交未完成,可手动提交(不影响已发布的 Release)")
+    return False
+
+
+def create_release_gh(asset, version, extra_assets=()):
     tag = f"v{version}"
     check = run(["gh", "release", "view", tag, "--repo", GITHUB_REPO], capture_output=True)
 
@@ -621,6 +676,7 @@ def create_release_gh(asset, version):
             "create",
             tag,
             str(asset),
+            *[str(extra) for extra in extra_assets],
             "--repo",
             GITHUB_REPO,
             "--title",
@@ -637,7 +693,7 @@ def create_release_gh(asset, version):
         )
 
 
-def create_release_api(asset, version):
+def create_release_api(asset, version, extra_assets=()):
     import json
     import urllib.request
 
@@ -671,17 +727,18 @@ def create_release_api(asset, version):
         die(f"创建 Release 失败: {error}", "请检查 GITHUB_TOKEN 权限(repo)与网络代理")
 
     upload_url = release["uploads_url"].replace("{?name,label}", "")
-    request = urllib.request.Request(
-        f"{upload_url}?name={asset.name}",
-        data=asset.read_bytes(),
-        headers={**headers, "Content-Type": "application/octet-stream"},
-        method="POST",
-    )
+    for upload in (asset, *extra_assets):
+        request = urllib.request.Request(
+            f"{upload_url}?name={upload.name}",
+            data=upload.read_bytes(),
+            headers={**headers, "Content-Type": "application/octet-stream"},
+            method="POST",
+        )
 
-    try:
-        urllib.request.urlopen(request, timeout=600).read()
-    except Exception as error:
-        die(f"上传安装包失败: {error}", "请检查网络代理后重新执行 release --skip-build")
+        try:
+            urllib.request.urlopen(request, timeout=600).read()
+        except Exception as error:
+            die(f"上传 {upload.name} 失败: {error}", "请检查网络代理后重新执行 release --skip-build")
 
     log("发布", f"Release {tag} 创建成功")
 
@@ -690,10 +747,21 @@ def publish(asset, version, interactive=False):
     log("发布", f"准备发布 {asset.name} → {GITHUB_REPO}")
     assert_publish_channel(interactive)
 
+    if not asset.is_file():
+        die(f"未找到安装包: {asset}", "先运行构建再发布")
+
+    # 旁路校验文件与更新清单:应用端双校验成真,API 全断时版本发现走清单兜底
+    digest_hex = hashlib.sha256(asset.read_bytes()).hexdigest()
+    sidecar = write_update_sidecar(asset)
+    manifest = write_update_manifest(asset, version, digest_hex)
+    log("发布", f"已生成 {sidecar.name} 与 latest.json(sha256 {digest_hex[:16]}…)")
+
     if shutil.which("gh"):
-        create_release_gh(asset, version)
+        create_release_gh(asset, version, extra_assets=(sidecar, manifest))
     else:
-        create_release_api(asset, version)
+        create_release_api(asset, version, extra_assets=(sidecar, manifest))
+
+    commit_update_manifest()
 
     print(f"\n[完成] 发布地址: https://github.com/{GITHUB_REPO}/releases/tag/v{version}")
 
@@ -773,6 +841,9 @@ BUILD_CONTRACT_PATTERNS = (
     'test_etw_consumer.py',
     'test_log_action_i18n.py',
     'test_behavior_defense.py',
+    'test_update_protocol.py',
+    'test_update_resume.py',
+    'test_update_manifest.py',
     'test_policy_config_keys.py',
     'test_policy_relaunch.py',
     'test_write_owner_query.py',

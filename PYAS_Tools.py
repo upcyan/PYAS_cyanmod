@@ -491,32 +491,46 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
 
         return unique
 
-    def _github_get(self, url, **kwargs):
+    def _github_get(self, url, extra_headers=None, **kwargs):
         """按渠道依次取 GitHub 数据:直连 → 系统代理 → 元数据镜像。
 
-        只要有一个渠道能通就返回;403/429 是 GitHub 给的真实状态,原样交给调用方。
-        镜像只用来判断「有没有新版本」,拿到的东西不参与安装包完整性判定。
+        只要有一个渠道能通就返回;403/429 是 GitHub 给的真实状态,仅对
+        api.github.com 原样上交(限流要提示用户),其余主机的非 200 按
+        「该渠道不可用」换下一个(下载与旁路校验不该被单个镜像的 403 卡死)。
+        上次成功的渠道在会话内粘滞 10 分钟,避免每轮都从已失效渠道白等超时。
         """
-        kwargs.setdefault("timeout", 15)
-        kwargs.setdefault("headers", self.GITHUB_RELEASE_HEADERS)
+        import time
+        from urllib.parse import urlsplit
 
-        from PYAS_Updates import RELEASE_MIRRORS
+        kwargs.setdefault("timeout", 15)
+        headers = dict(self.GITHUB_RELEASE_HEADERS)
+        if extra_headers:
+            headers.update(extra_headers)
+        kwargs.setdefault("headers", headers)
+
+        from PYAS_Updates import effective_mirrors
 
         attempts = [(None, url)]
         for proxy in self._system_proxy_candidates():
             attempts.append((proxy, url))
-        for mirror in RELEASE_MIRRORS:
+        for mirror in effective_mirrors():
             attempts.append((None, mirror + url))
 
+        hint = getattr(self, '_github_channel_hint', None)
+        if hint and time.monotonic() < hint[1] and 0 <= hint[0] < len(attempts):
+            attempts.insert(0, attempts.pop(hint[0]))
+
+        api_host = urlsplit(url).hostname == 'api.github.com'
         last = None
-        for proxy, target in attempts:
+        for index, (proxy, target) in enumerate(attempts):
             try:
                 response = requests.get(target, **kwargs) if proxy is None else requests.get(
                     target, proxies={"http": proxy, "https": proxy}, **kwargs)
             except requests.RequestException as error:
                 last = error
                 continue
-            if response.status_code in (200, 403, 429):
+            if response.status_code == 200 or (api_host and response.status_code in (403, 429)):
+                self._github_channel_hint = (index, time.monotonic() + 600)
                 return response
             last = response
             response.close()
@@ -707,6 +721,14 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
                 }
 
         except requests.RequestException as error:
+            # API 全断(网络类失败)时的版本发现兜底:仓库 main 分支的 latest.json。
+            # 403/429 是 GitHub 的真实回答,已在上面短路返回,不走兜底。
+            try:
+                manifest = self._fetch_update_manifest()
+            except Exception:
+                manifest = None
+            if isinstance(manifest, dict):
+                return manifest
             log_exception('PYAS_Tools.ToolsMixin.check_update.network')
             return {'error': True, 'error_code': 'network_error', 'detail': f'{type(error).__name__}: {str(error)[:160]}'}
         except Exception:
@@ -714,6 +736,117 @@ class ToolsMixin(AutostartMixin, ProcessMixin, MaintenanceMixin, ThreatMixin):
             pass
 
         return {"error": True, 'error_code': 'invalid_response'}
+
+    def _fetch_update_manifest(self):
+        """GitHub API 不可达时的更新清单兜底:main 分支上的 latest.json。
+
+        清单由发布流水线生成并提交;安装包 URL 仍是 github.com releases
+        (normalize_asset 照常把门),清单里的 sha256 作为下载校验来源之一,
+        内容锚不变。jsDelivr 优先(国内边缘可达),失败再走 raw
+        经镜像前缀;jsDelivr 对分支内容有缓存,新发布后可能滞后数小时。
+        """
+        repository = 'upcyan/PYAS_cyanmod'
+        from PYAS_Updates import effective_mirrors, register_session_mirrors
+
+        targets = [f'https://cdn.jsdelivr.net/gh/{repository}@main/latest.json']
+        targets += [mirror + f'https://raw.githubusercontent.com/{repository}/main/latest.json'
+            for mirror in effective_mirrors()]
+        text = None
+        for target in targets:
+            try:
+                response = requests.get(target, timeout=10, headers=self.GITHUB_RELEASE_HEADERS)
+            except requests.RequestException:
+                continue
+            try:
+                if response.status_code == 200:
+                    text = response.text
+            finally:
+                try:
+                    response.close()
+                except Exception:
+                    pass
+            if text:
+                break
+        if not text:
+            return None
+        data = json.loads(text)
+        if not isinstance(data, dict):
+            return None
+        version = str(data.get('version') or '').strip()
+        asset = data.get('asset')
+        if not version or not isinstance(asset, dict):
+            return None
+        # 清单可以顺带下发补充镜像;非法条目在 register_session_mirrors 里被滤掉
+        mirrors = data.get('mirrors')
+        if isinstance(mirrors, list):
+            try:
+                register_session_mirrors(mirrors)
+            except Exception:
+                pass
+        current = VERSION
+        return {
+            'has_update': not self.compare_versions(current, version) and current != version,
+            'latest': version,
+            'current': current,
+            'url': f'https://github.com/{repository}/releases',
+            'asset': asset,
+            'body': str(data.get('notes') or '').strip()[:4000],
+            'published_at': str(data.get('published_at') or '')[:10],
+            'via': 'manifest',
+        }
+
+    def fetch_release_changelog(self, repository, per_page=20):
+        """变更记录页的数据通道:GitHub releases 列表,走 _github_get 的渠道阶梯。
+
+        之前前端裸 fetch 直连 api.github.com,没有任何容错——GitHub 抖动时
+        「检查更新」能成而本页必挂;收进 Python 侧与检查更新共用同一阶梯,
+        并做 10 分钟进程内缓存。
+        """
+        try:
+            repository = str(repository or '').strip()
+            if repository not in ('upcyan/PYAS_cyanmod', UPSTREAM_REPO):
+                return {'success': False, 'error_code': 'invalid_repository'}
+            try:
+                count = min(max(int(per_page), 1), 30)
+            except (TypeError, ValueError):
+                count = 20
+            cache = getattr(self, '_release_changelog_cache', None)
+            if not isinstance(cache, dict):
+                cache = self._release_changelog_cache = {}
+            now = time.monotonic()
+            hit = cache.get(repository)
+            if hit and now < hit[0] + 600:
+                return hit[1]
+            response = self._github_get(f'https://api.github.com/repos/{repository}/releases?per_page={count}')
+            try:
+                if response.status_code != 200:
+                    return {'success': False, 'error_code': 'http_' + str(response.status_code)}
+                releases = response.json()
+            finally:
+                try:
+                    response.close()
+                except Exception:
+                    pass
+            if not isinstance(releases, list):
+                return {'success': False, 'error_code': 'invalid_response'}
+            entries = []
+            for item in releases:
+                if not isinstance(item, dict) or item.get('draft'):
+                    continue
+                entry = {
+                    'tag': str(item.get('tag_name') or '').strip(),
+                    'name': str(item.get('name') or ''),
+                    'date': str(item.get('published_at') or '')[:10],
+                    'body': str(item.get('body') or '')[:2000],
+                }
+                if entry['tag']:
+                    entries.append(entry)
+            result = {'success': True, 'releases': entries}
+            cache[repository] = (now, result)
+            return result
+        except Exception:
+            log_exception('PYAS_Tools.ToolsMixin.fetch_release_changelog')
+            return {'success': False, 'error_code': 'network_error'}
 
     def _get_update_manager(self):
         from PYAS_Updates import UpdateDownloadManager, update_control_lock

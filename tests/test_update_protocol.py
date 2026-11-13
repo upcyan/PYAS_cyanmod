@@ -118,7 +118,11 @@ class UpdateProtocolTests(unittest.TestCase):
         self.assertIsNone(self.manager.verified)
 
     def test_bad_checksum_size_and_empty_body_fail_without_installer(self):
-        for payload in (b'X' * len(self.payload), b'short', b''):
+        from PYAS_Updates import RESUME_ROUNDS
+        # 校验不符:整包收完才发现,单轮;体积不足/空流:各轮续传到轮数用尽
+        cases = ((b'X' * len(self.payload), 1), (b'short', RESUME_ROUNDS), (b'', RESUME_ROUNDS))
+        fetch_base = 0
+        for payload, fetch_calls in cases:
             with self.subTest(payload=payload):
                 self.manager = UpdateDownloadManager(self.temp.name, self.fetch, self.emit, self.log,
                     launcher=self.launcher, thread_factory=DeferredThread)
@@ -128,8 +132,15 @@ class UpdateProtocolTests(unittest.TestCase):
                 self.manager._download(self.manager.job)
                 self.assertEqual(self.manager.snapshot()['phase'], 'failed')
                 self.assertIsNone(self.manager.verified)
-                response.close.assert_called_once()
+                self.assertEqual(self.fetch.call_count - fetch_base, fetch_calls)
+                self.assertEqual(response.close.call_count, fetch_calls)
+                for _ in range(20):  # 实时防护可能短暂持有刚写出的临时文件
+                    if not list(Path(self.temp.name).rglob('*.part')):
+                        break
+                    import time as _time
+                    _time.sleep(0.1)
                 self.assertEqual(list(Path(self.temp.name).rglob('*.part')), [])
+            fetch_base = self.fetch.call_count
         self.launcher.assert_not_called()
 
     def test_unknown_size_progress_and_response_close_failure_are_safe(self):

@@ -28,6 +28,36 @@ def update_control_lock(owner):
 # 安装包仍按 API 给的 sha256 与发布里的 .sha256 双重校验,内容被换就装不上。
 RELEASE_MIRRORS = ('https://gh-proxy.com/', 'https://ghfast.top/', 'https://ghproxy.net/')
 
+# 断点续传:中流断开后的最多续传轮数;孤儿 .part(崩溃残留)最长保留时间。
+RESUME_ROUNDS = 5
+PART_MAX_AGE = 7 * 24 * 3600
+
+# 本会话从更新清单学到的补充镜像(latest.json 的 mirrors 字段);
+# 镜像生态漂移时不用发版就能换血,只存内存,重启回基础列表。
+_SESSION_MIRRORS = []
+
+def effective_mirrors():
+    """基础镜像 + 清单补充镜像(去重,保持顺序)。"""
+    return tuple(RELEASE_MIRRORS) + tuple(m for m in _SESSION_MIRRORS if m not in RELEASE_MIRRORS)
+
+def register_session_mirrors(mirrors):
+    """登记更新清单下发的补充镜像;只收 https 且形态干净的条目,至多 6 条。"""
+    accepted = []
+    for item in mirrors if isinstance(mirrors, list) else []:
+        if not isinstance(item, str) or len(accepted) >= 6:
+            continue
+        candidate = item.strip()
+        if not candidate.endswith('/'):
+            candidate += '/'
+        parsed = urlsplit(candidate)
+        if (parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password
+                or parsed.query or parsed.fragment or parsed.path not in ('', '/') or len(candidate) > 100):
+            continue
+        if candidate not in accepted:
+            accepted.append(candidate)
+    _SESSION_MIRRORS[:] = accepted
+    return accepted
+
 def normalize_asset(asset):
     if not isinstance(asset, dict):
         return None
@@ -154,45 +184,72 @@ class UpdateDownloadManager:
         self._emit(state)
         return response
 
-    def _open_stream(self, url):
-        """直连失败时按镜像顺序重试;非 200 视为该渠道不可用。"""
-        error = None
-        for target in [url] + [mirror + url for mirror in RELEASE_MIRRORS]:
-            try:
-                response = self.fetch(target, stream=True)
-            except Exception as exc:
-                error = exc
-                continue
-            if getattr(response, 'status_code', 200) == 200:
-                return response
+    def _open_stream(self, url, offset=0):
+        """取安装包流;offset>0 时带 Range 请求断点续传。
+
+        渠道阶梯(直连→系统代理→镜像)由注入的 fetch 自己实现(生产环境是
+        ToolsMixin._github_get),这里只判响应可用性:200 全量;offset>0 时
+        206 且 Content-Range 起点吻合为续传,200 视为服务器忽略 Range(调用方
+        须从零重写)。其余一律视为渠道不可用。返回 (response, resumed)。
+        """
+        if offset < 0:
+            offset = 0
+        kwargs = {'stream': True}
+        if offset:
+            kwargs['extra_headers'] = {'Range': 'bytes=' + str(offset) + '-'}
+        response = self.fetch(url, **kwargs)
+        status = getattr(response, 'status_code', 200)
+        if status == 200:
+            return response, False
+        if status == 206 and offset:
+            headers = getattr(response, 'headers', None) or {}
+            match = re.match(r'bytes\s+(\d+)-', str(headers.get('Content-Range') or ''))
+            if match and int(match.group(1)) == offset:
+                return response, True
+        try:
+            response.close()
+        except Exception:
+            pass
+        raise ValueError('Update source returned HTTP ' + str(status))
+
+    def _read_checksum(self, asset):
+        """读发布里的 .sha256 旁路文件,得到第二份校验码(渠道阶梯在 fetch 内)。"""
+        response = self.fetch(asset['checksum_url'], timeout=15)
+        try:
+            text = str(getattr(response, 'text', '') or '')
+        finally:
             try:
                 response.close()
             except Exception:
                 pass
-            error = ValueError('HTTP ' + str(getattr(response, 'status_code', '?')))
-        raise error if error else RuntimeError('update source unavailable')
+        match = re.search(r'\b([0-9a-fA-F]{64})\b', text)
+        if not match:
+            raise ValueError('Invalid checksum file')
+        return 'sha256:' + match.group(1).lower()
 
-    def _read_checksum(self, asset):
-        """读发布里的 .sha256 旁路文件,得到第二份校验码。"""
-        error = None
-        for target in [asset['checksum_url']] + [m + asset['checksum_url'] for m in RELEASE_MIRRORS]:
-            try:
-                response = self.fetch(target, timeout=15)
-            except Exception as exc:
-                error = exc
-                continue
-            try:
-                text = str(getattr(response, 'text', '') or '')
-            finally:
+    def _prune_orphan_parts(self, name):
+        """清掉同安装包名下过期的孤儿 .part(崩溃残留;本任务自己的 .part 不在此列)。"""
+        try:
+            deadline = time.time() - PART_MAX_AGE
+            prefix = name + '.'
+            for entry in os.listdir(self.directory):
+                if not entry.startswith(prefix) or not entry.endswith('.part'):
+                    continue
+                path = os.path.join(self.directory, entry)
                 try:
-                    response.close()
-                except Exception:
+                    if os.path.getmtime(path) < deadline:
+                        os.unlink(path)
+                except OSError:
                     pass
-            match = re.search(r'\b([0-9a-fA-F]{64})\b', text)
-            if match:
-                return 'sha256:' + match.group(1).lower()
-            error = ValueError('Invalid checksum file')
-        raise ValueError('Update checksum unavailable') from error
+        except OSError:
+            pass
+
+    @staticmethod
+    def _close_quiet(response):
+        try:
+            response.close()
+        except Exception:
+            pass
 
     def _download(self, job):
         asset = job['asset']
@@ -200,39 +257,92 @@ class UpdateDownloadManager:
         part = target + '.' + job['download_id'] + '.part'
         response = None
         received = 0
+        total = asset['size'] or 0
         try:
             os.makedirs(self.directory, exist_ok=True)
-            response = self._open_stream(asset['url'])
-            header_size = int(response.headers.get('Content-Length') or 0)
-            if header_size < 0:
-                raise ValueError('Invalid response size')
-            total = asset['size'] or header_size
-            digest = hashlib.sha256()
-            next_report = 0.0
-            with open(part, 'xb') as stream:
-                for chunk in response.iter_content(chunk_size=65536):
-                    if not chunk:
-                        continue
-                    stream.write(chunk)
-                    digest.update(chunk)
-                    received += len(chunk)
-                    now = time.monotonic()
-                    if now >= next_report:
-                        next_report = now + .2
-                        self._publish(job, 'downloading', received=received, total=total,
-                            percent=min(100, int(received * 100 / total)) if total > 0 else -1)
+            self._prune_orphan_parts(asset['name'])
+            # 续传循环:中流断开不清 .part,下一轮从已收字节接着拉;
+            # 轮数用尽仍未收完整才按失败处理。
+            for round_index in range(RESUME_ROUNDS):
+                response = None
+                try:
+                    if total and received >= total:
+                        break
+                    response, resumed = self._open_stream(asset['url'], offset=received)
+                    headers = getattr(response, 'headers', None) or {}
+                    if resumed:
+                        # 续传前提:盘上 .part 的字节数与断点一致(被清掉/截断就重来)
+                        try:
+                            on_disk = os.path.getsize(part)
+                        except OSError:
+                            on_disk = -1
+                        if on_disk != received:
+                            resumed = False
+                            received = 0
+                    if not resumed:
+                        # 全量重发(首拉,或服务器忽略 Range);.part 名内嵌本任务唯一
+                        # download_id,seen 集合保证不会撞到别的任务,截断重写安全
+                        received = 0
+                        header_size = int(headers.get('Content-Length') or 0)
+                        if header_size < 0:
+                            raise ValueError('Invalid response size')
+                        total = asset['size'] or header_size
+                    elif not total:
+                        match = re.match(r'bytes\s+\d+-\d+/(\d+)',
+                            str(headers.get('Content-Range') or ''))
+                        total = int(match.group(1)) if match else 0
+                    next_report = 0.0
+                    with open(part, 'r+b' if resumed else 'wb') as stream:
+                        if resumed:
+                            stream.seek(received)
+                        for chunk in response.iter_content(chunk_size=65536):
+                            if not chunk:
+                                continue
+                            stream.write(chunk)
+                            received += len(chunk)
+                            now = time.monotonic()
+                            if now >= next_report:
+                                next_report = now + .2
+                                self._publish(job, 'downloading', received=received, total=total,
+                                    percent=min(100, int(received * 100 / total)) if total > 0 else -1)
+                    if total and received > total:
+                        raise ValueError('Part exceeds update size')
+                    if total and received < total:
+                        self._close_quiet(response)
+                        response = None
+                        continue  # 未收完整,下一轮从断点续传
+                    # 收完整:响应留给外层 finally 关闭——旧契约(桥接侧回调、
+                    # 守卫测试)依赖「完成发布之后才关闭」的时序
+                    break
+                except Exception as round_error:
+                    self._close_quiet(response)
+                    response = None
+                    if round_index + 1 >= RESUME_ROUNDS:
+                        raise
+                    continue
+            else:
+                raise ValueError('Incomplete update download')
             if received == 0:
                 raise ValueError('Empty update download')
-            if total > 0 and received != total:
-                raise ValueError('Incomplete update download')
-            actual = digest.hexdigest()
-            # 多校验码:API 里的 digest 与发布附带的 .sha256 都要对得上;
+            # 校验码改在收完后对 .part 整读计算:续传把流式哈希打散了,
+            # 而比对时点本来就在下载结束之后,安全语义不变
+            with open(part, 'rb') as stream:
+                actual = sha256_stream(stream)
+            # 多校验码:API/清单里的 digest 与发布附带的 .sha256 都要对得上;
             # 一份都没有就拒绝安装(镜像只能换传输路径,不能改变内容)
             checksums = []
             if asset.get('digest'):
                 checksums.append(('github-api', str(asset['digest']).lower()))
             if asset.get('checksum_url'):
-                checksums.append(('sha256-asset', self._read_checksum(asset)))
+                try:
+                    checksums.append(('sha256-asset', self._read_checksum(asset)))
+                except Exception as sidecar_error:
+                    # 旁路文件拉不到不再一票否决:还有别的校验码就继续用,
+                    # 零校验码仍然拒绝
+                    if not checksums:
+                        raise
+                    self.log('INFO', 'Update Download',
+                        detail='Checksum sidecar unavailable (' + str(sidecar_error)[:80] + '), verifying with ' + checksums[0][0])
             if not checksums:
                 raise ValueError('Missing update checksum')
             for source, expected in checksums:
@@ -283,12 +393,15 @@ class UpdateDownloadManager:
                     pass
             # Only this job's unique temporary file may be removed.
             if os.path.dirname(os.path.abspath(part)) == self.directory and part.endswith('.' + job['download_id'] + '.part'):
-                try:
-                    os.unlink(part)
-                except FileNotFoundError:
-                    pass
-                except OSError:
-                    pass
+                # 实时防护可能短暂持有刚写出的临时文件,给清理几次机会
+                for _ in range(3):
+                    try:
+                        os.unlink(part)
+                        break
+                    except FileNotFoundError:
+                        break
+                    except OSError:
+                        time.sleep(0.15)
 
     def install(self, path, download_id=None):
         with self.lock:
