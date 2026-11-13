@@ -2227,6 +2227,15 @@ class EtwMixin:
     # 工具的落地缓存都在此,用户文档不在 —— 落地的恶意文件由签名扫描
     # 负责,突发启发不统计临时区。
     _CONTENT_DIR_MARKERS = ("\\steamapps\\", "\\temp\\")
+    # 程序区的图片资产:浏览器/商店应用的更新器批量重写自身图标(实测
+    # 2026-11-09 Edge 更新 10 秒改写 40 个 VisualElements\Logo*.png 触发
+    # 告警;2026-11-05 AMD Radeon 同型误报)。更新器进程即抛即退,事件
+    # 时刻连映像都解析不到,下面的签名门必然 fail-closed;而用户照片与
+    # 文档不在程序目录,图片资产在程序区被批量改写毫无勒索意义 —— 按
+    # 扩展名豁免计数,文档类扩展不受影响,台账与溯源保留。
+    _ASSET_IMAGE_EXTENSIONS = frozenset(
+        ".png .jpg .jpeg .gif .bmp .tif .tiff .webp .heic .ico .svg".split()
+    )
 
     @classmethod
     def _path_in_program_area(cls, path: str) -> bool:
@@ -2261,14 +2270,22 @@ class EtwMixin:
         if "\\temp\\" in path.lower():
             return True
 
+        path_lower = path.lower()
+        rest = path_lower[2:] if len(path_lower) > 2 and path_lower[1] == ":" else path_lower
+        first_segment = rest.lstrip("\\").split("\\", 1)[0]
+
+        # 程序区图片资产在签名门之前:写入方常为即抛即退的更新进程,映像
+        # 解析与验签来不及,签名门必然 fail-closed(Edge 更新器实测连名字
+        # 都解析不到)。AppData 除外:那里有应用文档与聊天图片,维持原
+        # 「签名即可」的写入方绑定。
+        if (first_segment != "appdata"
+                and os.path.splitext(path_lower)[1] in self._ASSET_IMAGE_EXTENSIONS):
+            return True
+
         image = self._etw_writer_image(pid)
 
         if not image or not (writer_trusted(pid) if callable(writer_trusted) else False):
             return False
-
-        path_lower = path.lower()
-        rest = path_lower[2:] if len(path_lower) > 2 and path_lower[1] == ":" else path_lower
-        first_segment = rest.lstrip("\\").split("\\", 1)[0]
 
         # 应用数据区(ProgramData 与 AppData 同性质):签名程序的自身数据
         # 目录不由其安装树涵盖(安全软件诱饵/服务状态都在 ProgramData),

@@ -358,6 +358,45 @@ class RecycleBinExclusionTests(unittest.TestCase):
 
         self.assertEqual(host.reached, [], "WindowsApps 路径默认即噪音,不触达台账/告警")
 
+    def test_edge_updater_image_assets_are_noise_with_unresolvable_writer(self):
+        """程序区图片资产按扩展名豁免,写入方不可解析也放行:浏览器/商店
+        更新器即抛即退(实测 2026-11-09 Edge 更新器 PID 连名字都解析不到,
+        10 秒改写 40 个 VisualElements\\Logo*.png 触发告警),签名×安装树
+        绑定来不及生效。用户照片/文档不在程序目录,图片资产无勒索意义;
+        台账与溯源保留,AppData 不享受此豁免。"""
+        host = self.make_host()
+
+        for name in ("Logo.png", "LogoBeta.png", "LogoCanary.png"):
+            host._on_etw_write(7620, f"C:\\Program Files (x86)\\Microsoft\\EdgeCore\\157.0.4341.42\\VisualElements\\{name}")
+
+        logs = [r for r in host.reached if isinstance(r, tuple) and r[0] == "log"]
+        self.assertEqual(logs, [], "更新器重写自身图标不得触发勒索告警")
+        self.assertEqual(len([r for r in host.reached if isinstance(r, str)]), 3,
+                         "台账照常保留,回滚能力不受豁免影响")
+
+    def test_program_area_documents_fail_closed_without_writer(self):
+        """程序区的文档类扩展不享受图片豁免:写入方不可解析时必须照常
+        计数告警(fail-closed)—— 堵住「不可解析写入方批量改写程序目录
+        文档」的漏检通道。"""
+        host = self.make_host()
+
+        for name in ("a.docx", "b.docx"):
+            host._on_etw_write(7620, f"C:\\Program Files (x86)\\Vendor\\App\\docs\\{name}")
+
+        logs = [r for r in host.reached if isinstance(r, tuple) and r[0] == "log"]
+        self.assertEqual(len(logs), 1, "不可解析写入方批量改写程序目录文档必须告警")
+
+    def test_appdata_image_assets_still_require_writer_binding(self):
+        """AppData 里有应用文档与聊天图片,图片豁免不覆盖 AppData:写入方
+        不可解析时照常计数告警。"""
+        host = self.make_host()
+
+        for name in ("1.png", "2.png"):
+            host._on_etw_write(7620, f"C:\\Users\\u\\AppData\\Local\\Vendor\\cache\\{name}")
+
+        logs = [r for r in host.reached if isinstance(r, tuple) and r[0] == "log"]
+        self.assertEqual(len(logs), 1, "AppData 图片在写入方不可解析时必须告警")
+
     def test_programdata_never_fires_burst_but_keeps_ledger(self):
         """ProgramData 是全部安装软件的机器级数据目录:安全软件诱饵(实测
         腾讯 iOA DecoyFiles 触发勒索启发)、同步盘数据库都在此高频改写。
